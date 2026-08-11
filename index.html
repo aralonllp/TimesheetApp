@@ -787,9 +787,7 @@ window.addEventListener('load', () => {
     document.getElementById('config-banner').style.display = 'block';
     setSyncStatus('login', 'error', 'Not connected — set SCRIPT_URL');
     jobs = [
-      { id: 'JOB0001', property: 'Estate', description: 'Repair works at Estate', assignedTo: 'Chris R', open: true },
-      { id: 'JOB0002', property: 'Gardens', description: 'Repair works at Gardens', assignedTo: 'Alex A', open: true },
-      { id: 'JOB0003', property: 'Office', description: 'Repair works at Office', assignedTo: 'Les P', open: true },
+      { id: 'WO00001', property: 'Example Property', description: 'Example job description', assignedTo: '', open: true },
     ];
     entries = JSON.parse(localStorage.getItem('entries') || '[]');
     populateWorkerDropdown();
@@ -1079,9 +1077,9 @@ async function pollJobs() {
 }
 
 // ── Team alias map — expand shortcodes to individual worker names ──
-const TEAM_ALIASES = {
-  'DICKADAM': ['Adam Hazeldine', 'Henry Sparks'],
-};
+// (empty for now — add entries here only if you introduce team-alias
+// assignment shortcuts for this business, e.g. 'TEAMX': ['Name A', 'Name B'])
+const TEAM_ALIASES = {};
 
 function expandAssignedTo(assignedTo) {
   if (!assignedTo) return [];
@@ -1100,37 +1098,15 @@ function expandAssignedTo(assignedTo) {
 function populateJobDropdown() {
   const sel = document.getElementById('job-select');
   const open = jobs.filter(j => j.open);
-  const isManager = (currentWorker || '').trim().toLowerCase().replace(/\s+/g, ' ') === 'chris rosier';
   let html = '<option value="">Select a job...</option>';
 
-  if (isManager) {
-    // Manager sees all active WOs + recurring jobs assigned to him + all tasks
-    if (open.length) {
-      html += `<optgroup label="Active Work Orders">`;
-      html += open.map(j => `<option value="${j.id}">${j.id} · ${propLabel(j.property)} · ${j.description && j.description.length > 60 ? j.description.slice(0, 60) + '…' : (j.description || '')}</option>`).join('');
-      html += `</optgroup>`;
-    }
-    const managerRecurring = recurringJobs.filter(j => j.active !== false && j.active !== 'FALSE' && expandAssignedTo(j.assignedTo || '').includes(currentWorker));
-    if (managerRecurring.length) {
-      html += `<optgroup label="Recurring Jobs">`;
-      html += managerRecurring.map(j => `<option value="${j.id}">${j.id} · ${propLabel(j.property)} · ${j.description && j.description.length > 60 ? j.description.slice(0, 60) + '…' : (j.description || '')}</option>`).join('');
-      html += `</optgroup>`;
-    }
-    const activeTasks = tasks.filter(t => t.active !== false && t.active !== 'FALSE');
-    if (activeTasks.length) {
-      html += `<optgroup label="Tasks">`;
-      html += activeTasks.map(t => `<option value="${t.id}">${t.id} · ${propLabel(t.property)} · ${t.description && t.description.length > 60 ? t.description.slice(0, 60) + '…' : (t.description || '')}</option>`).join('');
-      html += `</optgroup>`;
-    }
-  } else {
-    const assignedRecurring = recurringJobs.filter(j => j.active !== false && j.active !== 'FALSE' && expandAssignedTo(j.assignedTo || '').includes(currentWorker));
-    const mine = open.filter(j => expandAssignedTo(j.assignedTo).includes(currentWorker));
-    const mineAll = [...mine, ...assignedRecurring.map(j => ({ ...j, _recurring: true }))];
-    if (mineAll.length) {
-      html += `<optgroup label="Your assigned jobs">`;
-      html += mineAll.map(j => `<option value="${j.id}">${j.id} · ${propLabel(j.property)} · ${j.description && j.description.length > 60 ? j.description.slice(0, 60) + '…' : (j.description || '')}</option>`).join('');
-      html += `</optgroup>`;
-    }
+  const assignedRecurring = recurringJobs.filter(j => j.active !== false && j.active !== 'FALSE' && expandAssignedTo(j.assignedTo || '').includes(currentWorker));
+  const mine = open.filter(j => expandAssignedTo(j.assignedTo).includes(currentWorker));
+  const mineAll = [...mine, ...assignedRecurring.map(j => ({ ...j, _recurring: true }))];
+  if (mineAll.length) {
+    html += `<optgroup label="Your assigned jobs">`;
+    html += mineAll.map(j => `<option value="${j.id}">${j.id} · ${propLabel(j.property)} · ${j.description && j.description.length > 60 ? j.description.slice(0, 60) + '…' : (j.description || '')}</option>`).join('');
+    html += `</optgroup>`;
   }
 
   const activeAbsenceTypes = absenceTypes.filter(a => a.active !== false && a.active !== 'FALSE');
@@ -1459,8 +1435,7 @@ function fmtShortDate(dateStr) {
 
 
 function isWeekFulfilled(workerName, wc) {
-  const isDerrick = workerName.trim().toLowerCase() === 'derrick smith';
-  const requiredDayCount = isDerrick ? 3 : 5; // Mon-Wed or Mon-Fri
+  const requiredDayCount = 5; // Mon-Fri
   const parts = wc.split('-');
   const workerEntries = entries.filter(e => e.worker === workerName);
 
@@ -1537,17 +1512,8 @@ function renderWeek(wc) {
       .concat(Object.keys(byDay))
       .filter(ds => { const dow = new Date(ds + 'T12:00:00').getDay(); return dow === 0 || dow === 6; })
   );
-  // Derrick Smith works Mon-Wed only — hide Thu/Fri unless he already has data logged that day
-  const isDerrickWorker = currentWorker.trim().toLowerCase() === 'derrick smith';
-  const requiredDayCount = isDerrickWorker ? 3 : 5;
-  const thuFriWithData = new Set(
-    overtimeRequests
-      .filter(o => o.worker === currentWorker)
-      .map(o => normaliseDate(o.date))
-      .concat(Object.keys(byDay))
-      .filter(ds => { const dow = new Date(ds + 'T12:00:00').getDay(); return dow === 4 || dow === 5; })
-  );
-  const weekDays = allWeekDays.filter((ds, i) => i < requiredDayCount || weekendDaysWithData.has(ds) || (isDerrickWorker && thuFriWithData.has(ds)));
+  const requiredDayCount = 5;
+  const weekDays = allWeekDays.filter((ds, i) => i < requiredDayCount || weekendDaysWithData.has(ds));
   const dayNames = weekDays.map((_, i) => allDayNames[allWeekDays.indexOf(weekDays[i])]);
 
   const rows = weekDays.map((dayStr, i) => {
@@ -1662,16 +1628,10 @@ function renderWeek(wc) {
                     const absTypes = absenceTypes.filter(a => a.active !== false && a.active !== 'FALSE');
                     const fmt = j => `<option value="${j.id}" ${j.id === e.jobId ? 'selected' : ''}>${j.id} · ${propLabel(j.property || j.name || '')} · ${(j.description || j.name || '').slice(0,40)}</option>`;
                     let html = '';
-                    if ((currentWorker || '').trim().toLowerCase().replace(/\s+/g, ' ') === 'chris rosier') {
-                      if (openJobs.length) html += `<optgroup label="Active Work Orders">${openJobs.map(fmt).join('')}</optgroup>`;
-                      const activeTasks = tasks.filter(t => (t.active !== false && t.active !== 'FALSE') || t.id === e.jobId);
-                      if (activeTasks.length) html += `<optgroup label="Tasks">${activeTasks.map(fmt).join('')}</optgroup>`;
-                    } else {
-                      const assigned = openJobs.filter(j => expandAssignedTo(j.assignedTo).includes(currentWorker));
-                      const recurr   = recurringJobs.filter(j => (j.active !== false && j.active !== 'FALSE') || j.id === e.jobId).filter(j => expandAssignedTo(j.assignedTo || '').includes(currentWorker));
-                      if (assigned.length) html += `<optgroup label="Assigned Jobs">${assigned.map(fmt).join('')}</optgroup>`;
-                      if (recurr.length)   html += `<optgroup label="Recurring Jobs">${recurr.map(fmt).join('')}</optgroup>`;
-                    }
+                    const assigned = openJobs.filter(j => expandAssignedTo(j.assignedTo).includes(currentWorker));
+                    const recurr   = recurringJobs.filter(j => (j.active !== false && j.active !== 'FALSE') || j.id === e.jobId).filter(j => expandAssignedTo(j.assignedTo || '').includes(currentWorker));
+                    if (assigned.length) html += `<optgroup label="Assigned Jobs">${assigned.map(fmt).join('')}</optgroup>`;
+                    if (recurr.length)   html += `<optgroup label="Recurring Jobs">${recurr.map(fmt).join('')}</optgroup>`;
                     if (absTypes.length) html += `<optgroup label="Absence / Leave">${absTypes.map(fmt).join('')}</optgroup>`;
                     return html;
                   })()}
@@ -2322,17 +2282,7 @@ function renderOfficeEntries() {
       workerOT.some(o => normaliseDate(o.date) === dayStr)
     );
 
-    // Derrick Smith works Mon-Wed only — hide Thu/Fri unless he already has data logged that day
-    const isDerrick = worker.name.trim().toLowerCase() === 'derrick smith';
-    const workerDays = (isDerrick
-      ? allDays.filter(dayStr => {
-          const dow = new Date(dayStr + 'T12:00:00').getDay();
-          const isThuFri = dow === 4 || dow === 5;
-          if (!isThuFri) return true;
-          return workerEntries.some(e => normaliseDate(e.date) === dayStr);
-        })
-      : allDays
-    ).concat(workerWeekendDays).sort();
+    const workerDays = allDays.concat(workerWeekendDays).sort();
 
     const workerRows = workerDays.map(dayStr => {
       const dayEntries = workerEntries.filter(e => normaliseDate(e.date) === dayStr).sort((a, b) => String(a.jobId).localeCompare(String(b.jobId), undefined, { numeric: true }));
@@ -2826,13 +2776,12 @@ async function submitMultiAddEntries() {
   if (start > end) { alert('The "From" date must be on or before the "To" date.'); return; }
 
   const absType = absenceTypes.find(a => a.id === jobId);
-  const isDerrickWorker = worker.trim().toLowerCase() === 'derrick smith';
   const toDateStr = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
 
   const candidateDates = [];
   for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
     const dow = d.getDay(); // 0=Sun ... 6=Sat
-    const included = isDerrickWorker ? (dow >= 1 && dow <= 3) : (dow >= 1 && dow <= 5);
+    const included = dow >= 1 && dow <= 5;
     if (included) candidateDates.push(toDateStr(d));
   }
 
@@ -3072,12 +3021,6 @@ function renderDailyView() {
     const dayEntries = entries
       .filter(e => e.worker === worker.name && normaliseDate(e.date) === todayStr)
       .sort((a, b) => String(a.jobId).localeCompare(String(b.jobId), undefined, { numeric: true }));
-
-    // Derrick Smith works Mon-Wed only — skip his row on Thu/Fri unless he has data logged
-    const isDerrick = worker.name.trim().toLowerCase() === 'derrick smith';
-    const todayDow = new Date(todayStr + 'T12:00:00').getDay();
-    const isThuFri = todayDow === 4 || todayDow === 5;
-    if (isDerrick && isThuFri && dayEntries.length === 0) return;
 
     const hoursLogged = dayEntries.reduce((s, e) => s + parseFloat(e.hours || 0), 0);
     const absence = null;
@@ -3633,7 +3576,7 @@ function exportXLSX() {
   const workerPart = workerFilter ? '_' + workerFilter.replace(/ /g,'_') : '_All_Workers';
   const fromPart   = fromVal || 'start';
   const toPart     = toVal   || 'today';
-  XLSX.writeFile(wb, `Fairlawne_Timesheet${workerPart}_${fromPart}_to_${toPart}.xlsx`);
+  XLSX.writeFile(wb, `Timesheet${workerPart}_${fromPart}_to_${toPart}.xlsx`);
 }
 
 function exportOvertimeXLSX() {
@@ -3688,7 +3631,7 @@ function exportOvertimeXLSX() {
 
   const fromPart = fromVal || 'start';
   const toPart   = toVal   || 'today';
-  XLSX.writeFile(wb, `Fairlawne_Overtime_${fromPart}_to_${toPart}.xlsx`);
+  XLSX.writeFile(wb, `Overtime_${fromPart}_to_${toPart}.xlsx`);
 }
 
 
