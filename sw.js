@@ -3,7 +3,7 @@
 //  Caches the app shell for offline use
 // ══════════════════════════════════════════════════════════════════
 
-const CACHE_NAME = 'timesheet-v1';
+const CACHE_NAME = 'jobsystem-v1';
 
 // Files to cache on install
 const PRECACHE_URLS = [
