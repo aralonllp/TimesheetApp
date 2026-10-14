@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: v79-19 (Daily View: added prev/next day arrows + Today shortcut, add-entry now logs against viewed day; WO Hours: shows WO's raised/reported date next to WO number) — check this line via view-source against the file uploaded to Claude to confirm they match -->
+<!-- BUILD MARKER: NB-01 (New business base: Fairlawne user rules, Arthur sync, Tasks, WO1142 driving and office users removed) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -39,6 +39,20 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
 label { font-size: 13px; color: var(--color-text-secondary); display: block; margin-bottom: 6px; margin-top: 14px; }
 label:first-of-type { margin-top: 0; }
 select, input, textarea { width: 100%; font-size: 14px; padding: 8px 10px; border: 1px solid #ccc; border-radius: var(--border-radius-md); font-family: inherit; }
+
+/* Native date input tends to render its internal day/month/year segments
+   oddly (looks like a mid-typing "reset") when the control is cramped for
+   horizontal space — hiding the spin buttons and repositioning the calendar
+   icon frees up room for the segments themselves. */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  display: inline-block;
+  margin-top: 2%;
+  float: right;
+}
+input[type="date"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
 select:focus, input:focus, textarea:focus { outline: 2px solid #111; outline-offset: 1px; }
 textarea { height: 60px; resize: none; }
 .btn { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; padding: 7px 14px; border-radius: var(--border-radius-md); border: 0.5px solid var(--color-border-secondary); background: transparent; color: var(--color-text-primary); cursor: pointer; font-weight: 500; min-height: 42px; font-family: inherit; }
@@ -247,7 +261,7 @@ textarea { height: 60px; resize: none; }
 .rj-prop-wrap.rj-visible { display: block; }
 .rj-prop-wrap > label { font-size: 13px; color: var(--color-text-secondary); display: block; margin-bottom: 6px; margin-top: 0; font-weight: normal; }
 </style>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 </head>
 <body>
 <div class="app">
@@ -305,36 +319,38 @@ textarea { height: 60px; resize: none; }
       <div id="toast-amended" class="toast toast-warning">✓ Entry amended</div>
       <div id="toast-error" class="toast toast-error">⚠ Saved locally — will sync when online</div>
 
-      <div class="card">
-        <label>Job number</label>
-        <select id="job-select" onchange="fillJobDetails()">
-          <option value="">Select a job...</option>
-        </select>
-        <div id="job-detail" class="job-detail">
-          <p class="job-title" id="job-prop"></p>
-          <p class="text-muted" id="job-desc"></p>
-          <p class="text-muted" id="job-assigned" style="font-size:12px;margin-top:4px;"></p>
-        </div>
-        <div class="grid2">
-          <div>
-            <label>Date</label>
-            <input type="date" id="entry-date" onchange="renderEntriesByDate(); updateHoursPlaceholder()">
+      <div id="worker-entries-section">
+        <div class="card">
+          <label>Job number</label>
+          <select id="job-select" onchange="fillJobDetails()">
+            <option value="">Select a job...</option>
+          </select>
+          <div id="job-detail" class="job-detail">
+            <p class="job-title" id="job-prop"></p>
+            <p class="text-muted" id="job-desc"></p>
+            <p class="text-muted" id="job-assigned" style="font-size:12px;margin-top:4px;"></p>
           </div>
-          <div>
-            <label>Hours</label>
-            <input type="number" id="entry-hours" placeholder="e.g. 4" min="0.5" max="16" step="0.5" onfocus="updateHoursPlaceholder()">
+          <div class="grid2">
+            <div>
+              <label>Date</label>
+              <input type="date" id="entry-date" autocomplete="off" onchange="renderEntriesByDate(); updateHoursPlaceholder()">
+            </div>
+            <div>
+              <label>Hours</label>
+              <input type="number" id="entry-hours" placeholder="e.g. 4" min="0.5" max="16" step="0.5" onfocus="updateHoursPlaceholder()">
+            </div>
+          </div>
+          <div id="rj-prop-worker" class="rj-prop-wrap"></div>
+          <label id="entry-comments-label">Comments (optional)</label>
+          <textarea id="entry-comments" placeholder="What was done..."></textarea>
+          <div class="form-footer">
+            <button class="btn btn-primary full-width" id="save-btn" onclick="submitEntry()">Save entry</button>
           </div>
         </div>
-        <div id="rj-prop-worker" class="rj-prop-wrap"></div>
-        <label>Comments (optional)</label>
-        <textarea id="entry-comments" placeholder="What was done..."></textarea>
-        <div class="form-footer">
-          <button class="btn btn-primary full-width" id="save-btn" onclick="submitEntry()">Save entry</button>
-        </div>
-      </div>
 
-      <p class="section-label">Your entries</p>
-      <div id="entries-by-date"></div>
+        <p class="section-label">Your entries</p>
+        <div id="entries-by-date"></div>
+      </div>
     </div>
   </div>
 
@@ -347,7 +363,7 @@ textarea { height: 60px; resize: none; }
           <label>User</label>
           <select id="office-user-select">
             <option value="">Select user...</option>
-            <option value="Office">Office</option>
+            <option value="Admin">Admin</option>
           </select>
           <label>Password</label>
           <input type="password" id="office-pin" placeholder="Enter password" onkeydown="if(event.key==='Enter'){event.preventDefault();officeLogin();}">
@@ -399,33 +415,9 @@ textarea { height: 60px; resize: none; }
             <p class="section-heading">Active jobs</p>
             <div style="display:flex;gap:8px;">
               <button class="btn btn-sm" onclick="refreshOffice()">↻ Refresh</button>
-              <button class="btn btn-sm btn-primary" id="cj-toggle-btn" onclick="toggleCreateJobForm()">+ Create Job</button>
-            </div>
-          </div>
-          <div id="create-job-form" style="display:none;padding:0 1rem 1rem;border-bottom:0.5px solid var(--color-border-tertiary);margin-bottom:1rem;">
-            <div class="grid2">
-              <div>
-                <label style="margin-top:0;">Property <span style="color:var(--color-text-error)">*</span></label>
-                <select id="cj-property"><option value="">Select property...</option></select>
-              </div>
-              <div>
-                <label style="margin-top:0;">Description</label>
-                <input type="text" id="cj-description" placeholder="Job description">
-              </div>
-            </div>
-            <div style="margin-top:12px;">
-              <label style="margin-top:0;">Assigned To</label>
-              <div id="cj-worker-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;"></div>
-            </div>
-            <div class="form-footer">
-              <button class="btn btn-primary" onclick="submitCreateJob()">Create Job</button>
             </div>
           </div>
           <div id="job-list"><p class="text-muted">Loading...</p></div>
-        </div>
-        <div class="card" style="margin-top:1rem;">
-          <div class="card-header"><p class="section-heading">Tasks</p></div>
-          <div id="task-list"><p class="text-muted">Loading...</p></div>
         </div>
       </div>
 
@@ -486,7 +478,7 @@ textarea { height: 60px; resize: none; }
               </div>
               <div>
                 <div id="rj-prop-dae" class="rj-prop-wrap"></div>
-                <label style="margin-top:0;">Comments (optional)</label>
+                <label id="dae-comments-label" style="margin-top:0;">Comments (optional)</label>
                 <input type="text" id="dae-comments" placeholder="What was done...">
               </div>
             </div>
@@ -527,7 +519,7 @@ textarea { height: 60px; resize: none; }
             <div class="grid2" style="margin-top:10px;">
               <div>
                 <label style="margin-top:0;">Date</label>
-                <input type="date" id="oae-date">
+                <input type="date" id="oae-date" autocomplete="off">
               </div>
               <div>
                 <label style="margin-top:0;">Hours</label>
@@ -536,7 +528,7 @@ textarea { height: 60px; resize: none; }
             </div>
             <div style="margin-top:10px;">
               <div id="rj-prop-oae" class="rj-prop-wrap"></div>
-              <label style="margin-top:0;">Comments (optional)</label>
+              <label id="oae-comments-label" style="margin-top:0;">Comments (optional)</label>
               <textarea id="oae-comments" placeholder="What was done..."></textarea>
             </div>
             <div style="display:flex;gap:8px;margin-top:0.75rem;">
@@ -559,11 +551,11 @@ textarea { height: 60px; resize: none; }
             <div class="grid2" style="margin-top:10px;">
               <div>
                 <label style="margin-top:0;">From date</label>
-                <input type="date" id="mae-date-from" onchange="document.getElementById('mae-date-to').min = this.value; if (document.getElementById('mae-date-to').value && document.getElementById('mae-date-to').value < this.value) document.getElementById('mae-date-to').value = this.value;">
+                <input type="date" id="mae-date-from" autocomplete="off" onblur="enforceDateOrder('mae-date-from', 'mae-date-to')">
               </div>
               <div>
                 <label style="margin-top:0;">To date</label>
-                <input type="date" id="mae-date-to">
+                <input type="date" id="mae-date-to" autocomplete="off">
               </div>
             </div>
             <div style="margin-top:10px;">
@@ -578,17 +570,17 @@ textarea { height: 60px; resize: none; }
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:end;margin-bottom:1rem;">
             <div>
               <label style="margin-top:0;">Worker</label>
-              <select id="oe-worker-filter">
+              <select id="oe-worker-filter" onkeydown="if(event.key==='Enter'){event.preventDefault();renderOfficeEntries();}">
                 <option value="">All workers</option>
               </select>
             </div>
             <div>
               <label style="margin-top:0;">From</label>
-              <input type="date" id="oe-date-from" onchange="syncDateRangeLimits()">
+              <input type="date" id="oe-date-from" autocomplete="off" onblur="syncDateRangeLimits()" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();renderOfficeEntries();}">
             </div>
             <div>
               <label style="margin-top:0;">To</label>
-              <input type="date" id="oe-date-to" onchange="syncDateRangeLimits()">
+              <input type="date" id="oe-date-to" autocomplete="off" onblur="syncDateRangeLimits()" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();renderOfficeEntries();}">
             </div>
             <div>
               <button class="btn btn-primary" onclick="renderOfficeEntries()" style="width:100%;margin-top:0;">Search</button>
@@ -656,16 +648,19 @@ textarea { height: 60px; resize: none; }
         <div class="card">
           <div class="row-between card-header">
             <p class="section-heading">⏱ Overtime Requests</p>
-            <button class="btn btn-primary btn-sm" onclick="exportOvertimeXLSX()">↓ Export XLSX</button>
+            <div>
+              <button class="btn btn-primary btn-sm" onclick="exportOvertimeXLSX()">↓ Export XLSX</button>
+              <button class="btn btn-sm" onclick="exportOvertimeRateReport()" style="margin-left:6px;">↓ Rate Report</button>
+            </div>
           </div>
           <div style="padding:0 1rem;display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end;margin-bottom:1rem;">
             <div>
               <label style="margin-top:0;">Approved / Declined from</label>
-              <input type="date" id="ot-date-from">
+              <input type="date" id="ot-date-from" autocomplete="off" onblur="enforceDateOrder('ot-date-from', 'ot-date-to')">
             </div>
             <div>
               <label style="margin-top:0;">To</label>
-              <input type="date" id="ot-date-to">
+              <input type="date" id="ot-date-to" autocomplete="off" onblur="enforceDateOrder('ot-date-from', 'ot-date-to')">
             </div>
             <div>
               <button class="btn btn-primary" onclick="renderOvertimeTab()" style="width:100%;margin-top:0;">Search</button>
@@ -740,7 +735,7 @@ textarea { height: 60px; resize: none; }
 <script>
 // ══════════════════════════════════════════════════════════════════
 // ══════════════════════════════════════════════════════════════════
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxPWyetcp3dDBgj9cgs8nwGvqv1N357YQKxNw2zb4aKQwl4cLzNbsen2n_Ln1PA9lopLQ/exec';
+const SCRIPT_URL = '';
 const POLL_INTERVAL_MS = 60000;
 // ══════════════════════════════════════════════════════════════════
 
@@ -762,7 +757,6 @@ let entries = [];
 let workers = [];
 let weekSubmissions = [];
 let recurringJobs = [];
-let tasks = [];
 let absenceTypes = [];
 let currentOfficeUser = null;
 let overtimeRequests = [];
@@ -772,6 +766,21 @@ let isSubmittingEntry = false;
 let isSubmittingOvertime = false;
 let isSubmittingMultiAdd = false;
 let woHoursActiveFilter = '';
+
+// Protects against a real, observed race: a poll's server read can lag
+// behind a write that already genuinely succeeded (Sheets/Apps Script
+// consistency quirk under concurrent executions). Without this, the poll's
+// wholesale entries-replace can silently erase an entry that's already
+// synced-and-removed from the outbound queue, resetting the worker's
+// locally-computed hours-today count and letting a duplicate slip past the
+// overtime check with a different ID. Entries are tracked here for a short
+// window after creation and re-injected if a poll's snapshot is missing them.
+const RECENT_ENTRY_WINDOW_MS = 3 * 60 * 1000; // 3 minutes
+let recentlyCreatedEntries = [];
+function trackRecentEntry(entry) {
+  recentlyCreatedEntries.push({ entry, at: Date.now() });
+  recentlyCreatedEntries = recentlyCreatedEntries.filter(r => Date.now() - r.at < RECENT_ENTRY_WINDOW_MS);
+}
 let dailyViewDate = new Date().toISOString().slice(0, 10);
 let currentWorker = null;
 let syncQueue = JSON.parse(localStorage.getItem('syncQueue') || '[]');
@@ -786,9 +795,7 @@ window.addEventListener('load', () => {
   } else {
     document.getElementById('config-banner').style.display = 'block';
     setSyncStatus('login', 'error', 'Not connected — set SCRIPT_URL');
-    jobs = [
-      { id: 'WO00001', property: 'Example Property', description: 'Example job description', assignedTo: '', open: true },
-    ];
+    jobs = [];
     entries = JSON.parse(localStorage.getItem('entries') || '[]');
     populateWorkerDropdown();
   }
@@ -801,17 +808,28 @@ window.addEventListener('online', () => {
 
 // ── API helpers ───────────────────────────────────────────────────
 
-function api(action, payload = {}) {
+function api(action, payload = {}, _attempt = 0) {
   if (!SCRIPT_URL) return Promise.reject(new Error('No SCRIPT_URL configured'));
+  const MAX_ATTEMPTS = 3; // 1 initial try + 2 retries
   return fetch(SCRIPT_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain' },
     body: JSON.stringify({ action, ...payload })
   })
-  .then(function(r) { return r.json(); })
+  .then(function(r) {
+    if (!r.ok) throw new Error('HTTP ' + r.status); // transient — worth retrying
+    return r.json().catch(function() { throw new Error('Bad response from server'); }); // non-JSON — also transient
+  })
   .then(function(data) {
-    if (data.error) throw new Error(data.error);
+    if (data.error) throw new Error(data.error); // real app-level error — not retried
     return data;
+  })
+  .catch(function(err) {
+    const isAppError = err.message && !/^HTTP \d|Bad response from server|Failed to fetch|NetworkError|network/i.test(err.message);
+    if (isAppError || _attempt >= MAX_ATTEMPTS - 1) throw err;
+    const delay = 500 * Math.pow(2, _attempt); // 500ms, then 1000ms
+    return new Promise(function(resolve) { setTimeout(resolve, delay); })
+      .then(function() { return api(action, payload, _attempt + 1); });
   });
 }
 
@@ -820,6 +838,10 @@ function loadInitialData() {
   api('getData').then(function(data) {
     jobs = data.jobs || [];
     workers = (data.workers || []).map(w => ({ ...w, name: String(w.name || '').trim().replace(/\s+/g, ' ') }));
+    if (Array.isArray(data.bankHolidays) && data.bankHolidays.length) {
+      BANK_HOLIDAYS = data.bankHolidays;
+      localStorage.setItem('bankHolidays', JSON.stringify(BANK_HOLIDAYS));
+    }
     entries = (data.entries || []).map(e => ({
       ...e,
       worker: String(e.worker || '').trim().replace(/\s+/g, ' '),
@@ -835,7 +857,6 @@ function loadInitialData() {
       if (!entries.find(e => e.id === q.id)) entries.push(q);
     });
     recurringJobs = (data.recurringJobs || []).map(j => ({ ...j, assignedTo: String(j.assignedTo || '') }));
-    tasks = (data.tasks || tasks).map(t => ({ ...t }));
     rjProperties = (data.properties || []).map(function(p) { return String(p.name || p || ''); }).filter(Boolean);
     weekSubmissions = data.weekSubmissions || [];
     absenceTypes = (data.absenceTypes || []);
@@ -856,7 +877,6 @@ function loadInitialData() {
     localStorage.setItem('recurringJobs', JSON.stringify(recurringJobs));
     localStorage.setItem('absenceTypes', JSON.stringify(absenceTypes));
     localStorage.setItem('workers', JSON.stringify(workers));
-    localStorage.setItem('tasks', JSON.stringify(tasks));
     const serverEntryIds = new Set(entries.map(e => String(e.id)));
     const serverOTIds = new Set((overtimeRequests || []).map(o => String(o.id)));
     syncQueue = syncQueue.filter(q => {
@@ -886,7 +906,6 @@ function loadInitialData() {
     jobs = JSON.parse(localStorage.getItem('jobs') || '[]');
     entries = JSON.parse(localStorage.getItem('entries') || '[]');
     workers = JSON.parse(localStorage.getItem('workers') || '[]');
-    tasks = JSON.parse(localStorage.getItem('tasks') || '[]');
     recurringJobs = JSON.parse(localStorage.getItem('recurringJobs') || '[]');
     absenceTypes = JSON.parse(localStorage.getItem('absenceTypes') || '[]');
     overtimeRequests = JSON.parse(localStorage.getItem('overtimeRequests') || '[]');
@@ -1009,6 +1028,10 @@ async function pollJobs() {
     const data = await api('getData');
     jobs = data.jobs || [];
     workers = (data.workers || workers).map(w => ({ ...w, name: String(w.name || '').trim().replace(/\s+/g, ' ') }));
+    if (Array.isArray(data.bankHolidays) && data.bankHolidays.length) {
+      BANK_HOLIDAYS = data.bankHolidays;
+      localStorage.setItem('bankHolidays', JSON.stringify(BANK_HOLIDAYS));
+    }
     entries = (data.entries || []).map(e => ({
       ...e,
       worker: String(e.worker || '').trim().replace(/\s+/g, ' '),
@@ -1021,10 +1044,17 @@ async function pollJobs() {
       overtimeEnd: toHHMM(e.overtimeEnd)
     })).filter(e => !pendingDeleteEntryIds.has(String(e.id)));
     syncQueue.forEach(q => { if (q.payload?.entry && !entries.find(e => e.id === q.payload.entry.id)) entries.push(q.payload.entry); });
+    // Guard against a lagging server read silently dropping an entry that
+    // already synced successfully — see trackRecentEntry for why this exists.
+    recentlyCreatedEntries = recentlyCreatedEntries.filter(r => Date.now() - r.at < RECENT_ENTRY_WINDOW_MS);
+    recentlyCreatedEntries.forEach(r => {
+      if (!entries.find(e => e.id === r.entry.id) && !pendingDeleteEntryIds.has(String(r.entry.id))) {
+        entries.push(r.entry);
+      }
+    });
     recurringJobs = (data.recurringJobs || recurringJobs).map(j => ({ ...j, assignedTo: String(j.assignedTo || '') }));
     absenceTypes = data.absenceTypes || absenceTypes;
     overtimeRequests = data.overtimeRequests || overtimeRequests;
-    tasks = (data.tasks || tasks).map(t => ({ ...t }));
     rjProperties = (data.properties || rjProperties).map(function(p) { return String(p.name || p || ''); }).filter(Boolean);
     weekSubmissions = data.weekSubmissions || weekSubmissions;
     overtimeRequests = overtimeRequests.map(o => {
@@ -1043,8 +1073,6 @@ async function pollJobs() {
     localStorage.setItem('absenceTypes', JSON.stringify(absenceTypes));
     localStorage.setItem('entries', JSON.stringify(entries));
     localStorage.setItem('workers', JSON.stringify(workers));
-    localStorage.setItem('tasks', JSON.stringify(tasks));
-    localStorage.setItem('tasks', JSON.stringify(tasks));
     const currentJobSel = document.getElementById('job-select');
     const savedJobId = currentJobSel ? currentJobSel.value : '';
     const jobPickerOpen = document.getElementById('job-select_ssd')?.classList.contains('ss-open');
@@ -1076,23 +1104,9 @@ async function pollJobs() {
   } catch (e) { setSyncStatus('worker', 'error', 'Could not refresh'); }
 }
 
-// ── Team alias map — expand shortcodes to individual worker names ──
-// (empty for now — add entries here only if you introduce team-alias
-// assignment shortcuts for this business, e.g. 'TEAMX': ['Name A', 'Name B'])
-const TEAM_ALIASES = {};
-
 function expandAssignedTo(assignedTo) {
   if (!assignedTo) return [];
-  const names = assignedTo.split(',').map(s => s.trim());
-  const expanded = [];
-  names.forEach(name => {
-    if (TEAM_ALIASES[name]) {
-      TEAM_ALIASES[name].forEach(n => { if (!expanded.includes(n)) expanded.push(n); });
-    } else {
-      if (!expanded.includes(name)) expanded.push(name);
-    }
-  });
-  return expanded;
+  return String(assignedTo).split(',').map(s => s.trim()).filter(Boolean);
 }
 
 function populateJobDropdown() {
@@ -1317,11 +1331,12 @@ async function submitEntry() {
   const jobObj = jobs.find(j => j.id === jobId) || recurringJobs.find(j => j.id === jobId) || absenceTypes.find(a => a.id === jobId);
   const entry = { id: uid(), worker: currentWorker, jobId, date, hours, comments, amendments: [], createdAt: new Date().toISOString(), property: isRecurringJobId(jobId) ? (rjPropGetValue('rj-prop-worker') || (jobObj ? jobObj.property : '')) : (jobObj ? jobObj.property : ''), description: jobObj ? jobObj.description : '' };
   if (isRecurringJobId(jobId) && !rjPropGetValue('rj-prop-worker')) { alert('Please select a property for this recurring job.'); return; }
+  if (isRecurringJobId(jobId) && !comments.trim()) { alert('Please add a comment for this recurring job.'); return; }
 
   if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
   isSubmittingEntry = true;
   try {
-    entries.push(entry);
+    entries.push(entry); trackRecentEntry(entry);
     localStorage.setItem('entries', JSON.stringify(entries));
 
     document.getElementById('job-select').value = '';
@@ -1435,7 +1450,7 @@ function fmtShortDate(dateStr) {
 
 
 function isWeekFulfilled(workerName, wc) {
-  const requiredDayCount = 5; // Mon-Fri
+  const requiredDayCount = 5;
   const parts = wc.split('-');
   const workerEntries = entries.filter(e => e.worker === workerName);
 
@@ -1512,8 +1527,7 @@ function renderWeek(wc) {
       .concat(Object.keys(byDay))
       .filter(ds => { const dow = new Date(ds + 'T12:00:00').getDay(); return dow === 0 || dow === 6; })
   );
-  const requiredDayCount = 5;
-  const weekDays = allWeekDays.filter((ds, i) => i < requiredDayCount || weekendDaysWithData.has(ds));
+  const weekDays = allWeekDays.filter((ds, i) => i < 5 || weekendDaysWithData.has(ds));
   const dayNames = weekDays.map((_, i) => allDayNames[allWeekDays.indexOf(weekDays[i])]);
 
   const rows = weekDays.map((dayStr, i) => {
@@ -1559,18 +1573,18 @@ function renderWeek(wc) {
           <div class="day-date">${fmtShortDate(dayStr)}</div>
           ${dayCellContent}
         </td>` : ''}
-        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);${otIdx === 0 ? '' : 'border-left:0.5px solid var(--color-border-tertiary);'}font-size:12px;vertical-align:middle;width:160px;">
+        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);${otIdx === 0 ? '' : 'border-left:0.5px solid var(--color-border-tertiary);'}font-size:12px;vertical-align:middle;width:90px;overflow:hidden;">
           <div style="font-weight:600;">${o.jobId}</div>
           <span class="badge-amended-sm" style="${statusStyle}">${statusLabel}</span>
         </td>
-        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;color:var(--color-text-secondary);vertical-align:middle;width:200px;">${propLabel(o.property, 35)}</td>
-        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;color:var(--color-text-secondary);vertical-align:middle;">${o.description || ''}</td>
+        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;color:var(--color-text-secondary);vertical-align:middle;width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${propLabel(o.property, 35)}</td>
+        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;color:var(--color-text-secondary);vertical-align:middle;width:380px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${o.description || ''}</td>
         <td style="padding:5px 6px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;font-weight:500;text-align:center;vertical-align:middle;white-space:nowrap;width:46px;">${o.hours}h</td>
-        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;font-style:italic;color:var(--color-text-secondary);vertical-align:middle;">
+        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;font-style:italic;color:var(--color-text-secondary);vertical-align:middle;width:220px;overflow:hidden;">
           ${o.timeRange || ''}
           ${o.reviewComment ? `<div style="font-style:italic;font-size:10px;margin-top:2px;color:var(--color-text-secondary);">${o.reviewComment}</div>` : ''}
         </td>
-        <td style="padding:4px 8px;vertical-align:middle;width:60px;text-align:right;">
+        <td style="padding:4px 8px;vertical-align:middle;width:110px;text-align:right;">
           ${o.status === 'pending' ? `<button class="btn btn-sm" style="color:var(--color-text-error);border-color:var(--color-border-error);font-size:11px;" onclick="deleteOTRequest('${o.id}')">Delete</button>` : ''}
         </td>
       </tr>`;
@@ -1579,7 +1593,7 @@ function renderWeek(wc) {
     }
 
     const entryRowsHtml = dayEntries.map((e, idx) => {
-      const job = jobs.find(j => j.id === e.jobId) || recurringJobs.find(j => j.id === e.jobId) || tasks.find(j => j.id === e.jobId); const isRJ = recurringJobs.some(j => j.id === e.jobId); const jobProperty = isRJ ? (e.property || (job ? job.property : '')) : (job ? job.property : (e.property || '')); const jobDescription = (job ? (job.description || '') : (e.description || '')).slice(0, 200);
+      const job = jobs.find(j => j.id === e.jobId) || recurringJobs.find(j => j.id === e.jobId); const isRJ = recurringJobs.some(j => j.id === e.jobId); const jobProperty = isRJ ? (e.property || (job ? job.property : '')) : (job ? job.property : (e.property || '')); const jobDescription = (job ? (job.description || '') : (e.description || '')).slice(0, 200);
       const amended = e.amendments && e.amendments.length > 0;
       const lastAmend = amended ? e.amendments[e.amendments.length - 1] : null;
       const isPending = syncQueue.some(q => q.payload?.entry?.id === e.id);
@@ -1591,27 +1605,27 @@ function renderWeek(wc) {
           <div class="day-date">${fmtShortDate(dayStr)}</div>
           ${dayCellContent}
         </td>` : ''}
-        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;vertical-align:middle;width:160px;">
+        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;vertical-align:middle;width:90px;overflow:hidden;">
           <div style="font-weight:600;">${e.jobId}</div>
           ${amended && !e.isOvertime ? `<span class="badge-amended-sm">Amended</span>` : ''}
           ${isPending ? `<span class="badge-amended-sm" style="background:var(--color-background-info);color:var(--color-text-info);">Pending</span>` : ''}
           ${e.isOvertime ? `<span class="badge-amended-sm" style="background:var(--color-background-success);color:var(--color-text-success);">⏱ Overtime</span>` : ''}
         </td>
-        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;color:var(--color-text-secondary);vertical-align:middle;width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;color:var(--color-text-secondary);vertical-align:middle;width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
           ${propLabel(jobProperty, 35)}
         </td>
-        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;color:var(--color-text-secondary);vertical-align:middle;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;color:var(--color-text-secondary);vertical-align:middle;width:380px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
           ${jobDescription}
         </td>
         <td style="padding:5px 6px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;font-weight:500;text-align:center;vertical-align:middle;white-space:nowrap;width:46px;">
           ${e.hours}h
         </td>
-        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;font-style:italic;color:var(--color-text-secondary);vertical-align:middle;">
+        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;font-style:italic;color:var(--color-text-secondary);vertical-align:middle;width:220px;overflow:hidden;word-wrap:break-word;">
           ${e.overtimeStart ? `<span style="font-style:normal;font-weight:500;color:var(--color-text-success);">${e.overtimeStart} – ${e.overtimeEnd}</span> ` : ''}
           ${e.comments || ''}
           ${amended ? `<div class="audit-log-sm" style="font-style:normal;">${lastAmend.note === 'Created by Office' ? 'Created by' : e.isOvertime ? 'Approved by' : 'Amended by'} ${lastAmend.by} · ${lastAmend.at}${e.isOvertime && lastAmend.note && lastAmend.note.includes('): ') ? `<span style="font-style:italic;"> — ${lastAmend.note.slice(lastAmend.note.indexOf('): ') + 3)}</span>` : ''}</div>` : ''}
         </td>
-        <td style="padding:4px 8px;text-align:right;vertical-align:middle;width:160px;white-space:nowrap;">
+        <td style="padding:4px 8px;text-align:right;vertical-align:middle;width:110px;white-space:nowrap;">
           ${isLocked ? '' : `<button class="btn btn-sm" onclick="toggleEditWeek('${e.id}')">Edit</button>
             <button class="btn btn-sm" style="color:var(--color-text-error);border-color:var(--color-border-error);margin-left:4px;" onclick="deleteEntry('${e.id}', false)">Delete</button>`}
         </td>
@@ -1671,18 +1685,18 @@ function renderWeek(wc) {
           <div class="day-name">${dayNames[i]}</div>
           <div class="day-date">${fmtShortDate(dayStr)}</div>
         </td>
-        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;vertical-align:middle;width:160px;">
+        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;vertical-align:middle;width:90px;overflow:hidden;">
           <div style="font-weight:600;">${o.jobId}</div>
           <span class="badge-amended-sm" style="${statusStyle}">${statusLabel}</span>
         </td>
-        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;color:var(--color-text-secondary);vertical-align:middle;width:200px;">${propLabel(o.property, 35)}</td>
-        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;color:var(--color-text-secondary);vertical-align:middle;">${o.description || ''}</td>
+        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;color:var(--color-text-secondary);vertical-align:middle;width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${propLabel(o.property, 35)}</td>
+        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;color:var(--color-text-secondary);vertical-align:middle;width:380px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${o.description || ''}</td>
         <td style="padding:5px 6px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;font-weight:500;text-align:center;vertical-align:middle;white-space:nowrap;width:46px;">${o.hours}h</td>
-        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;font-style:italic;color:var(--color-text-secondary);vertical-align:middle;">
+        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;font-style:italic;color:var(--color-text-secondary);vertical-align:middle;width:220px;overflow:hidden;">
           ${o.timeRange || ''}
           ${o.reviewComment ? `<div style="font-style:italic;font-size:10px;margin-top:2px;color:var(--color-text-secondary);">${o.reviewComment}</div>` : ''}
         </td>
-        <td style="padding:4px 8px;vertical-align:middle;width:60px;text-align:right;">
+        <td style="padding:4px 8px;vertical-align:middle;width:110px;text-align:right;">
           ${o.status === 'pending' ? `<button class="btn btn-sm" style="color:var(--color-text-error);border-color:var(--color-border-error);font-size:11px;" onclick="deleteOTRequest('${o.id}')">Delete</button>` : ''}
         </td>
       </tr>`;
@@ -1701,16 +1715,16 @@ function renderWeek(wc) {
         ${weekSub && weekSub.status === 'declined' ? `<span class="badge" style="background:#fdecea;color:var(--color-text-error);">Declined — resubmit when ready</span>` : ''}
       </div>
       <div class="week-table-wrap">
-      <table class="week-table">
+      <table class="week-table" style="table-layout:fixed;width:100%;">
         <thead>
           <tr>
-            <th style="width:100px;">Day</th>
-            <th style="width:160px;">W/O Number</th>
-            <th style="width:130px;">Property</th>
-            <th>Description</th>
+            <th style="width:70px;">Day</th>
+            <th style="width:90px;">W/O Number</th>
+            <th style="width:180px;">Property</th>
+            <th style="width:380px;">Description</th>
             <th style="width:46px;text-align:center;">Hrs</th>
-            <th>Comments</th>
-            <th style="width:60px;"></th>
+            <th style="width:220px;">Comments</th>
+            <th style="width:110px;"></th>
           </tr>
         </thead>
         <tbody>${rows}</tbody>
@@ -1724,13 +1738,22 @@ function toggleEditWeek(id) {
   if (row) row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
 }
 
-// ── Bank Holidays (England & Wales 2026-2027) ─────────────────────
-const BANK_HOLIDAYS = [
+// ── Bank Holidays — England & Wales, live from gov.uk (see loadInitialData) ──
+// This hardcoded list is only the emergency fallback for a first-ever load
+// with no network and no prior cached data; it's overwritten as soon as a
+// live list is available from the backend (which fetches gov.uk server-side
+// and keeps its own fallback — see getBankHolidaysList_ in Code.gs) or from
+// a previous session's cache.
+let BANK_HOLIDAYS = [
   '2026-01-01','2026-04-03','2026-04-06','2026-05-04','2026-05-25',
   '2026-08-31','2026-12-25','2026-12-28',
   '2027-01-01','2027-03-26','2027-03-29','2027-05-03','2027-05-31',
   '2027-08-30','2027-12-27','2027-12-28'
 ];
+try {
+  const cachedBankHolidays = JSON.parse(localStorage.getItem('bankHolidays') || 'null');
+  if (Array.isArray(cachedBankHolidays) && cachedBankHolidays.length) BANK_HOLIDAYS = cachedBankHolidays;
+} catch (e) { /* keep the hardcoded fallback above */ }
 
 
 
@@ -1763,7 +1786,7 @@ async function submitAbsenceEntry() {
     property: '',
     description: absType ? absType.name : jobId
   };
-  entries.push(entry);
+  entries.push(entry); trackRecentEntry(entry);
   localStorage.setItem('entries', JSON.stringify(entries));
   document.getElementById('abs-entry-worker').value = '';
   document.getElementById('abs-entry-job').value = '';
@@ -1791,7 +1814,7 @@ function groupByDate(arr) {
 }
 
 function renderEntryRow(e, isOffice) {
-  const job = jobs.find(j => j.id === e.jobId) || recurringJobs.find(j => j.id === e.jobId) || tasks.find(j => j.id === e.jobId); const isRJ = recurringJobs.some(j => j.id === e.jobId); const jobProperty = isRJ ? (e.property || (job ? job.property : '')) : (job ? job.property : (e.property || '')); const jobDescription = job ? (job.description || '') : (e.description || '');
+  const job = jobs.find(j => j.id === e.jobId) || recurringJobs.find(j => j.id === e.jobId); const isRJ = recurringJobs.some(j => j.id === e.jobId); const jobProperty = isRJ ? (e.property || (job ? job.property : '')) : (job ? job.property : (e.property || '')); const jobDescription = job ? (job.description || '') : (e.description || '');
   const amended = e.amendments && e.amendments.length > 0;
   const lastAmend = amended ? e.amendments[e.amendments.length - 1] : null;
   const isPending = syncQueue.some(q => q.payload?.entry?.id === e.id);
@@ -1869,7 +1892,7 @@ async function saveDailyViewEdit(id) {
   // Recalculate property/description for the new job selection — previously
   // left untouched, so switching e.g. a WO entry to an absence type silently
   // kept showing the old WO's property/description.
-  const newJobObj_dv = jobs.find(j => j.id === newJob) || tasks.find(j => j.id === newJob);
+  const newJobObj_dv = jobs.find(j => j.id === newJob);
   const newRecurringObj_dv = recurringJobs.find(j => j.id === newJob);
   const newAbsTypeObj_dv = absenceTypes.find(a => a.id === newJob);
   if (newJobObj_dv) {
@@ -1929,7 +1952,7 @@ async function saveEdit(id, isOffice) {
   // Recalculate property/description for the new job selection — previously
   // left untouched, so switching e.g. a WO entry to an absence type silently
   // kept showing the old WO's property/description.
-  const newJobObj_se = jobs.find(j => j.id === newJob) || tasks.find(j => j.id === newJob);
+  const newJobObj_se = jobs.find(j => j.id === newJob);
   const newRecurringObj_se = recurringJobs.find(j => j.id === newJob);
   const newAbsTypeObj_se = absenceTypes.find(a => a.id === newJob);
   if (newJobObj_se) {
@@ -2004,6 +2027,10 @@ async function refreshOffice() {
       const data = await api('getData');
       jobs = data.jobs || [];
       workers = (data.workers || []).map(w => ({ ...w, name: String(w.name || '').trim().replace(/\s+/g, ' ') }));
+      if (Array.isArray(data.bankHolidays) && data.bankHolidays.length) {
+        BANK_HOLIDAYS = data.bankHolidays;
+        localStorage.setItem('bankHolidays', JSON.stringify(BANK_HOLIDAYS));
+      }
       entries = (data.entries || []).map(e => ({
         ...e,
         worker: String(e.worker || '').trim().replace(/\s+/g, ' '),
@@ -2013,8 +2040,14 @@ async function refreshOffice() {
         overtimeStart: toHHMM(e.overtimeStart),
         overtimeEnd: toHHMM(e.overtimeEnd)
       })).filter(e => !pendingDeleteEntryIds.has(String(e.id)));
+      syncQueue.forEach(q => { if (q.payload?.entry && !entries.find(e => e.id === q.payload.entry.id)) entries.push(q.payload.entry); });
+      recentlyCreatedEntries = recentlyCreatedEntries.filter(r => Date.now() - r.at < RECENT_ENTRY_WINDOW_MS);
+      recentlyCreatedEntries.forEach(r => {
+        if (!entries.find(e => e.id === r.entry.id) && !pendingDeleteEntryIds.has(String(r.entry.id))) {
+          entries.push(r.entry);
+        }
+      });
         recurringJobs = (data.recurringJobs || []).map(j => ({ ...j, assignedTo: String(j.assignedTo || '') }));
-      tasks = (data.tasks || tasks).map(t => ({ ...t }));
     rjProperties = (data.properties || rjProperties).map(function(p) { return String(p.name || p || ''); }).filter(Boolean);
     weekSubmissions = data.weekSubmissions || weekSubmissions;
       absenceTypes = data.absenceTypes || [];
@@ -2043,7 +2076,6 @@ async function refreshOffice() {
     jobs = JSON.parse(localStorage.getItem('jobs') || '[]');
     entries = JSON.parse(localStorage.getItem('entries') || '[]');
     workers = JSON.parse(localStorage.getItem('workers') || '[]');
-    tasks = JSON.parse(localStorage.getItem('tasks') || '[]');
     recurringJobs = JSON.parse(localStorage.getItem('recurringJobs') || '[]');
     absenceTypes = JSON.parse(localStorage.getItem('absenceTypes') || '[]');
     overtimeRequests = JSON.parse(localStorage.getItem('overtimeRequests') || '[]');
@@ -2075,30 +2107,9 @@ function renderOfficeDashboard() {
     ? openJobs.map(j => renderJobRow(j)).join('')
     : '<p class="text-muted">No open jobs.</p>';
 
-  const taskEl = document.getElementById('task-list');
-  if (taskEl) {
-    const activeTasks = tasks.filter(t => t.active !== false && t.active !== 'FALSE');
-    taskEl.innerHTML = activeTasks.length
-      ? activeTasks.map(t => `
-        <div class="job-row" style="padding:10px 12px;border-bottom:0.5px solid var(--color-border-tertiary);display:flex;align-items:center;gap:12px;">
-          <span style="font-size:12px;font-weight:600;min-width:80px;">${t.id}</span>
-          <span style="font-size:12px;color:var(--color-text-secondary);flex:1;">${propLabel(t.property, 35)}</span>
-          <span style="font-size:12px;color:var(--color-text-secondary);flex:2;">${t.description || ''}</span>
-          <span style="font-size:11px;color:var(--color-text-secondary);">${t.assignedTo || ''}</span>
-        </div>`).join('')
-      : '<p class="text-muted" style="padding:0.5rem 0;">No active tasks.</p>';
-  }
-
   renderWorkersList();
   renderRecurringJobsList();
   renderAbsenceTypesList();
-  const taskElRefresh = document.getElementById('task-list');
-  if (taskElRefresh) {
-    const activeTasks = tasks.filter(t => t.active !== false && t.active !== 'FALSE');
-    taskElRefresh.innerHTML = activeTasks.length
-      ? activeTasks.map(t => `<div class="job-row" style="padding:10px 12px;border-bottom:0.5px solid var(--color-border-tertiary);display:flex;align-items:center;gap:12px;"><span style="font-size:12px;font-weight:600;min-width:80px;">${t.id}</span><span style="font-size:12px;color:var(--color-text-secondary);flex:1;">${propLabel(t.property, 35)}</span><span style="font-size:12px;color:var(--color-text-secondary);flex:2;">${t.description || ''}</span></div>`).join('')
-      : '<p class="text-muted" style="padding:0.5rem 0;">No active tasks.</p>';
-  }
   const awSel = document.getElementById('absence-worker-select');
   if (awSel) {
     const active = workers.filter(w => w.active !== false && w.active !== 'FALSE');
@@ -2137,7 +2148,7 @@ function renderWOHoursTab() {
 
   // Real work orders only — deliberately excludes RecurringJobs (which
   // accumulate far more hours over time and would swamp this view) and
-  // Tasks/AbsenceTypes, which aren't WOs at all.
+  // AbsenceTypes, which aren't WOs at all.
   const realJobIds = new Set(jobs.map(j => String(j.id)));
   let relevantEntries = entries.filter(e => realJobIds.has(String(e.jobId)));
 
@@ -2325,7 +2336,7 @@ function renderOfficeEntries() {
         o.worker === worker.name && normaliseDate(o.date) === dayStr && (o.status === 'pending' || o.status === 'declined')
       );
       const pendingOTRows_oe = dayOT_oe.map((o, otIdx) => {
-        const otJob = jobs.find(j => j.id === o.jobId) || recurringJobs.find(j => j.id === o.jobId) || tasks.find(j => j.id === o.jobId);
+        const otJob = jobs.find(j => j.id === o.jobId) || recurringJobs.find(j => j.id === o.jobId);
         const otProp = propLabel((otJob ? otJob.property : '') || o.property || '', 35);
         const otDesc = ((otJob ? (otJob.description || '') : '') || o.description || '').slice(0, 200);
         const statusStyle = o.status === 'pending' ? 'background:#fff3cd;color:#856404;' : 'background:#fdecea;color:var(--color-text-error);';
@@ -2372,7 +2383,7 @@ function renderOfficeEntries() {
       }
 
       return dayEntries.map((e, idx) => {
-        const job = jobs.find(j => j.id === e.jobId) || recurringJobs.find(j => j.id === e.jobId) || tasks.find(j => j.id === e.jobId); const isRJ = recurringJobs.some(j => j.id === e.jobId); const jobProperty = isRJ ? (e.property || (job ? job.property : '')) : (job ? job.property : (e.property || '')); const jobDescription = (job ? (job.description || '') : (e.description || '')).slice(0, 200);
+        const job = jobs.find(j => j.id === e.jobId) || recurringJobs.find(j => j.id === e.jobId); const isRJ = recurringJobs.some(j => j.id === e.jobId); const jobProperty = isRJ ? (e.property || (job ? job.property : '')) : (job ? job.property : (e.property || '')); const jobDescription = (job ? (job.description || '') : (e.description || '')).slice(0, 200);
         const amended = e.amendments && e.amendments.length > 0;
         const lastAmend = amended ? e.amendments[e.amendments.length - 1] : null;
         const isPending = syncQueue.some(q => q.payload?.entry?.id === e.id);
@@ -2508,7 +2519,7 @@ async function saveEditOfficeEntries(id) {
   // Recalculate property/description for the new job selection — previously
   // left untouched, so switching e.g. a WO entry to an absence type silently
   // kept showing the old WO's property/description.
-  const newJobObj_oe = jobs.find(j => j.id === newJob) || tasks.find(j => j.id === newJob);
+  const newJobObj_oe = jobs.find(j => j.id === newJob);
   const newRecurringObj_oe = recurringJobs.find(j => j.id === newJob);
   const newAbsTypeObj_oe = absenceTypes.find(a => a.id === newJob);
   if (newJobObj_oe) {
@@ -2530,71 +2541,6 @@ async function saveEditOfficeEntries(id) {
   const { synced } = await queueOrSend('updateEntry', { entry: { ...entry, amendments: amendmentsToString(entry.amendments) } });
   if (synced) setSyncStatus('office', 'synced', 'Saved to Sheets');
 }
-
-// ── Create Job (replaces Arthur sync) ────────────────────────────
-let cjSelectedWorkers = [];
-
-function toggleCreateJobForm() {
-  const form = document.getElementById('create-job-form');
-  const btn  = document.getElementById('cj-toggle-btn');
-  const open = form.style.display === 'none';
-  form.style.display = open ? 'block' : 'none';
-  btn.textContent = open ? '✕ Cancel' : '+ Create Job';
-  if (open) {
-    const propSel = document.getElementById('cj-property');
-    propSel.innerHTML = '<option value="">Select property...</option>' +
-      rjProperties.map(p => `<option value="${p.replace(/"/g,'&quot;')}">${p}</option>`).join('');
-    if (!propSel._ssAttached) { ssAttach('cj-property', 'Search properties...'); } else { ssRefresh('cj-property'); }
-
-    const chips = document.getElementById('cj-worker-chips');
-    const active = workers.filter(w => w.active !== false && w.active !== 'FALSE');
-    cjSelectedWorkers = [];
-    chips.innerHTML = active.map(w =>
-      `<span class="chip" data-name="${w.name}" onclick="toggleCjWorker(this)" style="padding:6px 11px;border:1px solid var(--color-border-secondary);border-radius:16px;font-size:12.5px;cursor:pointer;">${w.name}</span>`
-    ).join('');
-  }
-}
-
-function toggleCjWorker(el) {
-  const name = el.getAttribute('data-name');
-  const i = cjSelectedWorkers.indexOf(name);
-  if (i === -1) {
-    cjSelectedWorkers.push(name);
-    el.style.background = 'var(--color-accent-primary)';
-    el.style.color = '#fff';
-    el.style.borderColor = 'var(--color-accent-primary)';
-  } else {
-    cjSelectedWorkers.splice(i, 1);
-    el.style.background = '';
-    el.style.color = '';
-    el.style.borderColor = '';
-  }
-}
-
-async function submitCreateJob() {
-  const property = document.getElementById('cj-property').value;
-  const description = document.getElementById('cj-description').value.trim();
-  if (!property) { alert('Please select a property.'); return; }
-
-  const job = { property, description, assignedTo: cjSelectedWorkers, performedBy: currentOfficeUser || 'Office' };
-  setSyncStatus('office', 'pending', 'Creating job...');
-  const { synced, result } = await queueOrSend('createJob', { job });
-
-  document.getElementById('cj-description').value = '';
-  cjSelectedWorkers = [];
-  toggleCreateJobForm();
-
-  if (synced && result && result.success) {
-    setSyncStatus('office', 'synced', 'Job ' + result.id + ' created');
-    await refreshOffice();
-  } else if (synced && result && result.error) {
-    setSyncStatus('office', 'error', result.error);
-    alert(result.error);
-  } else {
-    setSyncStatus('office', 'pending', 'Job queued — will sync when online');
-  }
-}
-
 
 function renderRecurringJobsList() {
   const el = document.getElementById('recurring-job-list');
@@ -2729,6 +2675,8 @@ function toggleOfficeAddEntry() {
     const active = workers.filter(w => w.active !== false && w.active !== 'FALSE');
     workerSel.innerHTML = '<option value="">Select worker...</option>' + active.map(w => `<option value="${w.name}">${w.name}</option>`).join('');
     document.getElementById('oae-job').innerHTML = '<option value="">Select worker first...</option>';
+    const oaeCommentsLabel = document.getElementById('oae-comments-label');
+    if (oaeCommentsLabel) oaeCommentsLabel.textContent = 'Comments (optional)';
     // Close multi-add if it's open, so only one form shows at a time
     const maeForm = document.getElementById('office-multi-add-form');
     if (maeForm && maeForm.style.display !== 'none') toggleMultiAddEntry();
@@ -2745,7 +2693,6 @@ function toggleMultiAddEntry() {
     const today = new Date().toISOString().slice(0,10);
     document.getElementById('mae-date-from').value = today;
     document.getElementById('mae-date-to').value = today;
-    document.getElementById('mae-date-to').min = today;
     document.getElementById('mae-comments').value = '';
     const workerSel = document.getElementById('mae-worker');
     const active = workers.filter(w => w.active !== false && w.active !== 'FALSE');
@@ -2832,7 +2779,7 @@ async function submitMultiAddEntries() {
         isOvertime: false,
         performedBy: currentOfficeUser || 'Office'
       };
-      entries.push(entry);
+      entries.push(entry); trackRecentEntry(entry);
       localStorage.setItem('entries', JSON.stringify(entries));
       const { synced } = await queueOrSend('addEntry', { entry: { ...entry, amendments: amendmentsToString(entry.amendments) } });
       if (!synced) failedCount++;
@@ -2889,7 +2836,7 @@ async function submitOfficeEntry() {
   const isWeekend_oe = dayOfWeek_oe === 0 || dayOfWeek_oe === 6;
   const alreadyLogged = entries.filter(e => e.worker === worker && normaliseDate(e.date) === date).reduce((s, e) => s + parseFloat(e.hours || 0), 0);
   const isOvertime_oe = isWeekend_oe || (alreadyLogged + hours > 8);
-  const allJobs = [...jobs, ...recurringJobs, ...tasks];
+  const allJobs = [...jobs, ...recurringJobs];
   const jobObj = allJobs.find(j => j.id === jobId);
   const entry_oe = {
     id: uid(), worker, jobId, date, hours, comments,
@@ -2900,9 +2847,10 @@ async function submitOfficeEntry() {
     performedBy: currentOfficeUser || 'Office'
   };
   if (isRecurringJobId(jobId) && !rjPropGetValue('rj-prop-oae')) { alert('Please select a property for this recurring job.'); return; }
+  if (isRecurringJobId(jobId) && !comments.trim()) { alert('Please add a comment for this recurring job.'); return; }
   if (isOvertime_oe) { showOvertimeModal(entry_oe, isWeekend_oe); return; }
   const entry = entry_oe;
-  entries.push(entry);
+  entries.push(entry); trackRecentEntry(entry);
   localStorage.setItem('entries', JSON.stringify(entries));
 
   // Keep the form open and keep worker + date as-is — office staff are usually
@@ -3044,7 +2992,7 @@ function renderDailyView() {
     const entryRows = dayEntries.length === 0
       ? `<tr><td colspan="6" style="padding:10px 12px;font-size:12px;color:var(--color-text-secondary);width:100%;">No entries</td></tr>`
       : dayEntries.map((e, idx) => {
-          const job = jobs.find(j => j.id === e.jobId) || recurringJobs.find(j => j.id === e.jobId) || tasks.find(j => j.id === e.jobId);
+          const job = jobs.find(j => j.id === e.jobId) || recurringJobs.find(j => j.id === e.jobId);
           const isRJ = recurringJobs.some(j => j.id === e.jobId);
           const jobProperty = isRJ ? (e.property || (job ? job.property : '')) : (job ? job.property : (e.property || ''));
           const jobDescription = (job ? (job.description || '') : (e.description || '')).slice(0, 200);
@@ -3166,6 +3114,8 @@ function toggleDailyAddEntry() {
     const active = workers.filter(w => w.active !== false && w.active !== 'FALSE');
     workerSel.innerHTML = '<option value="">Select worker...</option>' + active.map(w => `<option value="${w.name}">${w.name}</option>`).join('');
     document.getElementById('dae-job').innerHTML = '<option value="">Select worker first...</option>';
+    const daeCommentsLabel = document.getElementById('dae-comments-label');
+    if (daeCommentsLabel) daeCommentsLabel.textContent = 'Comments (optional)';
   }
 }
 
@@ -3197,13 +3147,14 @@ async function submitDailyEntry() {
   const isWeekend_de = dayOfWeek_de === 0 || dayOfWeek_de === 6;
   const alreadyLogged = entries.filter(e => e.worker === worker && normaliseDate(e.date) === date).reduce((s, e) => s + parseFloat(e.hours || 0), 0);
   const isOvertime_de = isWeekend_de || (alreadyLogged + hours > 8);
-  const allJobs = [...jobs, ...recurringJobs, ...tasks, ...absenceTypes];
+  const allJobs = [...jobs, ...recurringJobs, ...absenceTypes];
   const jobObj = allJobs.find(j => j.id === jobId);
   const entry_de = { id: uid(), worker, jobId, date, hours, comments, amendments: [{ by: currentOfficeUser || 'Office', at: new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }), note: 'Created by Office' }], createdAt: new Date().toISOString(), property: isRecurringJobId(jobId) ? (rjPropGetValue('rj-prop-dae') || (jobObj ? jobObj.property : '')) : (jobObj ? jobObj.property : ''), description: jobObj ? (jobObj.description || jobObj.name || '') : '', performedBy: currentOfficeUser || 'Office' };
   if (isRecurringJobId(jobId) && !rjPropGetValue('rj-prop-dae')) { alert('Please select a property for this recurring job.'); return; }
+  if (isRecurringJobId(jobId) && !comments.trim()) { alert('Please add a comment for this recurring job.'); return; }
   if (isOvertime_de) { showOvertimeModal(entry_de, isWeekend_de); return; }
   const entry = entry_de;
-  entries.push(entry);
+  entries.push(entry); trackRecentEntry(entry);
   localStorage.setItem('entries', JSON.stringify(entries));
   document.getElementById('dae-worker').value = '';
   document.getElementById('dae-job').innerHTML = '<option value="">Select worker first...</option>';
@@ -3215,6 +3166,208 @@ async function submitDailyEntry() {
   renderDailyView();
   const { synced } = await queueOrSend('addEntry', { entry: { ...entry, amendments: amendmentsToString(entry.amendments) } });
   if (synced) setSyncStatus('office', 'synced', 'Entry saved to Sheets');
+}
+
+// ── Overtime rate suggestion (DEMO — rules confirmed pending HR meeting) ──
+// Weekdays: 07:00-08:00 and 17:00-21:00 = 1.5x; 21:00-07:00 = 2.0x
+// Sat/Sun: 07:00-21:00 = 1.5x; 21:00-07:00 = 2.0x
+// Bank holidays: 1.0x (already paid as salary — OT processed at normal rate)
+// Based on the OT request's start time only — a request spanning a rate
+// boundary (e.g. 8pm-10pm) is not split across two rates in this version.
+function getOTRateSuggestion(dateStr, startTime) {
+  if (BANK_HOLIDAYS.includes(dateStr)) return '1.0';
+  const d = new Date(dateStr + 'T12:00:00');
+  const dow = d.getDay();
+  const isWeekend = dow === 0 || dow === 6;
+  const parts = (startTime || '').split(':').map(Number);
+  const startMinutes = (parts[0] || 0) * 60 + (parts[1] || 0);
+  if (isWeekend) {
+    return (startMinutes >= 7 * 60 && startMinutes < 21 * 60) ? '1.5' : '2.0';
+  }
+  if ((startMinutes >= 7 * 60 && startMinutes < 8 * 60) || (startMinutes >= 17 * 60 && startMinutes < 21 * 60)) return '1.5';
+  if (startMinutes >= 21 * 60 || startMinutes < 7 * 60) return '2.0';
+  return '1.5'; // outside normal OT hours entirely - safe fallback, always manually adjustable
+}
+
+// ── OT rate segments — a single OT request can span multiple rate bands
+// (e.g. 06:00-08:00 crosses the weekday 2.0x/1.5x boundary at 07:00), so
+// each request is auto-split into independently-rated time segments the
+// first time it's viewed, and can be further split/merged manually.
+function otTimeToMinutes(t) {
+  const p = (t || '').split(':').map(Number);
+  return (p[0] || 0) * 60 + (p[1] || 0);
+}
+function otMinutesToTime(m) {
+  m = ((m % 1440) + 1440) % 1440;
+  return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+}
+function otSegDuration(seg) {
+  let s = otTimeToMinutes(seg.start), e = otTimeToMinutes(seg.end);
+  if (e <= s) e += 1440; // crosses midnight
+  return (e - s) / 60;
+}
+function getOTSegments(o) {
+  if (o.rateSegments) {
+    try {
+      const parsed = JSON.parse(o.rateSegments);
+      if (Array.isArray(parsed) && parsed.length) return parsed;
+    } catch (e) { /* fall through to auto-split */ }
+  }
+  const parts = (o.timeRange || '').split(/\s*[–-]\s*/);
+  const start = parts[0] ? parts[0].trim() : '';
+  const end = parts[1] ? parts[1].trim() : '';
+  if (!start || !end) {
+    const rate = o.rate || getOTRateSuggestion(normaliseDate(o.date), start);
+    return [{ start, end, rate, approved: (o.rateApproved === true || o.rateApproved === 'TRUE') }];
+  }
+  return autoSplitOTSegments(normaliseDate(o.date), start, end);
+}
+
+// Rate at an absolute minute offset from a base date (offset can exceed
+// 1440 / go negative to reach into the next or previous calendar day,
+// which matters for requests that cross midnight into a different
+// weekday/weekend/bank-holiday status).
+function otRateAtAbsoluteMinute(baseDateStr, absMin) {
+  const dayOffset = Math.floor(absMin / 1440);
+  const localMin = ((absMin % 1440) + 1440) % 1440;
+  const d = new Date(baseDateStr + 'T12:00:00');
+  d.setDate(d.getDate() + dayOffset);
+  const thisDateStr = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  return getOTRateSuggestion(thisDateStr, otMinutesToTime(localMin));
+}
+
+// Auto-split a raw start–end range into segments wherever the applicable
+// rate actually changes (weekday/weekend 07:00 and 21:00 boundaries, and
+// any weekday/weekend/bank-holiday transition at midnight).
+function autoSplitOTSegments(dateStr, start, end) {
+  let s = otTimeToMinutes(start);
+  let e = otTimeToMinutes(end);
+  if (e <= s) e += 1440;
+  const cutPoints = [];
+  let prevRate = otRateAtAbsoluteMinute(dateStr, s);
+  for (let t = s + 1; t < e; t++) {
+    const r = otRateAtAbsoluteMinute(dateStr, t);
+    if (r !== prevRate) { cutPoints.push(t); prevRate = r; }
+  }
+  const points = [s, ...cutPoints, e];
+  const segments = [];
+  for (let i = 0; i < points.length - 1; i++) {
+    segments.push({
+      start: otMinutesToTime(points[i]),
+      end: otMinutesToTime(points[i + 1]),
+      rate: otRateAtAbsoluteMinute(dateStr, points[i]),
+      approved: false
+    });
+  }
+  return segments;
+}
+
+// Valid boundary points for the manual carve-out picker — clock-aligned
+// interior points plus the segment's own start/end, so the user can pick
+// a sub-range that touches either edge (a plain 2-way split) or sits
+// fully inside it (a 3-way split: before / carved-out / after).
+function getOTSplitOptions(seg) {
+  let s = otTimeToMinutes(seg.start), e = otTimeToMinutes(seg.end);
+  if (e <= s) e += 1440;
+  let interior = [];
+  for (const step of [15, 10, 5, 1]) {
+    const opts = [];
+    let t = Math.ceil((s + 1) / step) * step;
+    for (; t < e; t += step) opts.push(t);
+    if (opts.length) { interior = opts; break; }
+  }
+  return [s, ...interior, e];
+}
+
+let otSplitUIState = {}; // { [otId]: segIdx currently showing the inline carve-out picker }
+
+function splitOTSegment(id, segIdx) {
+  otSplitUIState = { [id]: segIdx };
+  renderOvertimeTab();
+}
+
+function cancelSplitOTSegment(id) {
+  delete otSplitUIState[id];
+  renderOvertimeTab();
+}
+
+// Carve the selected start–end sub-range out of the segment. Whatever's
+// left before and/or after the carved-out piece becomes its own
+// segment(s) too, each with a rate guessed from getOTRateSuggestion.
+async function confirmSplitOTSegment(id, segIdx) {
+  const startSel = document.getElementById(`ot-split-a-${id}-${segIdx}`);
+  const endSel = document.getElementById(`ot-split-b-${id}-${segIdx}`);
+  const rangeStart = startSel ? startSel.value : '';
+  const rangeEnd = endSel ? endSel.value : '';
+  if (!rangeStart || !rangeEnd) { alert('Please choose both a start and end time.'); return; }
+
+  const o = overtimeRequests.find(r => r.id === id);
+  if (!o) return;
+  const segments = getOTSegments(o);
+  const seg = segments[segIdx];
+
+  let segStart = otTimeToMinutes(seg.start), segEnd = otTimeToMinutes(seg.end);
+  if (segEnd <= segStart) segEnd += 1440;
+  let rStart = otTimeToMinutes(rangeStart);
+  if (rStart < segStart) rStart += 1440;
+  let rEnd = otTimeToMinutes(rangeEnd);
+  if (rEnd < segStart) rEnd += 1440;
+  if (rEnd <= rStart) rEnd += 1440;
+
+  if (rStart < segStart || rEnd > segEnd || rStart >= rEnd) {
+    alert('The selected range must fall within this segment (' + seg.start + ' – ' + seg.end + ') with the end after the start.');
+    return;
+  }
+
+  const dateStr = normaliseDate(o.date);
+  const newPieces = [];
+  if (rStart > segStart) {
+    newPieces.push({ start: otMinutesToTime(segStart), end: otMinutesToTime(rStart), rate: otRateAtAbsoluteMinute(dateStr, segStart), approved: false });
+  }
+  newPieces.push({ start: otMinutesToTime(rStart), end: otMinutesToTime(rEnd), rate: otRateAtAbsoluteMinute(dateStr, rStart), approved: false });
+  if (rEnd < segEnd) {
+    newPieces.push({ start: otMinutesToTime(rEnd), end: otMinutesToTime(segEnd), rate: otRateAtAbsoluteMinute(dateStr, rEnd), approved: false });
+  }
+
+  segments.splice(segIdx, 1, ...newPieces);
+  delete otSplitUIState[id];
+  await saveOTSegmentsToBackend(o, segments);
+}
+
+async function deleteOTSegment(id, segIdx) {
+  if (segIdx === 0) return; // nothing above the first segment to merge into
+  const o = overtimeRequests.find(r => r.id === id);
+  if (!o) return;
+  const segments = getOTSegments(o);
+  if (segments.length <= 1) return;
+  segments[segIdx - 1].end = segments[segIdx].end;
+  segments.splice(segIdx, 1);
+  await saveOTSegmentsToBackend(o, segments);
+}
+
+async function updateOTSegmentRate(id, segIdx, rate) {
+  const o = overtimeRequests.find(r => r.id === id);
+  if (!o) return;
+  const segments = getOTSegments(o);
+  segments[segIdx].rate = rate;
+  await saveOTSegmentsToBackend(o, segments);
+}
+
+async function toggleOTSegmentLock(id, segIdx, lock) {
+  const o = overtimeRequests.find(r => r.id === id);
+  if (!o) return;
+  const segments = getOTSegments(o);
+  segments[segIdx].approved = lock;
+  segments[segIdx].approvedBy = lock ? (currentOfficeUser || 'Office') : '';
+  segments[segIdx].approvedAt = lock ? new Date().toISOString() : '';
+  await saveOTSegmentsToBackend(o, segments);
+}
+
+async function saveOTSegmentsToBackend(o, segments) {
+  o.rateSegments = JSON.stringify(segments);
+  localStorage.setItem('overtimeRequests', JSON.stringify(overtimeRequests));
+  renderOvertimeTab();
+  await api('saveOTRate', { id: o.id, rateSegments: o.rateSegments, performedBy: currentOfficeUser || 'Office' });
 }
 
 function renderOvertimeTab() {
@@ -3242,33 +3395,99 @@ function renderOvertimeTab() {
   const approved = overtimeRequests.filter(o => o.status === 'approved').filter(inRange).sort(byDateAsc);
   const declined = overtimeRequests.filter(o => o.status === 'declined').filter(inRange).sort(byDateAsc);
 
-  function otRow(o, showActions) {
+  const isAdminView = (currentOfficeUser || '').trim().toLowerCase() === 'admin';
+
+  function otDayLabel(dateStr) {
+    const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const d = new Date(normaliseDate(dateStr) + 'T12:00:00');
+    return days[d.getDay()];
+  }
+
+  function otEntryCard(o, showActions) {
     const job = jobs.find(j => j.id === o.jobId) || recurringJobs.find(j => j.id === o.jobId);
     const isRJ = recurringJobs.some(j => j.id === o.jobId);
     const property = isRJ ? (o.property || (job ? job.property : '')) : ((job ? job.property : '') || o.property || '');
     const desc     = (job ? (job.description || '') : '') || o.description || '';
-    return `<tr>
-      <td style="padding:6px 10px;font-size:12px;font-weight:500;">${o.worker}</td>
-      <td style="padding:6px 10px;font-size:12px;">${fmtShortDate(o.date)}</td>
-      <td style="padding:6px 10px;font-size:12px;font-weight:600;">${o.jobId}</td>
-      <td style="padding:6px 10px;font-size:12px;color:var(--color-text-secondary);">${propLabel(property, 35)}</td>
-      <td style="padding:6px 10px;font-size:12px;color:var(--color-text-secondary);">${desc}</td>
-      <td style="padding:6px 10px;font-size:12px;font-weight:500;text-align:center;">${o.hours}h</td>
-      <td style="padding:6px 10px;font-size:12px;font-style:italic;">${o.timeRange || ''}</td>
-      <td style="padding:6px 10px;font-size:11px;color:var(--color-text-secondary);">${o.submittedAt ? new Date(o.submittedAt).toLocaleString('en-GB',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : ''}</td>
-      ${showActions === 'pending' ? `
-      <td style="padding:4px 8px;min-width:180px;">
+    const segments = getOTSegments(o);
+    const splittingIdx = otSplitUIState[o.id];
+    const rowspan = segments.length;
+
+    const sharedCells = `
+      <td rowspan="${rowspan}" style="padding:6px 10px;font-size:12px;font-weight:500;vertical-align:top;">${o.worker}</td>
+      <td rowspan="${rowspan}" style="padding:6px 10px;font-size:12px;vertical-align:top;">${otDayLabel(o.date)} ${fmtShortDate(o.date)}</td>
+      <td rowspan="${rowspan}" style="padding:6px 10px;font-size:12px;font-weight:600;vertical-align:top;">${o.jobId}</td>
+      <td rowspan="${rowspan}" style="padding:6px 10px;font-size:12px;color:var(--color-text-secondary);vertical-align:top;">${propLabel(property, 35)}</td>
+      <td rowspan="${rowspan}" style="padding:6px 10px;font-size:12px;color:var(--color-text-secondary);vertical-align:top;">${desc}</td>
+      <td rowspan="${rowspan}" style="padding:6px 10px;font-size:12px;font-weight:500;text-align:center;vertical-align:top;">${o.hours}h</td>`;
+
+    const submittedCell = `<td rowspan="${rowspan}" style="padding:6px 10px;font-size:11px;color:var(--color-text-secondary);vertical-align:top;">${o.submittedAt ? new Date(o.submittedAt).toLocaleString('en-GB',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : ''}</td>`;
+
+    const actionCell = showActions === 'pending' ? `
+      <td rowspan="${rowspan}" style="padding:4px 8px;min-width:180px;vertical-align:top;">
         <textarea id="ot-comment-${o.id}" placeholder="Reason (optional)" style="width:100%;font-size:11px;padding:4px 6px;border:0.5px solid var(--color-border-secondary);border-radius:var(--border-radius-sm);resize:vertical;min-height:48px;margin-bottom:6px;"></textarea>
         <div style="white-space:nowrap;">
           <button id="ot-approve-${o.id}" class="btn btn-sm" style="background:var(--color-background-success);color:var(--color-text-success);border-color:var(--color-border-success);margin-right:4px;" onclick="officeReviewOvertime('${o.id}','approved')">Approve</button>
           <button id="ot-decline-${o.id}" class="btn btn-sm" style="color:var(--color-text-error);border-color:var(--color-border-error);" onclick="officeReviewOvertime('${o.id}','declined')">Decline</button>
         </div>
       </td>` : `
-      <td style="padding:6px 10px;font-size:11px;color:var(--color-text-secondary);">
+      <td rowspan="${rowspan}" style="padding:6px 10px;font-size:11px;color:var(--color-text-secondary);vertical-align:top;">
         <div style="font-weight:500;">${o.reviewedBy || ''} · ${o.reviewedAt ? new Date(o.reviewedAt).toLocaleString('en-GB',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}) : ''}</div>
         ${o.reviewComment ? `<div style="margin-top:3px;font-style:italic;">${o.reviewComment}</div>` : ''}
-      </td>`}
-    </tr>`;
+      </td>`;
+
+    const segRows = segments.map((seg, segIdx) => {
+      const isFirst = segIdx === 0;
+      const isLast = segIdx === segments.length - 1;
+      const dur = otSegDuration(seg);
+      const durLabel = (Math.round(dur * 100) / 100).toString();
+      const locked = seg.approved === true || seg.approved === 'TRUE';
+      const isSplitting = splittingIdx === segIdx;
+
+      const splitOpts = isSplitting ? getOTSplitOptions(seg) : [];
+      const defStartIdx = splitOpts.length ? Math.floor(splitOpts.length / 3) : 0;
+      const defEndIdx = splitOpts.length ? Math.max(defStartIdx + 1, Math.floor(splitOpts.length * 2 / 3)) : 0;
+      const optHtml = selVal => splitOpts.map(m => { const t = otMinutesToTime(m); return `<option value="${t}" ${t === selVal ? 'selected' : ''}>${t}</option>`; }).join('');
+
+
+      const rateCells = `
+        <td style="padding:6px 10px;font-size:12px;vertical-align:top;">
+          <select id="ot-rate-${o.id}-${segIdx}" ${locked ? 'disabled' : ''} onchange="updateOTSegmentRate('${o.id}', ${segIdx}, this.value)" style="font-size:12px;padding:2px 4px;width:64px;">
+                <option value="1.0" ${seg.rate === '1.0' ? 'selected' : ''}>1.0x</option>
+                <option value="1.5" ${seg.rate === '1.5' ? 'selected' : ''}>1.5x</option>
+                <option value="2.0" ${seg.rate === '2.0' ? 'selected' : ''}>2.0x</option>
+              </select>
+        </td>
+        <td style="padding:6px 10px;font-size:12px;text-align:center;white-space:nowrap;vertical-align:top;">
+          ${locked
+            ? `<span class="badge badge-done" style="margin-right:4px;" title="${seg.approvedBy ? 'Rate approved by ' + seg.approvedBy : ''}">✓ Locked</span>${isAdminView ? `<button class="btn btn-sm" style="font-size:10px;padding:2px 6px;" onclick="toggleOTSegmentLock('${o.id}', ${segIdx}, false)">Unlock</button>` : ''}`
+            : `<button class="btn btn-sm" style="font-size:11px;" onclick="toggleOTSegmentLock('${o.id}', ${segIdx}, true)">Yes</button>`}
+        </td>
+        <td style="padding:6px 10px;font-size:11px;white-space:nowrap;vertical-align:top;">
+          ${isSplitting ? `
+            <div style="display:flex;align-items:center;gap:4px;flex-wrap:wrap;">
+              <span style="color:var(--color-text-secondary);">from</span>
+              <select id="ot-split-a-${o.id}-${segIdx}" style="font-size:10px;padding:2px 4px;">${optHtml(otMinutesToTime(splitOpts[defStartIdx]))}</select>
+              <span style="color:var(--color-text-secondary);">to</span>
+              <select id="ot-split-b-${o.id}-${segIdx}" style="font-size:10px;padding:2px 4px;">${optHtml(otMinutesToTime(splitOpts[defEndIdx]))}</select>
+              <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;" onclick="confirmSplitOTSegment('${o.id}', ${segIdx})">✓</button>
+              <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;" onclick="cancelSplitOTSegment('${o.id}')">✕</button>
+            </div>
+          ` : `
+            <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;" onclick="splitOTSegment('${o.id}', ${segIdx})">Split ↓</button>
+            ${segments.length > 1 ? `<button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--color-text-error);border-color:var(--color-border-error);" onclick="deleteOTSegment('${o.id}', ${segIdx})">Merge ↑</button>` : ''}
+          `}
+        </td>`;
+
+      return `<tr style="${!isFirst ? 'border-top:0.5px dashed var(--color-border-tertiary);' : ''}${isLast ? 'border-bottom:1px solid var(--color-border-secondary);' : ''}">
+        ${isFirst ? sharedCells : ''}
+        <td style="padding:6px 10px;font-size:12px;font-style:italic;vertical-align:top;">${seg.start} – ${seg.end} <span style="color:var(--color-text-secondary);font-style:normal;">(${durLabel}h)</span></td>
+        ${rateCells}
+        ${isFirst ? submittedCell : ''}
+        ${isFirst ? actionCell : ''}
+      </tr>`;
+    }).join('');
+
+    return segRows;
   }
 
   function otTable(list, showActions) {
@@ -3282,10 +3501,11 @@ function renderOvertimeTab() {
         <th style="padding:6px 10px;font-size:11px;text-align:left;">Description</th>
         <th style="padding:6px 10px;font-size:11px;text-align:center;">Hrs</th>
         <th style="padding:6px 10px;font-size:11px;text-align:left;">Time Range</th>
+        <th style="padding:6px 10px;font-size:11px;text-align:left;">Rate</th><th style="padding:6px 10px;font-size:11px;text-align:center;">Approved Rate</th><th style="padding:6px 10px;font-size:11px;text-align:left;">Adjust</th>
         <th style="padding:6px 10px;font-size:11px;text-align:left;">Submitted</th>
         <th style="padding:6px 10px;font-size:11px;text-align:left;">${showActions === 'pending' ? 'Reason / Action' : 'Reviewed by / Comment'}</th>
       </tr></thead>
-      <tbody>${list.map(o => otRow(o, showActions)).join('')}</tbody>
+      <tbody>${list.map(o => otEntryCard(o, showActions)).join('')}</tbody>
     </table>`;
   }
 
@@ -3445,7 +3665,7 @@ async function toggleWorker(name, currentlyActive) {
   if (synced) setSyncStatus('office', 'synced', 'Worker updated in Sheets');
 }
 
-function exportXLSX() {
+async function exportXLSX() {
   const workerFilter = document.getElementById('oe-worker-filter')?.value || '';
   const fromVal      = document.getElementById('oe-date-from')?.value || '';
   const toVal        = document.getElementById('oe-date-to')?.value || '';
@@ -3460,126 +3680,164 @@ function exportXLSX() {
 
   if (!filtered.length) { alert('No entries match the current filters.'); return; }
 
-  // Build sorted unique date list
   const dateSet = new Set(filtered.map(e => normaliseDate(e.date)));
   const from = fromVal || [...dateSet].sort()[0];
   const to   = toVal   || [...dateSet].sort().pop();
-  const allDates = [];
-  const cur = new Date(from + 'T12:00:00');
-  const end = new Date(to   + 'T12:00:00');
-  while (cur <= end) {
-    const ds  = cur.toISOString().slice(0,10);
-    const dow = cur.getDay();
-    if (dow !== 0 && dow !== 6 || dateSet.has(ds)) allDates.push(ds);
-    cur.setDate(cur.getDate() + 1);
-  }
 
-  // Group by worker
-  const byWorker = {};
-  for (const e of filtered) {
-    (byWorker[e.worker] = byWorker[e.worker] || []).push(e);
-  }
-
-  const wb   = XLSX.utils.book_new();
-  const rows = [];
-
+  const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const dateLabel = ds => {
     const d = new Date(ds + 'T12:00:00');
-    return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()] + '\n' + d.getDate() + ' ' +
-           ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()];
+    return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()] + '\n' + d.getDate() + ' ' + MONTHS[d.getMonth()];
   };
 
-  for (const [workerName, wEntries] of Object.entries(byWorker).sort()) {
-    // Name row
-    rows.push([`NAME:  ${workerName}`]);
-    // Header row
-    rows.push(['W/O Number', 'Property Name/Number', 'Description', ...allDates.map(dateLabel), 'Comments', '', 'Start', 'Finish', 'Hrs']);
-
-    // Group by jobId preserving order of first appearance
-    const woOrder = [], woMap = {};
-    for (const e of wEntries) {
-      const id = (e.jobId || '').trim();
-      if (!woMap[id]) { woMap[id] = []; woOrder.push(id); }
-      woMap[id].push(e);
+  // Split the overall range into Mon–Sun weeks, one tab per week
+  function mondayOf(ds) {
+    const d = new Date(ds + 'T12:00:00');
+    const dow = d.getDay();
+    d.setDate(d.getDate() + (dow === 0 ? -6 : 1 - dow));
+    return d.toISOString().slice(0, 10);
+  }
+  const weeks = [];
+  let cursor = mondayOf(from);
+  const endBound = new Date(to + 'T12:00:00');
+  while (new Date(cursor + 'T12:00:00') <= endBound) {
+    const weekDates = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(cursor + 'T12:00:00');
+      d.setDate(d.getDate() + i);
+      const ds = d.toISOString().slice(0, 10);
+      if (ds >= from && ds <= to) weekDates.push(ds);
     }
-
-    const totals = {};
-    let grandTotal = 0;
-
-    for (const jobId of woOrder) {
-      const jobEntries = woMap[jobId];
-      const job = jobs.find(j => j.id === jobId) || recurringJobs.find(j => j.id === jobId);
-      const isRJ = recurringJobs.some(j => j.id === jobId);
-      const prop = isRJ ? (jobEntries[0].property || (job ? job.property : '')) : ((job ? job.property : '') || jobEntries[0].property || '');
-      const desc = (job ? (job.description || '') : '') || jobEntries[0].description || '';
-
-      // Separate regular and OT entries
-      const regularEntries = jobEntries.filter(e => !e.isOvertime);
-      const otEntries      = jobEntries.filter(e => e.isOvertime);
-
-      // Regular row — accumulate hours per date
-      const hoursByDate    = {};
-      const commentsByDate = {};
-
-      for (const e of regularEntries) {
-        const ds  = normaliseDate(e.date);
-        const hrs = parseFloat(e.hours) || 0;
-        hoursByDate[ds] = (hoursByDate[ds] || 0) + hrs;
-        totals[ds]      = (totals[ds] || 0) + hrs;
-        grandTotal     += hrs;
-        if (e.comments) commentsByDate[ds] = (commentsByDate[ds] ? commentsByDate[ds] + '; ' : '') + e.comments;
-      }
-
-      const dateCells = allDates.map(d => hoursByDate[d] || null);
-      const comments  = Object.values(commentsByDate).filter(Boolean).join('; ');
-
-      rows.push([jobId, prop, desc, ...dateCells, comments, '', '', '', null]);
-
-      // OT rows — one row per OT entry, W/O/Property/Description repeated
-      for (const e of otEntries) {
-        const ds  = normaliseDate(e.date);
-        const hrs = parseFloat(e.hours) || 0;
-        totals[ds]  = (totals[ds] || 0) + hrs;
-        grandTotal += hrs;
-        const otDateCells = allDates.map(d => d === ds ? (hrs || null) : null);
-        rows.push([
-          jobId, prop, desc,
-          ...otDateCells,
-          e.comments || '',
-          '',
-          e.overtimeStart || '',
-          e.overtimeEnd   || '',
-          hrs || null
-        ]);
-      }
-    }
-
-    // Totals row — date column totals only, Hrs column is for OT only so leave blank
-    rows.push(['Total', '', '', ...allDates.map(d => totals[d] || null), '', '', '', '', null]);
-    // Gap
-    rows.push([]);
-    rows.push([]);
+    if (weekDates.length) weeks.push(weekDates);
+    const next = new Date(cursor + 'T12:00:00');
+    next.setDate(next.getDate() + 7);
+    cursor = next.toISOString().slice(0, 10);
   }
 
-  const ws = XLSX.utils.aoa_to_sheet(rows);
+  const HEADER_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2C2C2C' } };
+  const HEADER_FONT = { bold: true, color: { argb: 'FFFFFFFF' }, size: 11 };
+  const NAME_FILL   = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8E8E8' } };
+  const TOTAL_FILL  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF3F3F3' } };
+  const THIN = { style: 'thin', color: { argb: 'FFCCCCCC' } };
+  const THIN_BORDER = { top: THIN, bottom: THIN, left: THIN, right: THIN };
 
-  // Column widths
-  const colWidths = [
-    { wch: 16 }, { wch: 40 }, { wch: 45 },
-    ...allDates.map(() => ({ wch: 9 })),
-    { wch: 26 }, { wch: 4 }, { wch: 9 }, { wch: 9 }, { wch: 9 }
-  ];
-  ws['!cols'] = colWidths;
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'Timesheet App';
+  workbook.created = new Date();
 
-  XLSX.utils.book_append_sheet(wb, ws, 'Timesheets');
+  const usedSheetNames = new Set();
 
-  const workerPart = workerFilter ? '_' + workerFilter.replace(/ /g,'_') : '_All_Workers';
+  for (const weekDates of weeks) {
+    const startD = new Date(weekDates[0] + 'T12:00:00');
+    const endD   = new Date(weekDates[weekDates.length - 1] + 'T12:00:00');
+    let sheetName = `${startD.getDate()}-${endD.getDate()} ${MONTHS[endD.getMonth()]} ${String(endD.getFullYear()).slice(2)}`;
+    sheetName = sheetName.replace(/[\\\/\?\*\[\]:]/g, '');
+    if (usedSheetNames.has(sheetName)) sheetName = (sheetName + ' ' + weekDates[0]).slice(0, 31);
+    usedSheetNames.add(sheetName);
+
+    const sheet = workbook.addWorksheet(sheetName.slice(0, 31));
+    const numDateCols = weekDates.length;
+
+    sheet.columns = [
+      { width: 16 }, { width: 36 }, { width: 42 },
+      ...weekDates.map(() => ({ width: 9 })),
+      { width: 26 }, { width: 3 }, { width: 9 }, { width: 9 }, { width: 9 }
+    ];
+
+    const weekEntries = filtered.filter(e => weekDates.includes(normaliseDate(e.date)));
+    const byWorker = {};
+    for (const e of weekEntries) (byWorker[e.worker] = byWorker[e.worker] || []).push(e);
+
+    if (!Object.keys(byWorker).length) {
+      sheet.addRow(['No entries this week.']);
+      continue;
+    }
+
+    for (const [workerName, wEntries] of Object.entries(byWorker).sort()) {
+      const nameRow = sheet.addRow([`NAME:  ${workerName}`]);
+      nameRow.font = { bold: true, size: 12 };
+      nameRow.eachCell({ includeEmpty: true }, cell => { cell.fill = NAME_FILL; });
+
+      const headerRow = sheet.addRow(['W/O Number', 'Property Name/Number', 'Description', ...weekDates.map(dateLabel), 'Comments', '', 'Start', 'Finish', 'Hrs']);
+      headerRow.height = 30;
+      headerRow.eachCell({ includeEmpty: true }, cell => {
+        cell.font = HEADER_FONT;
+        cell.fill = HEADER_FILL;
+        cell.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
+        cell.border = THIN_BORDER;
+      });
+
+      const woOrder = [], woMap = {};
+      for (const e of wEntries) {
+        const id = (e.jobId || '').trim();
+        if (!woMap[id]) { woMap[id] = []; woOrder.push(id); }
+        woMap[id].push(e);
+      }
+
+      const totals = {};
+
+      for (const jobId of woOrder) {
+        const jobEntries = woMap[jobId];
+        const job = jobs.find(j => j.id === jobId) || recurringJobs.find(j => j.id === jobId);
+        const isRJ = recurringJobs.some(j => j.id === jobId);
+        const prop = isRJ ? (jobEntries[0].property || (job ? job.property : '')) : ((job ? job.property : '') || jobEntries[0].property || '');
+        const desc = (job ? (job.description || '') : '') || jobEntries[0].description || '';
+
+        const regularEntries = jobEntries.filter(e => !e.isOvertime);
+        const otEntries      = jobEntries.filter(e => e.isOvertime);
+
+        const hoursByDate = {}, commentsByDate = {};
+        for (const e of regularEntries) {
+          const ds  = normaliseDate(e.date);
+          const hrs = parseFloat(e.hours) || 0;
+          hoursByDate[ds] = (hoursByDate[ds] || 0) + hrs;
+          totals[ds] = (totals[ds] || 0) + hrs;
+          if (e.comments) commentsByDate[ds] = (commentsByDate[ds] ? commentsByDate[ds] + '; ' : '') + e.comments;
+        }
+
+        const dateCells = weekDates.map(d => hoursByDate[d] || null);
+        const comments  = Object.values(commentsByDate).filter(Boolean).join('; ');
+
+        const row = sheet.addRow([jobId, prop, desc, ...dateCells, comments, '', '', '', null]);
+        row.eachCell({ includeEmpty: true }, cell => { cell.border = THIN_BORDER; });
+        row.getCell(1).font = { bold: true };
+        for (let c = 4; c < 4 + numDateCols; c++) row.getCell(c).numFmt = '0.##';
+
+        for (const e of otEntries) {
+          const ds  = normaliseDate(e.date);
+          const hrs = parseFloat(e.hours) || 0;
+          totals[ds] = (totals[ds] || 0) + hrs;
+          const otDateCells = weekDates.map(d => d === ds ? (hrs || null) : null);
+          const otRow = sheet.addRow([jobId, prop, desc, ...otDateCells, e.comments || '', '', e.overtimeStart || '', e.overtimeEnd || '', hrs || null]);
+          otRow.eachCell({ includeEmpty: true }, cell => { cell.border = THIN_BORDER; cell.font = { italic: true, color: { argb: 'FF15803D' } }; });
+          for (let c = 4; c < 4 + numDateCols; c++) otRow.getCell(c).numFmt = '0.##';
+          otRow.getCell(4 + numDateCols + 5).numFmt = '0.##';
+        }
+      }
+
+      const totalRow = sheet.addRow(['Total', '', '', ...weekDates.map(d => totals[d] || null), '', '', '', '', null]);
+      totalRow.eachCell({ includeEmpty: true }, cell => { cell.fill = TOTAL_FILL; cell.font = { bold: true }; cell.border = THIN_BORDER; });
+      for (let c = 4; c < 4 + numDateCols; c++) totalRow.getCell(c).numFmt = '0.##';
+
+      sheet.addRow([]);
+    }
+  }
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const workerPart = workerFilter ? '_' + workerFilter.replace(/ /g, '_') : '_All_Workers';
   const fromPart   = fromVal || 'start';
   const toPart     = toVal   || 'today';
-  XLSX.writeFile(wb, `Timesheet${workerPart}_${fromPart}_to_${toPart}.xlsx`);
+  a.download = `Timesheet${workerPart}_${fromPart}_to_${toPart}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
 }
 
-function exportOvertimeXLSX() {
+async function exportOvertimeXLSX() {
   const fromVal = document.getElementById('ot-date-from')?.value || '';
   const toVal   = document.getElementById('ot-date-to')?.value || '';
   const inRange = o => {
@@ -3587,10 +3845,6 @@ function exportOvertimeXLSX() {
     return (!fromVal || d >= fromVal) && (!toVal || d <= toVal);
   };
 
-  // Export scope differs from the on-screen view: Pending is deliberately
-  // excluded here, since a pending request has no confirmed date/outcome yet
-  // and was previously slipping into exports regardless of the range picked.
-  // Only Approved/Declined, both respecting the active date range, are exported.
   const approved = overtimeRequests.filter(o => o.status === 'approved').filter(inRange);
   const declined = overtimeRequests.filter(o => o.status === 'declined').filter(inRange);
   const all = [...approved, ...declined];
@@ -3600,10 +3854,32 @@ function exportOvertimeXLSX() {
   const byDateAsc = (a, b) => normaliseDate(a.date).localeCompare(normaliseDate(b.date));
   all.sort(byDateAsc);
 
-  const wb   = XLSX.utils.book_new();
-  const rows = [];
+  const HEADER_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2C2C2C' } };
+  const HEADER_FONT = { bold: true, color: { argb: 'FFFFFFFF' } };
+  const THIN = { style: 'thin', color: { argb: 'FFCCCCCC' } };
+  const THIN_BORDER = { top: THIN, bottom: THIN, left: THIN, right: THIN };
+  const APPROVED_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8F5E9' } };
+  const DECLINED_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFDECEA' } };
 
-  rows.push(['Worker', 'Date', 'W/O Number', 'Property', 'Description', 'Hours', 'Time Range', 'Status', 'Submitted', 'Reviewed By', 'Reviewed At', 'Comment']);
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'Timesheet App';
+  workbook.created = new Date();
+  const sheet = workbook.addWorksheet('Overtime');
+
+  sheet.columns = [
+    { width: 16 }, { width: 12 }, { width: 14 }, { width: 30 }, { width: 35 },
+    { width: 8 },  { width: 16 }, { width: 10 }, { width: 10 }, { width: 10 }, { width: 20 }, { width: 16 }, { width: 20 }, { width: 30 }
+  ];
+
+  const headerRow = sheet.addRow(['Worker', 'Date', 'W/O Number', 'Property', 'Description', 'Hours', 'Time Range', 'Time 1', 'Time 2', 'Status', 'Submitted', 'Reviewed By', 'Reviewed At', 'Comment']);
+  headerRow.height = 20;
+  headerRow.eachCell({ includeEmpty: true }, cell => {
+    cell.font = HEADER_FONT;
+    cell.fill = HEADER_FILL;
+    cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    cell.border = THIN_BORDER;
+  });
+  sheet.views = [{ state: 'frozen', ySplit: 1 }];
 
   for (const o of all) {
     const job = jobs.find(j => j.id === o.jobId) || recurringJobs.find(j => j.id === o.jobId);
@@ -3614,26 +3890,163 @@ function exportOvertimeXLSX() {
     const reviewedFmt  = o.reviewedAt  ? new Date(o.reviewedAt).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
     const comment = o.status === 'pending' ? (o.workerComment || '') : (o.reviewComment || o.workerComment || '');
 
-    rows.push([
+    const timeParts = (o.timeRange || '').split(/\s*[–-]\s*/);
+    const time1 = timeParts[0] ? timeParts[0].trim() : '';
+    const time2 = timeParts[1] ? timeParts[1].trim() : '';
+
+    const row = sheet.addRow([
       o.worker, normaliseDate(o.date), o.jobId, property, description,
-      parseFloat(o.hours) || 0, o.timeRange || '', o.status,
+      parseFloat(o.hours) || 0, o.timeRange || '', time1, time2, o.status,
       submittedFmt, o.reviewedBy || '', reviewedFmt, comment
     ]);
+    const rowFill = o.status === 'approved' ? APPROVED_FILL : o.status === 'declined' ? DECLINED_FILL : null;
+    row.eachCell({ includeEmpty: true }, cell => {
+      cell.border = THIN_BORDER;
+      if (rowFill) cell.fill = rowFill;
+    });
   }
 
-  const ws = XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols'] = [
-    { wch: 16 }, { wch: 12 }, { wch: 14 }, { wch: 30 }, { wch: 35 },
-    { wch: 8 }, { wch: 16 }, { wch: 10 }, { wch: 20 }, { wch: 16 }, { wch: 20 }, { wch: 30 }
-  ];
-
-  XLSX.utils.book_append_sheet(wb, ws, 'Overtime');
-
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
   const fromPart = fromVal || 'start';
   const toPart   = toVal   || 'today';
-  XLSX.writeFile(wb, `Overtime_${fromPart}_to_${toPart}.xlsx`);
+  a.download = `Overtime_${fromPart}_to_${toPart}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
 }
 
+// Simple two-sheet overtime rate report:
+//  1) one row per rate segment — who, when, the job, the time range, the
+//     rate, and whether/by-whom the request was approved.
+//  2) a per-worker total of hours at each rate, for payroll reconciliation.
+async function exportOvertimeRateReport() {
+  const fromVal = document.getElementById('ot-date-from')?.value || '';
+  const toVal   = document.getElementById('ot-date-to')?.value || '';
+  const inRange = o => {
+    const d = normaliseDate(o.date);
+    return (!fromVal || d >= fromVal) && (!toVal || d <= toVal);
+  };
+
+  const approved = overtimeRequests.filter(o => o.status === 'approved').filter(inRange);
+  const declined = overtimeRequests.filter(o => o.status === 'declined').filter(inRange);
+  const all = [...approved, ...declined].sort((a, b) => normaliseDate(a.date).localeCompare(normaliseDate(b.date)));
+
+  if (!all.length) { alert('No overtime requests match the current filters.'); return; }
+
+  const rateLabel = seg => seg.rate ? seg.rate + 'x' : '';
+
+  const HEADER_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2C2C2C' } };
+  const HEADER_FONT = { bold: true, color: { argb: 'FFFFFFFF' } };
+  const THIN = { style: 'thin', color: { argb: 'FFCCCCCC' } };
+  const THIN_BORDER = { top: THIN, bottom: THIN, left: THIN, right: THIN };
+
+  const workbook = new ExcelJS.Workbook();
+  workbook.creator = 'Timesheet App';
+  workbook.created = new Date();
+
+  // Sheet 1 — one row per rate segment
+  const sheet = workbook.addWorksheet('Overtime');
+  sheet.columns = [
+    { width: 16 }, { width: 12 }, { width: 14 }, { width: 35 },
+    { width: 8 }, { width: 16 }, { width: 12 }, { width: 16 }, { width: 20 }, { width: 16 }, { width: 20 }
+  ];
+  const headerRow = sheet.addRow(['Worker', 'Date', 'W/O', 'Description', 'Hours', 'Time Range', 'Rate', 'Request Approved (Y/N)', 'Request Approved By', 'Rate Approved (Y/N)', 'Rate Approved By']);
+  headerRow.height = 20;
+  headerRow.eachCell({ includeEmpty: true }, cell => {
+    cell.font = HEADER_FONT;
+    cell.fill = HEADER_FILL;
+    cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    cell.border = THIN_BORDER;
+  });
+  sheet.views = [{ state: 'frozen', ySplit: 1 }];
+
+  const totals = {}; // { worker: { rate: totalHours } }
+
+  for (const o of all) {
+    const job = jobs.find(j => j.id === o.jobId) || recurringJobs.find(j => j.id === o.jobId);
+    const description = (job ? (job.description || '') : '') || o.description || '';
+    const segments = getOTSegments(o);
+    const isApproved = o.status === 'approved';
+
+    for (const seg of segments) {
+      const hours = Math.round(otSegDuration(seg) * 100) / 100;
+      const rate = rateLabel(seg);
+      const rateApproved = seg.approved === true || seg.approved === 'TRUE';
+      const row = sheet.addRow([
+        o.worker, normaliseDate(o.date), o.jobId, description,
+        hours, `${seg.start} – ${seg.end}`, rate,
+        isApproved ? 'Y' : 'N', o.reviewedBy || '',
+        rateApproved ? 'Y' : 'N', seg.approvedBy || ''
+      ]);
+      row.eachCell({ includeEmpty: true }, cell => { cell.border = THIN_BORDER; });
+
+      if (isApproved) {
+        totals[o.worker] = totals[o.worker] || {};
+        totals[o.worker][rate] = (totals[o.worker][rate] || 0) + hours;
+      }
+    }
+  }
+
+  // Sheet 2 — totals by worker + rate (approved OT only)
+  const totalsSheet = workbook.addWorksheet('Totals by Rate');
+  totalsSheet.columns = [{ width: 22 }, { width: 16 }, { width: 14 }];
+  const totalsHeaderRow = totalsSheet.addRow(['Name', 'Rate', 'Total Hours']);
+  totalsHeaderRow.height = 20;
+  totalsHeaderRow.eachCell({ includeEmpty: true }, cell => {
+    cell.font = HEADER_FONT;
+    cell.fill = HEADER_FILL;
+    cell.alignment = { vertical: 'middle', horizontal: 'center' };
+    cell.border = THIN_BORDER;
+  });
+  totalsSheet.views = [{ state: 'frozen', ySplit: 1 }];
+
+  const workerNames = Object.keys(totals).sort((a, b) => a.localeCompare(b));
+  for (const worker of workerNames) {
+    const rateKeys = Object.keys(totals[worker]).sort((a, b) => a.localeCompare(b));
+    for (const rate of rateKeys) {
+      const row = totalsSheet.addRow([worker, rate, Math.round(totals[worker][rate] * 100) / 100]);
+      row.eachCell({ includeEmpty: true }, cell => { cell.border = THIN_BORDER; });
+    }
+  }
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const fromPart = fromVal || 'start';
+  const toPart   = toVal   || 'today';
+  a.download = `Overtime_RateReport_${fromPart}_to_${toPart}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
+}
+
+
+// Finds the approved OT request an auto-created overtime entry came from —
+// reliable because approval creates the entry with the exact same worker,
+// job, date and time range as the request itself (see reviewOvertimeRequest
+// in Code.gs). Needed so the CSV can show each entry's actual rate
+// segments rather than just the overall start/end time it was approved for.
+function findOTRequestForEntry_(e) {
+  if (!e.isOvertime) return null;
+  const dateStr = normaliseDate(e.date);
+  return overtimeRequests.find(o => {
+    if (o.worker !== e.worker || o.jobId !== e.jobId || normaliseDate(o.date) !== dateStr) return false;
+    const parts = (o.timeRange || '').split(/\s*[–-]\s*/);
+    const oStart = parts[0] ? parts[0].trim() : '';
+    const oEnd   = parts[1] ? parts[1].trim() : '';
+    return oStart === e.overtimeStart && oEnd === e.overtimeEnd;
+  }) || null;
+}
+
+function csvRateLabel_(seg) {
+  return seg.rate ? seg.rate + 'x' : '';
+}
 
 function exportCSV() {
   const workerFilter = document.getElementById('oe-worker-filter')?.value || '';
@@ -3648,25 +4061,44 @@ function exportCSV() {
     return true;
   });
 
-  const headers = ['Worker', 'Job ID', 'Property', 'Description', 'Date', 'Hours', 'Is Overtime', 'Overtime Start', 'Overtime End', 'Comments', 'Reported Date', 'Assigned To', 'Amended', 'Amendment Count', 'Last Amended By', 'Last Amended At', 'Last Reason'];
-  const rows = filtered.map(e => {
-    const job = jobs.find(j => j.id === e.jobId) || recurringJobs.find(j => j.id === e.jobId) || tasks.find(j => j.id === e.jobId);
+  const headers = ['Worker', 'Job ID', 'Property', 'Description', 'Date', 'Hours', 'Is Overtime', 'Overtime Start', 'Overtime End', 'Rate Time Range', 'Rate', 'Comments', 'Reported Date', 'Assigned To', 'Amended', 'Amendment Count', 'Last Amended By', 'Last Amended At', 'Last Reason'];
+  const rows = filtered.flatMap(e => {
+    const job = jobs.find(j => j.id === e.jobId) || recurringJobs.find(j => j.id === e.jobId);
     const isRJ = recurringJobs.some(j => j.id === e.jobId);
     const last = e.amendments && e.amendments.length ? e.amendments[e.amendments.length - 1] : null;
-    return [
+
+    const baseFields = [
       e.worker, e.jobId,
       isRJ ? (e.property || (job ? job.property : '')) : (job ? job.property : (e.property || '')),
       (job ? (job.description || '') : (e.description || '')).slice(0, 200),
       e.date, e.hours,
       e.isOvertime ? 'Yes' : 'No',
       e.overtimeStart || '',
-      e.overtimeEnd || '',
+      e.overtimeEnd || ''
+    ];
+    const trailingFields = [
       e.comments || '',
       job ? (job.reportedDate || '') : '',
       job ? (job.assignedTo || '') : '',
       last ? 'Yes' : 'No', e.amendments ? e.amendments.length : 0,
       last ? last.by : '', last ? last.at : '', last ? last.note : ''
-    ].map(v => '"' + String(v).replace(/"/g, '""') + '"').join(',');
+    ];
+    const toCsvRow = fields => fields.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(',');
+
+    if (!e.isOvertime) {
+      return [toCsvRow([...baseFields, '', '', ...trailingFields])];
+    }
+
+    const otReq = findOTRequestForEntry_(e);
+    const segments = otReq
+      ? getOTSegments(otReq)
+      : [{ start: e.overtimeStart, end: e.overtimeEnd, rate: getOTRateSuggestion(normaliseDate(e.date), e.overtimeStart) }];
+
+    return segments.map(seg => {
+      const fields = [...baseFields];
+      fields[5] = Math.round(otSegDuration(seg) * 100) / 100;
+      return toCsvRow([...fields, seg.start + ' - ' + seg.end, csvRateLabel_(seg), ...trailingFields]);
+    });
   });
 
   const csv = [headers.join(','), ...rows].join('\n');
@@ -3966,24 +4398,44 @@ function rjPropCheck(prefix) {
   var sel = document.getElementById(selId);
   var id  = sel ? sel.value : '';
   var cid = 'rj-prop-' + prefix;
-  if (isRecurringJobId(id)) { rjPropShow(cid); }
-  else { rjPropHide(cid); }
+  var commentsLabelId = (prefix === 'worker' ? 'entry' : prefix) + '-comments-label';
+  var commentsLabel = document.getElementById(commentsLabelId);
+  if (isRecurringJobId(id)) {
+    rjPropShow(cid);
+    if (commentsLabel) commentsLabel.textContent = 'Comments (Required for Recurring Jobs)';
+  } else {
+    rjPropHide(cid);
+    if (commentsLabel) commentsLabel.textContent = 'Comments (optional)';
+  }
 }
 
-function syncDateRangeLimits() {
-  const fromEl = document.getElementById('oe-date-from');
-  const toEl   = document.getElementById('oe-date-to');
+// Chromium's native date input fires 'change' as soon as day+month+year all
+// have SOME value — including while the year is only partially typed, which
+// can briefly report a garbage year like "0002". Treating that as a real
+// date and auto-correcting against it was the actual cause of "To" resetting
+// to match "From" mid-typing. This guard only trusts values with a
+// plausible-looking year before applying any correction.
+function isPlausibleDate(iso) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return false;
+  const year = parseInt(iso.slice(0, 4), 10);
+  return year >= 1900 && year <= 2100;
+}
+
+function enforceDateOrder(fromId, toId) {
+  const fromEl = document.getElementById(fromId);
+  const toEl   = document.getElementById(toId);
   if (!fromEl || !toEl) return;
-  if (fromEl.value) toEl.min = fromEl.value;
-  // If From is moved past the current To, push To forward to match —
-  // From is never restricted from moving forward in the first place.
-  if (fromEl.value && toEl.value && fromEl.value > toEl.value) {
+  if (isPlausibleDate(fromEl.value) && isPlausibleDate(toEl.value) && fromEl.value > toEl.value) {
     toEl.value = fromEl.value;
   }
 }
 
-function renderWeekApprovalsTab() {
-  const el = document.getElementById('week-approvals-content');
+function syncDateRangeLimits() {
+  enforceDateOrder('oe-date-from', 'oe-date-to');
+}
+
+function renderWeekApprovalsTab(targetId) {
+  const el = document.getElementById(targetId || 'week-approvals-content');
   if (!el) return;
 
   const pending = weekSubmissions.filter(w => w.status === 'pending')
@@ -4033,7 +4485,7 @@ function renderWeekApprovalsTab() {
           </thead>
           <tbody>
             ${weekEntries.sort((a,b) => normaliseDate(a.date).localeCompare(normaliseDate(b.date))).map(e => {
-              const job = jobs.find(j => j.id === e.jobId) || recurringJobs.find(j => j.id === e.jobId) || tasks.find(j => j.id === e.jobId);
+              const job = jobs.find(j => j.id === e.jobId) || recurringJobs.find(j => j.id === e.jobId);
               const isRJ = recurringJobs.some(j => j.id === e.jobId);
               const jobProperty = isRJ ? (e.property || (job ? job.property : '')) : (job ? job.property : (e.property || ''));
               const jobDescription = (job ? (job.description || '') : (e.description || '')).slice(0, 200);
@@ -4077,7 +4529,7 @@ async function reviewWeek(id, status, btn) {
   buttonsInRow.forEach(b => b.disabled = true);
   if (btn) btn.textContent = status === 'approved' ? 'Approving…' : 'Declining…';
   try {
-    const reviewedBy = currentOfficeUser || 'Office';
+    const reviewedBy = currentOfficeUser || currentWorker || 'Office';
     const { synced } = await queueOrSend('reviewWeekSubmission', { id, status, reviewedBy });
     const sub = weekSubmissions.find(w => w.id === id);
     if (sub) {
@@ -4086,7 +4538,7 @@ async function reviewWeek(id, status, btn) {
       sub.reviewedBy = reviewedBy;
       localStorage.setItem('weekSubmissions', JSON.stringify(weekSubmissions));
     }
-    renderWeekApprovalsTab();
+    renderWeekApprovalsTab('week-approvals-content');
   } catch (err) {
     buttonsInRow.forEach(b => b.disabled = false);
     if (btn) btn.textContent = status === 'approved' ? 'Approve' : 'Decline';
