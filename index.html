@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-08 (Jobs list: labelled Cost Centre | Cost Code | Trade line) -->
+<!-- BUILD MARKER: NB-09 (Jobs list: labelled Location/Cost Centre + Description) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -137,7 +137,7 @@ textarea { height: 60px; resize: none; }
 .job-dates { font-size: 12px; color: var(--color-text-secondary); white-space: nowrap; }
 .job-dates strong { font-weight: 600; color: var(--color-text-primary); }
 .job-dates-sep { margin: 0 10px; color: var(--color-border-secondary, #ccc); }
-.job-codes { margin-top: 6px; font-size: 12px; color: var(--color-text-secondary); line-height: 1.6; }
+.job-codes { margin-top: 2px; font-size: 12px; color: var(--color-text-secondary); line-height: 1.6; }
 .job-codes strong { font-weight: 600; color: var(--color-text-primary); }
 .job-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .prio-P0 { background: #fde2e1; color: #a61b1b; }
@@ -2243,7 +2243,6 @@ function renderJobRow(j) {
   const assignedTxt = assigned.length ? assigned.map(n => workerInitials(n)).join(', ') : '';
   const codeLabel = (list, code) => { const d = codeDesc(list, code); return escWO(code) + (d ? ' – ' + escWO(d) : ''); };
   const codeParts = [];
-  if (j.costCentre) codeParts.push(`<span>Cost Centre:</span> <strong>${escWO(j.costCentre)}</strong>`);
   if (j.costCode)   codeParts.push(`<span>Cost Code:</span> <strong>${codeLabel(woCostCodes, j.costCode)}</strong>`);
   if (j.trade)      codeParts.push(`<span>Trade:</span> <strong>${codeLabel(woTrades, j.trade)}</strong>`);
   const codesLine = codeParts.length ? `<p class="job-codes">${codeParts.join('<span class="job-dates-sep">|</span>')}</p>` : '';
@@ -2256,7 +2255,7 @@ function renderJobRow(j) {
         <div>
           <span style="font-size:13px;font-weight:500;">${j.id}</span>
           ${j.priority ? `<span class="prio prio-${escWO(j.priority)}">${escWO(j.priority)}</span>` : ''}
-          <span class="text-muted" style="font-size:12px;margin-left:8px;">${escWO(propLabel(j.property, 50))}</span>
+          <span class="job-codes" style="margin-left:10px;"><span>Location:</span> <strong>${escWO(propLabel(j.property, 50))}</strong>${j.costCentre ? `<span class="job-dates-sep">|</span><span>Cost Centre:</span> <strong>${escWO(j.costCentre)}</strong>` : ''}</span>
         </div>
         <div class="job-actions">
           ${sched}
@@ -2265,7 +2264,7 @@ function renderJobRow(j) {
             : `<button class="btn btn-sm" onclick="toggleJobOpen('${escWO(j.id)}', true)">Reopen</button>`}
         </div>
       </div>
-      <p class="text-muted" style="margin-top:2px;font-size:12px;">${escWO(j.description || '')}</p>
+      ${j.description ? `<p class="job-codes" style="margin-top:4px;"><span>Description:</span> <strong>${escWO(j.description)}</strong></p>` : ''}
       ${codesLine}
       <p style="margin-top:2px;font-size:11px;color:var(--color-text-secondary);">${assignedTxt ? 'Assigned: ' + escWO(assignedTxt) : 'Unassigned'}${j.reportedBy ? ' · Reported by ' + escWO(j.reportedBy) : ''}${j.reportedDate ? ' · ' + fmtUKDate(j.reportedDate) : ''}${!j.open && (j.closedDate || j.closedBy) ? ' · Closed' + (j.closedDate ? ' ' + fmtUKDate(j.closedDate) : '') + (j.closedBy ? ' by ' + escWO(j.closedBy) : '') : ''}</p>
     </div>`;
