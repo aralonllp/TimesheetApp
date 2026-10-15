@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-23 (Schedule: WO list filtered to jobs assigned to the clicked worker) -->
+<!-- BUILD MARKER: NB-24 (WO Creation: end-date hint removed) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -556,7 +556,6 @@ textarea { height: 60px; resize: none; }
             <div>
               <label>Sched. end date</label>
               <input type="date" id="wo-sched-end">
-              <p class="wo-hint" id="wo-end-hint"></p>
             </div>
             <div>
               <label>Estimated hours <span style="color:var(--color-text-error)" id="wo-est-req">*</span></label>
@@ -5474,19 +5473,16 @@ function woPriorityChanged() {
   const code = document.getElementById('wo-priority').value;
   const startEl = document.getElementById('wo-sched-start');
   const endEl = document.getElementById('wo-sched-end');
-  const hint = document.getElementById('wo-end-hint');
   const p = WO_PRIORITIES.find(x => x.code === code);
-  if (!p) { hint.textContent = ''; return; }
+  if (!p) return;
   document.getElementById('wo-est-req').style.visibility = p.none ? 'hidden' : 'visible';
   if (p.none) {
     startEl.value = '';
     endEl.value = '';
-    hint.textContent = 'Ongoing — dates and estimated hours are optional';
     return;
   }
   if (!startEl.value) startEl.value = localDateStr(new Date());
   endEl.value = woSuggestedEnd(code, startEl.value);
-  hint.textContent = 'Suggested from ' + code + ' — can be changed';
 }
 
 function woStartChanged() {
@@ -5529,7 +5525,6 @@ function editJob(id) {
   document.getElementById('wo-priority').value = job.priority || '';
   document.getElementById('wo-sched-start').value = job.schedStart || '';
   document.getElementById('wo-sched-end').value = job.schedEnd || '';
-  document.getElementById('wo-end-hint').textContent = '';
   document.getElementById('wo-est-hours').value = job.estHours === '' || job.estHours == null ? '' : job.estHours;
   const pr = WO_PRIORITIES.find(x => x.code === job.priority);
   document.getElementById('wo-est-req').style.visibility = pr && pr.none ? 'hidden' : 'visible';
@@ -5560,7 +5555,6 @@ function resetWOForm() {
   document.getElementById('wo-priority').value = '';
   document.getElementById('wo-sched-start').value = localDateStr(new Date());
   document.getElementById('wo-sched-end').value = '';
-  document.getElementById('wo-end-hint').textContent = '';
   woSelectedWorkers = new Set();
   initWOForm();
 }
