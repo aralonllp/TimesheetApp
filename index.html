@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-14 (Jobs list: "Edited By: XX : date" format) -->
+<!-- BUILD MARKER: NB-15 (Jobs list: "Closed By: XX : date" format) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -2283,7 +2283,7 @@ function renderJobRow(j, hoursByJob) {
       </div>
       ${j.description ? `<p class="job-codes" style="margin-top:4px;"><span>Description:</span> <strong>${escWO(j.description)}</strong></p>` : ''}
       ${codesLine}
-      <p style="margin-top:2px;font-size:11px;color:var(--color-text-secondary);">${assignedTxt ? 'Assigned: ' + escWO(assignedTxt) : 'Unassigned'}${j.reportedBy ? ' · Reported by ' + escWO(j.reportedBy) : ''}${j.reportedDate ? ' · ' + fmtUKDate(j.reportedDate) : ''}${!j.open && (j.closedDate || j.closedBy) ? ' · Closed' + (j.closedDate ? ' ' + fmtUKDate(j.closedDate) : '') + (j.closedBy ? ' by ' + escWO(j.closedBy) : '') : ''}${j.updatedAt ? ' · Edited By: ' + (j.updatedBy ? escWO(j.updatedBy) : '—') + ' : ' + fmtUKDate(localDateStr(new Date(j.updatedAt))) : ''}</p>
+      <p style="margin-top:2px;font-size:11px;color:var(--color-text-secondary);">${assignedTxt ? 'Assigned: ' + escWO(assignedTxt) : 'Unassigned'}${j.reportedBy ? ' · Reported by ' + escWO(j.reportedBy) : ''}${j.reportedDate ? ' · ' + fmtUKDate(j.reportedDate) : ''}${!j.open && (j.closedDate || j.closedBy) ? ' · Closed By: ' + (j.closedBy ? escWO(j.closedBy) : '—') + (j.closedDate ? ' : ' + fmtUKDate(j.closedDate) : '') : ''}${j.updatedAt ? ' · Edited By: ' + (j.updatedBy ? escWO(j.updatedBy) : '—') + ' : ' + fmtUKDate(localDateStr(new Date(j.updatedAt))) : ''}</p>
     </div>`;
 }
 
