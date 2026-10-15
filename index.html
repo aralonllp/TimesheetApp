@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-12 (Estimated hours on WO creation; estimated vs actual + over flag on Jobs) -->
+<!-- BUILD MARKER: NB-13 (Edit work orders from the Jobs tab) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -442,7 +442,7 @@ textarea { height: 60px; resize: none; }
         <div id="toast-wo-created" class="toast"></div>
         <div class="card">
           <div class="row-between card-header">
-            <p class="section-heading">New work order</p>
+            <p class="section-heading" id="wo-form-title">New work order</p>
             <span class="text-muted" style="font-size:13px;">WO number: <strong id="wo-next-id">—</strong></span>
           </div>
           <div class="wo-grid">
@@ -496,7 +496,7 @@ textarea { height: 60px; resize: none; }
             </div>
           </div>
           <div class="form-footer" style="display:flex;gap:8px;justify-content:flex-end;margin-top:1.25rem;">
-            <button class="btn" onclick="resetWOForm()">Clear</button>
+            <button class="btn" id="wo-clear-btn" onclick="woClearOrCancel()">Clear</button>
             <button class="btn btn-primary" id="wo-create-btn" onclick="createWorkOrder()">Create work order</button>
           </div>
         </div>
@@ -2275,6 +2275,7 @@ function renderJobRow(j, hoursByJob) {
         </div>
         <div class="job-actions">
           ${sched}
+          <button class="btn btn-sm" onclick="editJob('${escWO(j.id)}')">Edit</button>
           ${j.open
             ? `<button class="btn btn-sm" onclick="toggleJobOpen('${escWO(j.id)}', false)">Close</button>`
             : `<button class="btn btn-sm" onclick="toggleJobOpen('${escWO(j.id)}', true)">Reopen</button>`}
@@ -2282,7 +2283,7 @@ function renderJobRow(j, hoursByJob) {
       </div>
       ${j.description ? `<p class="job-codes" style="margin-top:4px;"><span>Description:</span> <strong>${escWO(j.description)}</strong></p>` : ''}
       ${codesLine}
-      <p style="margin-top:2px;font-size:11px;color:var(--color-text-secondary);">${assignedTxt ? 'Assigned: ' + escWO(assignedTxt) : 'Unassigned'}${j.reportedBy ? ' · Reported by ' + escWO(j.reportedBy) : ''}${j.reportedDate ? ' · ' + fmtUKDate(j.reportedDate) : ''}${!j.open && (j.closedDate || j.closedBy) ? ' · Closed' + (j.closedDate ? ' ' + fmtUKDate(j.closedDate) : '') + (j.closedBy ? ' by ' + escWO(j.closedBy) : '') : ''}</p>
+      <p style="margin-top:2px;font-size:11px;color:var(--color-text-secondary);">${assignedTxt ? 'Assigned: ' + escWO(assignedTxt) : 'Unassigned'}${j.reportedBy ? ' · Reported by ' + escWO(j.reportedBy) : ''}${j.reportedDate ? ' · ' + fmtUKDate(j.reportedDate) : ''}${!j.open && (j.closedDate || j.closedBy) ? ' · Closed' + (j.closedDate ? ' ' + fmtUKDate(j.closedDate) : '') + (j.closedBy ? ' by ' + escWO(j.closedBy) : '') : ''}${j.updatedAt ? ' · Edited ' + fmtUKDate(String(j.updatedAt).slice(0, 10)) + (j.updatedBy ? ' by ' + escWO(j.updatedBy) : '') : ''}</p>
     </div>`;
 }
 
@@ -4652,9 +4653,15 @@ function woSuggestedEnd(code, startStr) {
 }
 
 function initWOForm() {
-  document.getElementById('wo-next-id').textContent = nextWOId();
-  document.getElementById('wo-reported-date').value = localDateStr(new Date());
-  document.getElementById('wo-reported-by').value = officeUserInitials();
+  const editing = editingJobId ? jobs.find(j => j.id === editingJobId) : null;
+  if (editingJobId && !editing) editingJobId = null;
+  document.getElementById('wo-form-title').textContent = editing ? 'Edit work order' : 'New work order';
+  document.getElementById('wo-create-btn').textContent = editing ? 'Save changes' : 'Create work order';
+  document.getElementById('wo-clear-btn').textContent = editing ? 'Cancel' : 'Clear';
+  document.getElementById('otab-wocreate').textContent = editing ? 'Edit ' + editing.id : 'WO Creation';
+  document.getElementById('wo-next-id').textContent = editing ? editing.id : nextWOId();
+  document.getElementById('wo-reported-date').value = editing ? (editing.reportedDate || '') : localDateStr(new Date());
+  document.getElementById('wo-reported-by').value = editing ? (editing.reportedBy || '') : officeUserInitials();
   const startEl = document.getElementById('wo-sched-start');
   if (!startEl.value && document.getElementById('wo-priority').value !== 'P5') startEl.value = localDateStr(new Date());
 
@@ -4731,6 +4738,59 @@ function woStartChanged() {
   if (p && !p.none && startVal) document.getElementById('wo-sched-end').value = woSuggestedEnd(code, startVal);
 }
 
+let editingJobId = null;
+
+function ensureSelectOption(selId, value, label) {
+  const sel = document.getElementById(selId);
+  if (!value || Array.from(sel.options).some(o => o.value === value)) return;
+  const opt = document.createElement('option');
+  opt.value = value; opt.textContent = label || value;
+  sel.appendChild(opt);
+}
+
+function editJob(id) {
+  const job = jobs.find(j => j.id === id);
+  if (!job) return;
+  editingJobId = id;
+  switchOfficeTab('wocreate');
+  document.getElementById('wo-description').value = job.description || '';
+
+  ensureSelectOption('wo-location', job.property, job.property);
+  document.getElementById('wo-location').value = job.property || '';
+  ssRefresh('wo-location');
+  const loc = woLocations.find(p => p.name === job.property);
+  document.getElementById('wo-costcentre').value = loc ? loc.costCentre : (job.costCentre || '');
+
+  ensureSelectOption('wo-costcode', job.costCode, job.costCode);
+  document.getElementById('wo-costcode').value = job.costCode || '';
+  ssRefresh('wo-costcode');
+  ensureSelectOption('wo-trade', job.trade, job.trade);
+  document.getElementById('wo-trade').value = job.trade || '';
+  ssRefresh('wo-trade');
+
+  document.getElementById('wo-priority').value = job.priority || '';
+  document.getElementById('wo-sched-start').value = job.schedStart || '';
+  document.getElementById('wo-sched-end').value = job.schedEnd || '';
+  document.getElementById('wo-end-hint').textContent = '';
+  document.getElementById('wo-est-hours').value = job.estHours === '' || job.estHours == null ? '' : job.estHours;
+  const pr = WO_PRIORITIES.find(x => x.code === job.priority);
+  document.getElementById('wo-est-req').style.visibility = pr && pr.none ? 'hidden' : 'visible';
+
+  woSelectedWorkers = new Set(expandAssignedTo(job.assignedTo));
+  renderWOAssignChips();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function woClearOrCancel() {
+  if (editingJobId) {
+    editingJobId = null;
+    resetWOForm();
+    switchOfficeTab('jobs');
+  } else {
+    resetWOForm();
+  }
+}
+
 function resetWOForm() {
   document.getElementById('wo-description').value = '';
   document.getElementById('wo-location').value = '';
@@ -4773,9 +4833,10 @@ async function createWorkOrder() {
 
   const loc = woLocations.find(x => x.name === location);
   const assignedNames = workers.filter(w => woSelectedWorkers.has(w.name)).map(w => w.name);
+  const editingJob = editingJobId ? jobs.find(j => j.id === editingJobId) : null;
   const job = {
     property: location,
-    costCentre: loc ? loc.costCentre : '',
+    costCentre: loc ? loc.costCentre : (editingJob ? editingJob.costCentre || '' : ''),
     costCode,
     trade,
     estHours,
@@ -4790,6 +4851,37 @@ async function createWorkOrder() {
   };
 
   const btn = document.getElementById('wo-create-btn');
+  if (editingJob) {
+    isCreatingWO = true;
+    btn.disabled = true; btn.textContent = 'Saving...';
+    setSyncStatus('office', 'pending', 'Saving ' + editingJob.id + '...');
+    try {
+      const upd = { ...job, id: editingJob.id, updatedBy: officeUserInitials() };
+      delete upd.reportedDate; delete upd.reportedBy;
+      const result = await api('updateJob', { job: upd });
+      Object.assign(editingJob, {
+        property: upd.property, costCentre: upd.costCentre, costCode: upd.costCode, trade: upd.trade,
+        estHours: upd.estHours, description: upd.description, priority: upd.priority,
+        assignedTo: upd.assignedTo, schedStart: upd.schedStart, schedEnd: upd.schedEnd
+      });
+      if (result.updatedAt) { editingJob.updatedAt = result.updatedAt; editingJob.updatedBy = result.updatedBy; }
+      localStorage.setItem('jobs', JSON.stringify(jobs));
+      const savedId = editingJob.id;
+      editingJobId = null;
+      resetWOForm();
+      switchOfficeTab('jobs');
+      renderOfficeDashboard();
+      setSyncStatus('office', 'synced', result.changed ? savedId + ' updated' : 'No changes to ' + savedId);
+    } catch (err) {
+      setSyncStatus('office', 'error', 'Changes not saved');
+      alert('Could not save the changes: ' + (err.message || err));
+    } finally {
+      isCreatingWO = false;
+      btn.disabled = false;
+      btn.textContent = editingJobId ? 'Save changes' : 'Create work order';
+    }
+    return;
+  }
   isCreatingWO = true;
   btn.disabled = true; btn.textContent = 'Creating...';
   setSyncStatus('office', 'pending', 'Creating work order...');
