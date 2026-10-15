@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-16 (Jobs list: Reopened By + history order Assigned/Reported/Edited/Reopened/Closed) -->
+<!-- BUILD MARKER: NB-17 (Worker view: My Jobs tab with Open/Closed split) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -335,7 +335,7 @@ textarea { height: 60px; resize: none; }
       <div class="row-between form-section">
         <div>
           <p class="screen-title" id="worker-greeting">Hello</p>
-          <p class="text-muted">Log time against a job</p>
+          <p class="text-muted" id="worker-subtitle">Log time against a job</p>
         </div>
         <div style="display:flex;align-items:center;gap:10px;">
           <div class="sync-status">
@@ -343,6 +343,24 @@ textarea { height: 60px; resize: none; }
             <span id="worker-sync-text">—</span>
           </div>
           <button class="btn" onclick="workerLogout()">Sign out</button>
+        </div>
+      </div>
+
+      <div class="office-subnav">
+        <button class="active" id="wtab-log" onclick="switchWorkerTab('log')">Log Time</button>
+        <button id="wtab-myjobs" onclick="switchWorkerTab('myjobs')">My Jobs</button>
+      </div>
+
+      <div id="worker-myjobs-section" style="display:none;">
+        <div class="card">
+          <div class="row-between card-header" style="flex-wrap:wrap;gap:8px;">
+            <div class="jobs-toggle">
+              <button id="wjobs-view-open" class="active" onclick="setWorkerJobsView('open')">Open</button>
+              <button id="wjobs-view-closed" onclick="setWorkerJobsView('closed')">Closed</button>
+            </div>
+            <input type="text" id="wjobs-search" placeholder="Search WO, location, description..." oninput="renderWorkerJobs()" style="max-width:320px;flex:1;min-width:200px;">
+          </div>
+          <div id="worker-job-list"></div>
         </div>
       </div>
 
@@ -1112,6 +1130,9 @@ function workerLogin() {
   document.getElementById('entry-date').value = new Date().toISOString().split('T')[0];
   populateJobDropdown();
   renderEntriesByDate();
+  workerJobsView = 'open';
+  document.getElementById('wjobs-search').value = '';
+  switchWorkerTab('log');
   setSyncStatus('worker', syncQueue.length ? 'pending' : 'synced',
     syncQueue.length ? syncQueue.length + ' entries pending sync' : 'Synced');
     if (pollTimer) clearInterval(pollTimer);
@@ -1201,6 +1222,7 @@ async function pollJobs() {
     // they close/reselect).
     renderEntriesByDate();
     updateHoursPlaceholder();
+    if (document.getElementById('worker-myjobs-section').style.display !== 'none') renderWorkerJobs();
     await flushQueue();
     if (syncQueue.length) {
       setSyncStatus('worker', 'pending', syncQueue.length + ' entries pending sync');
@@ -4545,6 +4567,92 @@ async function deleteOTRequest(id) {
   renderOvertimeTab && renderOvertimeTab();
   const { synced } = await queueOrSend('deleteOTRequest', { id, performedBy: currentOfficeUser || undefined });
   if (synced) setSyncStatus(currentOfficeUser ? 'office' : 'worker', 'synced', 'OT request deleted');
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  WORKER — MY JOBS
+// ══════════════════════════════════════════════════════════════════
+
+let workerJobsView = 'open';
+
+function switchWorkerTab(tab) {
+  document.getElementById('wtab-log').classList.toggle('active', tab === 'log');
+  document.getElementById('wtab-myjobs').classList.toggle('active', tab === 'myjobs');
+  document.getElementById('worker-entries-section').style.display = tab === 'log' ? 'block' : 'none';
+  document.getElementById('worker-myjobs-section').style.display = tab === 'myjobs' ? 'block' : 'none';
+  document.getElementById('worker-subtitle').textContent = tab === 'myjobs' ? 'Work orders assigned to you' : 'Log time against a job';
+  if (tab === 'myjobs') renderWorkerJobs();
+}
+
+function setWorkerJobsView(view) {
+  workerJobsView = view;
+  document.getElementById('wjobs-view-open').classList.toggle('active', view === 'open');
+  document.getElementById('wjobs-view-closed').classList.toggle('active', view === 'closed');
+  renderWorkerJobs();
+}
+
+function renderWorkerJobs() {
+  const el = document.getElementById('worker-job-list');
+  if (!el || !currentWorker) return;
+  const mine = jobs.filter(j => expandAssignedTo(j.assignedTo).includes(currentWorker));
+  const openJobs = mine.filter(j => j.open);
+  const closedJobs = mine.filter(j => !j.open);
+  document.getElementById('wjobs-view-open').textContent = 'Open (' + openJobs.length + ')';
+  document.getElementById('wjobs-view-closed').textContent = 'Closed (' + closedJobs.length + ')';
+  const q = (document.getElementById('wjobs-search').value || '').trim().toLowerCase();
+  const woNum = id => { const m = /(\d+)/.exec(String(id)); return m ? parseInt(m[1], 10) : 0; };
+  let list = (workerJobsView === 'open' ? openJobs : closedJobs).slice().sort((a, b) => woNum(b.id) - woNum(a.id));
+  if (q) list = list.filter(j => [j.id, j.property, j.description, j.trade, j.priority].some(v => String(v || '').toLowerCase().includes(q)));
+  const totals = {}, mineHrs = {};
+  entries.forEach(e => {
+    const k = String(e.jobId), h = parseFloat(e.hours) || 0;
+    totals[k] = (totals[k] || 0) + h;
+    if (e.worker === currentWorker) mineHrs[k] = (mineHrs[k] || 0) + h;
+  });
+  el.innerHTML = list.length
+    ? list.map(j => renderWorkerJobRow(j, totals[String(j.id)] || 0, mineHrs[String(j.id)] || 0)).join('')
+    : '<p class="text-muted">' + (q ? 'No jobs match that search.' : (workerJobsView === 'open' ? 'No open jobs assigned to you.' : 'No closed jobs.')) + '</p>';
+}
+
+function renderWorkerJobRow(j, total, mine) {
+  const est = j.estHours === '' || j.estHours == null ? null : parseFloat(j.estHours);
+  const over = est != null && !isNaN(est) && total > est;
+  const parts = [];
+  if (j.trade) parts.push(`<span>Trade:</span> <strong>${escWO(j.trade)}${codeDesc(woTrades, j.trade) ? ' – ' + escWO(codeDesc(woTrades, j.trade)) : ''}</strong>`);
+  if (est != null && !isNaN(est)) parts.push(`<span>Est. Hours:</span> <strong>${fmtHrs(est)}h</strong>`);
+  parts.push(`<span>Logged:</span> <strong${over ? ' class="hrs-over"' : ''}>${fmtHrs(total)}h</strong>${mine && mine !== total ? ` <strong>(you ${fmtHrs(mine)}h)</strong>` : ''}`);
+  const dates = (j.schedStart || j.schedEnd)
+    ? `<span class="job-dates"><span>Start Date:</span> <strong>${j.schedStart ? fmtUKDate(j.schedStart) : '—'}</strong><span class="job-dates-sep">|</span><span>End Date:</span> <strong>${j.schedEnd ? fmtUKDate(j.schedEnd) : '—'}</strong></span>`
+    : '';
+  const others = expandAssignedTo(j.assignedTo).filter(n => n !== currentWorker);
+  return `
+    <div class="entry-row">
+      <div class="row-between" style="gap:12px;flex-wrap:wrap;">
+        <div>
+          <span style="font-size:14px;font-weight:700;">${escWO(j.id)}</span>
+          ${j.priority ? `<span class="prio prio-${escWO(j.priority)}">${escWO(j.priority)}</span>` : ''}
+          <span class="job-codes" style="margin-left:10px;"><span>Location:</span> <strong>${escWO(propLabel(j.property, 50))}</strong></span>
+        </div>
+        <div class="job-actions">
+          ${dates}
+          ${j.open ? `<button class="btn btn-sm" onclick="logTimeForJob('${escWO(j.id)}')">Log time</button>` : ''}
+        </div>
+      </div>
+      ${j.description ? `<p class="job-codes" style="margin-top:4px;"><span>Description:</span> <strong>${escWO(j.description)}</strong></p>` : ''}
+      <p class="job-codes">${parts.join('<span class="job-dates-sep">|</span>')}</p>
+      <p style="margin-top:2px;font-size:11px;color:var(--color-text-secondary);">${others.length ? 'Also assigned: ' + escWO(others.map(workerInitials).join(', ')) + ' · ' : ''}Reported ${j.reportedDate ? fmtUKDate(j.reportedDate) : ''}${!j.open && j.closedDate ? ' · Closed ' + fmtUKDate(j.closedDate) : ''}</p>
+    </div>`;
+}
+
+function logTimeForJob(id) {
+  switchWorkerTab('log');
+  const sel = document.getElementById('job-select');
+  sel.value = id;
+  if (sel.value !== id) { alert(id + ' is not available to log time against.'); return; }
+  if (typeof ssSyncLabel === 'function') ssSyncLabel('job-select');
+  fillJobDetails();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  document.getElementById('entry-hours').focus();
 }
 
 // ══════════════════════════════════════════════════════════════════
