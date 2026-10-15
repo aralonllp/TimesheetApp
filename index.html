@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-04 (Searchable pickers: arrow-key navigation + Enter to select) -->
+<!-- BUILD MARKER: NB-05 (Jobs tab: Open/Closed views, close + reopen WOs) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -131,6 +131,10 @@ textarea { height: 60px; resize: none; }
 .wo-chip.on { background: var(--color-text-primary); color: #fff; border-color: var(--color-text-primary); }
 .wo-hint { font-size: 11px; color: var(--color-text-secondary); margin-top: 4px; }
 .prio { font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 600; margin-left: 8px; }
+.jobs-toggle { display: inline-flex; border: 0.5px solid var(--color-border-secondary); border-radius: var(--border-radius-md); overflow: hidden; }
+.jobs-toggle button { border: none; background: transparent; padding: 6px 14px; font-size: 13px; font-weight: 500; cursor: pointer; font-family: inherit; color: var(--color-text-secondary); min-height: 34px; }
+.jobs-toggle button.active { background: var(--color-text-primary); color: #fff; }
+.job-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .prio-P0 { background: #fde2e1; color: #a61b1b; }
 .prio-P1 { background: #fde9d4; color: #9a4a00; }
 .prio-P2 { background: #fff3cd; color: #856404; }
@@ -417,7 +421,7 @@ textarea { height: 60px; resize: none; }
         <button onclick="switchOfficeTab('overtime')" id="otab-overtime">Overtime</button>
         <button onclick="switchOfficeTab('weekapprovals')" id="otab-weekapprovals">Weekly Approvals</button>
         <button onclick="switchOfficeTab('wocreate')" id="otab-wocreate">WO Creation</button>
-        <button onclick="switchOfficeTab('jobs')" id="otab-jobs">Active Jobs</button>
+        <button onclick="switchOfficeTab('jobs')" id="otab-jobs">Jobs</button>
         <button onclick="switchOfficeTab('wohours')" id="otab-wohours">WO Hours</button>
         <button onclick="switchOfficeTab('workers')" id="otab-workers">Workers</button>
         <button onclick="switchOfficeTab('absences')" id="otab-absences">Absence Types</button>
@@ -486,9 +490,13 @@ textarea { height: 60px; resize: none; }
           </div>
         </div>
         <div class="card">
-          <div class="row-between card-header">
-            <p class="section-heading">Active jobs</p>
-            <div style="display:flex;gap:8px;">
+          <div class="row-between card-header" style="flex-wrap:wrap;gap:8px;">
+            <div class="jobs-toggle">
+              <button id="jobs-view-open" class="active" onclick="setJobsView('open')">Open</button>
+              <button id="jobs-view-closed" onclick="setJobsView('closed')">Closed</button>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex:1;justify-content:flex-end;min-width:220px;">
+              <input type="text" id="jobs-search" placeholder="Search WO, location, description..." oninput="renderJobsList()" style="max-width:320px;">
               <button class="btn btn-sm" onclick="refreshOffice()">↻ Refresh</button>
             </div>
           </div>
@@ -2159,32 +2167,89 @@ async function refreshOffice() {
   renderOfficeDashboard();
 }
 
+let jobsView = 'open';
+let isTogglingJob = false;
+
+function setJobsView(view) {
+  jobsView = view;
+  document.getElementById('jobs-view-open').classList.toggle('active', view === 'open');
+  document.getElementById('jobs-view-closed').classList.toggle('active', view === 'closed');
+  renderJobsList();
+}
+
+function renderJobsList() {
+  const el = document.getElementById('job-list');
+  if (!el) return;
+  const openJobs = jobs.filter(j => j.open);
+  const closedJobs = jobs.filter(j => !j.open);
+  document.getElementById('jobs-view-open').textContent = 'Open (' + openJobs.length + ')';
+  document.getElementById('jobs-view-closed').textContent = 'Closed (' + closedJobs.length + ')';
+  const q = (document.getElementById('jobs-search').value || '').trim().toLowerCase();
+  const woNum = id => { const m = /(\d+)/.exec(String(id)); return m ? parseInt(m[1], 10) : 0; };
+  let list = jobsView === 'open'
+    ? openJobs.slice().sort((a, b) => String(a.priority || 'P9').localeCompare(String(b.priority || 'P9')) || woNum(a.id) - woNum(b.id))
+    : closedJobs.slice().sort((a, b) => String(b.closedDate || '').localeCompare(String(a.closedDate || '')) || woNum(b.id) - woNum(a.id));
+  if (q) {
+    list = list.filter(j => [j.id, j.property, j.description, j.costCode, j.priority, expandAssignedTo(j.assignedTo).map(workerInitials).join(' ')]
+      .some(v => String(v || '').toLowerCase().includes(q)));
+  }
+  el.innerHTML = list.length
+    ? list.map(j => renderJobRow(j)).join('')
+    : '<p class="text-muted">' + (q ? 'No jobs match that search.' : (jobsView === 'open' ? 'No open jobs.' : 'No closed jobs.')) + '</p>';
+}
+
+async function toggleJobOpen(id, open) {
+  if (isTogglingJob) return;
+  const job = jobs.find(j => j.id === id);
+  if (!job) return;
+  if (!confirm((open ? 'Reopen ' : 'Close ') + id + '?')) return;
+  if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to ' + (open ? 'reopen' : 'close') + ' a job'); return; }
+  isTogglingJob = true;
+  setSyncStatus('office', 'pending', (open ? 'Reopening ' : 'Closing ') + id + '...');
+  try {
+    const result = await api(open ? 'reopenJob' : 'closeJob', { id, performedBy: currentOfficeUser, closedBy: officeUserInitials() });
+    job.open = open;
+    job.closedDate = result.closedDate || '';
+    job.closedBy = result.closedBy || '';
+    localStorage.setItem('jobs', JSON.stringify(jobs));
+    renderOfficeDashboard();
+    setSyncStatus('office', 'synced', id + (open ? ' reopened' : ' closed'));
+  } catch (err) {
+    setSyncStatus('office', 'error', 'Could not update ' + id);
+    alert('Could not ' + (open ? 'reopen ' : 'close ') + id + ': ' + (err.message || err));
+  } finally {
+    isTogglingJob = false;
+  }
+}
+
 function renderJobRow(j) {
   const assigned = expandAssignedTo(j.assignedTo);
   const assignedTxt = assigned.length ? assigned.map(n => workerInitials(n)).join(', ') : '';
   const sched = (j.schedStart || j.schedEnd) ? `${j.schedStart ? fmtUKDate(j.schedStart) : '—'} → ${j.schedEnd ? fmtUKDate(j.schedEnd) : '—'}` : '';
   return `
     <div class="entry-row">
-      <div class="row-between">
+      <div class="row-between" style="gap:12px;">
         <div>
           <span style="font-size:13px;font-weight:500;">${j.id}</span>
           ${j.priority ? `<span class="prio prio-${escWO(j.priority)}">${escWO(j.priority)}</span>` : ''}
           <span class="text-muted" style="font-size:12px;margin-left:8px;">${escWO(propLabel(j.property, 35))}${j.costCode ? ' · ' + escWO(j.costCode) : ''}</span>
         </div>
-        ${sched ? `<span class="text-muted" style="font-size:12px;">${sched}</span>` : ''}
+        <div class="job-actions">
+          ${sched ? `<span class="text-muted" style="font-size:12px;">${sched}</span>` : ''}
+          ${j.open
+            ? `<button class="btn btn-sm" onclick="toggleJobOpen('${escWO(j.id)}', false)">Close</button>`
+            : `<button class="btn btn-sm" onclick="toggleJobOpen('${escWO(j.id)}', true)">Reopen</button>`}
+        </div>
       </div>
       <p class="text-muted" style="margin-top:2px;font-size:12px;">${escWO(j.description || '')}</p>
-      <p style="margin-top:2px;font-size:11px;color:var(--color-text-secondary);">${assignedTxt ? 'Assigned: ' + escWO(assignedTxt) : 'Unassigned'}${j.reportedBy ? ' · Reported by ' + escWO(j.reportedBy) : ''}${j.reportedDate ? ' · ' + fmtUKDate(j.reportedDate) : ''}</p>
+      <p style="margin-top:2px;font-size:11px;color:var(--color-text-secondary);">${assignedTxt ? 'Assigned: ' + escWO(assignedTxt) : 'Unassigned'}${j.reportedBy ? ' · Reported by ' + escWO(j.reportedBy) : ''}${j.reportedDate ? ' · ' + fmtUKDate(j.reportedDate) : ''}${!j.open && (j.closedDate || j.closedBy) ? ' · Closed' + (j.closedDate ? ' ' + fmtUKDate(j.closedDate) : '') + (j.closedBy ? ' by ' + escWO(j.closedBy) : '') : ''}</p>
     </div>`;
 }
 
 function renderOfficeDashboard() {
   document.getElementById('stat-open').textContent = jobs.filter(j => j.open).length;
 
-  const openJobs = jobs.filter(j => j.open);
-  document.getElementById('job-list').innerHTML = openJobs.length
-    ? openJobs.map(j => renderJobRow(j)).join('')
-    : '<p class="text-muted">No open jobs.</p>';
+  renderJobsList();
 
   renderWorkersList();
   if (document.getElementById('office-tab-wocreate').style.display === 'block') initWOForm();
