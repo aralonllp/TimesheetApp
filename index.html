@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-02 (WO Creation tab: auto WO number, location + cost code, P0-P5 priority, multi-assign, scheduled dates) -->
+<!-- BUILD MARKER: NB-03 (WO Creation: searchable location picker) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -124,6 +124,7 @@ textarea { height: 60px; resize: none; }
 .wo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
 .wo-grid .wo-full { grid-column: 1 / -1; }
 .wo-loc-row { display: grid; grid-template-columns: 1fr 160px; gap: 10px; }
+#office-tab-wocreate .wo-loc-row .ss-input { height: 100%; font-size: 14px; }
 .wo-readonly { background: var(--color-background-secondary, #f3f3f3); color: var(--color-text-secondary); cursor: not-allowed; }
 .wo-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .wo-chip { min-width: 52px; padding: 6px 10px; font-size: 13px; font-weight: 600; border: 1px solid #ccc; border-radius: 20px; background: transparent; color: var(--color-text-primary); cursor: pointer; font-family: inherit; }
@@ -4482,12 +4483,15 @@ function initWOForm() {
   document.getElementById('wo-next-id').textContent = nextWOId();
   document.getElementById('wo-reported-date').value = localDateStr(new Date());
   document.getElementById('wo-reported-by').value = officeUserInitials();
+  const startEl = document.getElementById('wo-sched-start');
+  if (!startEl.value && document.getElementById('wo-priority').value !== 'P5') startEl.value = localDateStr(new Date());
 
   const locSel = document.getElementById('wo-location');
   const curLoc = locSel.value;
   locSel.innerHTML = '<option value="">' + (woLocations.length ? 'Select location...' : 'No locations — add them to the Properties sheet') + '</option>' +
     woLocations.map(p => `<option value="${escWO(p.name)}">${escWO(propLabel(p.name, 70))}</option>`).join('');
   if (curLoc && woLocations.find(p => p.name === curLoc)) locSel.value = curLoc;
+  if (!locSel._ssAttached) ssAttach('wo-location', 'Search locations...'); else ssRefresh('wo-location');
   woLocationChanged();
 
   const prSel = document.getElementById('wo-priority');
