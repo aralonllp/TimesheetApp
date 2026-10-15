@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-11 (Jobs list: sorted by WO number, highest first) -->
+<!-- BUILD MARKER: NB-12 (Estimated hours on WO creation; estimated vs actual + over flag on Jobs) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -142,6 +142,8 @@ textarea { height: 60px; resize: none; }
 .job-dates-sep { margin: 0 10px; color: var(--color-border-secondary, #ccc); }
 .job-codes { margin-top: 2px; font-size: 12px; color: var(--color-text-secondary); line-height: 1.6; }
 .job-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.over-flag { font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 600; margin-left: 6px; background: #fde2e1; color: #a61b1b; }
+.job-codes strong.hrs-over { color: #a61b1b; font-weight: 600; }
 .prio-P0 { background: #fde2e1; color: #a61b1b; }
 .prio-P1 { background: #fde9d4; color: #9a4a00; }
 .prio-P2 { background: #fff3cd; color: #856404; }
@@ -482,6 +484,10 @@ textarea { height: 60px; resize: none; }
               <label>Sched. end date</label>
               <input type="date" id="wo-sched-end">
               <p class="wo-hint" id="wo-end-hint"></p>
+            </div>
+            <div>
+              <label>Estimated hours <span style="color:var(--color-text-error)" id="wo-est-req">*</span></label>
+              <input type="number" id="wo-est-hours" min="0.5" step="0.5" placeholder="e.g. 4">
             </div>
             <div class="wo-full">
               <label>Assigned to</label>
@@ -2205,12 +2211,14 @@ function renderJobsList() {
   const q = (document.getElementById('jobs-search').value || '').trim().toLowerCase();
   const woNum = id => { const m = /(\d+)/.exec(String(id)); return m ? parseInt(m[1], 10) : 0; };
   let list = (jobsView === 'open' ? openJobs : closedJobs).slice().sort((a, b) => woNum(b.id) - woNum(a.id));
+  const hoursByJob = {};
+  entries.forEach(e => { const k = String(e.jobId); hoursByJob[k] = (hoursByJob[k] || 0) + (parseFloat(e.hours) || 0); });
   if (q) {
     list = list.filter(j => [j.id, j.property, j.description, j.costCentre, j.costCode, j.trade, j.priority, expandAssignedTo(j.assignedTo).map(workerInitials).join(' ')]
       .some(v => String(v || '').toLowerCase().includes(q)));
   }
   el.innerHTML = list.length
-    ? list.map(j => renderJobRow(j)).join('')
+    ? list.map(j => renderJobRow(j, hoursByJob)).join('')
     : '<p class="text-muted">' + (q ? 'No jobs match that search.' : (jobsView === 'open' ? 'No open jobs.' : 'No closed jobs.')) + '</p>';
 }
 
@@ -2238,13 +2246,20 @@ async function toggleJobOpen(id, open) {
   }
 }
 
-function renderJobRow(j) {
+function fmtHrs(n) { return (Math.round(n * 100) / 100).toString(); }
+
+function renderJobRow(j, hoursByJob) {
+  const est = j.estHours === '' || j.estHours == null ? null : parseFloat(j.estHours);
+  const actual = hoursByJob ? (hoursByJob[String(j.id)] || 0) : entries.filter(e => String(e.jobId) === String(j.id)).reduce((t, e) => t + (parseFloat(e.hours) || 0), 0);
+  const over = est != null && !isNaN(est) && actual > est;
   const assigned = expandAssignedTo(j.assignedTo);
   const assignedTxt = assigned.length ? assigned.map(n => workerInitials(n)).join(', ') : '';
   const codeLabel = (list, code) => { const d = codeDesc(list, code); return escWO(code) + (d ? ' – ' + escWO(d) : ''); };
   const codeParts = [];
   if (j.costCode)   codeParts.push(`<span>Cost Code:</span> <strong>${codeLabel(woCostCodes, j.costCode)}</strong>`);
   if (j.trade)      codeParts.push(`<span>Trade:</span> <strong>${codeLabel(woTrades, j.trade)}</strong>`);
+  codeParts.push(`<span>Est. Hours:</span> <strong>${est != null && !isNaN(est) ? fmtHrs(est) + 'h' : '—'}</strong>`);
+  codeParts.push(`<span>Actual Hours:</span> <strong${over ? ' class="hrs-over"' : ''}>${fmtHrs(actual)}h</strong>`);
   const codesLine = codeParts.length ? `<p class="job-codes">${codeParts.join('<span class="job-dates-sep">|</span>')}</p>` : '';
   const sched = (j.schedStart || j.schedEnd)
     ? `<span class="job-dates"><span>Start Date:</span> <strong>${j.schedStart ? fmtUKDate(j.schedStart) : '—'}</strong><span class="job-dates-sep">|</span><span>End Date:</span> <strong>${j.schedEnd ? fmtUKDate(j.schedEnd) : '—'}</strong></span>`
@@ -2255,6 +2270,7 @@ function renderJobRow(j) {
         <div>
           <span style="font-size:14px;font-weight:700;">${j.id}</span>
           ${j.priority ? `<span class="prio prio-${escWO(j.priority)}">${escWO(j.priority)}</span>` : ''}
+          ${over ? `<span class="over-flag" title="Estimated ${fmtHrs(est)}h, actual ${fmtHrs(actual)}h">Over by ${fmtHrs(actual - est)}h</span>` : ''}
           <span class="job-codes" style="margin-left:10px;"><span>Location:</span> <strong>${escWO(propLabel(j.property, 50))}</strong>${j.costCentre ? `<span class="job-dates-sep">|</span><strong class="job-cc">${escWO(j.costCentre)}</strong>` : ''}</span>
         </div>
         <div class="job-actions">
@@ -4696,10 +4712,11 @@ function woPriorityChanged() {
   const hint = document.getElementById('wo-end-hint');
   const p = WO_PRIORITIES.find(x => x.code === code);
   if (!p) { hint.textContent = ''; return; }
+  document.getElementById('wo-est-req').style.visibility = p.none ? 'hidden' : 'visible';
   if (p.none) {
     startEl.value = '';
     endEl.value = '';
-    hint.textContent = 'Ongoing — start and end dates are optional';
+    hint.textContent = 'Ongoing — dates and estimated hours are optional';
     return;
   }
   if (!startEl.value) startEl.value = localDateStr(new Date());
@@ -4720,6 +4737,8 @@ function resetWOForm() {
   document.getElementById('wo-costcentre').value = '';
   document.getElementById('wo-costcode').value = '';
   document.getElementById('wo-trade').value = '';
+  document.getElementById('wo-est-hours').value = '';
+  document.getElementById('wo-est-req').style.visibility = 'visible';
   document.getElementById('wo-priority').value = '';
   document.getElementById('wo-sched-start').value = localDateStr(new Date());
   document.getElementById('wo-sched-end').value = '';
@@ -4734,6 +4753,8 @@ async function createWorkOrder() {
   const location = document.getElementById('wo-location').value;
   const costCode = document.getElementById('wo-costcode').value;
   const trade = document.getElementById('wo-trade').value;
+  const estRaw = document.getElementById('wo-est-hours').value.trim();
+  const estHours = estRaw === '' ? '' : parseFloat(estRaw);
   const priority = document.getElementById('wo-priority').value;
   const schedStart = document.getElementById('wo-sched-start').value;
   const schedEnd = document.getElementById('wo-sched-end').value;
@@ -4744,6 +4765,8 @@ async function createWorkOrder() {
   if (!costCode) { alert('Please select a cost code'); return; }
   if (!trade) { alert('Please select a trade'); return; }
   if (!p) { alert('Please select a priority'); return; }
+  if (estRaw !== '' && (isNaN(estHours) || estHours <= 0)) { alert('Estimated hours must be a number above 0'); return; }
+  if (!p.none && estRaw === '') { alert('Please enter the estimated hours'); return; }
   if (!p.none && (!schedStart || !schedEnd)) { alert('Please set a scheduled start and end date'); return; }
   if (schedStart && schedEnd && schedEnd < schedStart) { alert('Scheduled end date cannot be before the start date'); return; }
   if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to create a work order'); return; }
@@ -4755,6 +4778,7 @@ async function createWorkOrder() {
     costCentre: loc ? loc.costCentre : '',
     costCode,
     trade,
+    estHours,
     description,
     priority,
     reportedDate: localDateStr(new Date()),
