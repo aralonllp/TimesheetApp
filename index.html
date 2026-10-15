@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-05 (Jobs tab: Open/Closed views, close + reopen WOs) -->
+<!-- BUILD MARKER: NB-06 (Jobs tab: labelled Start Date | End Date) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -134,6 +134,9 @@ textarea { height: 60px; resize: none; }
 .jobs-toggle { display: inline-flex; border: 0.5px solid var(--color-border-secondary); border-radius: var(--border-radius-md); overflow: hidden; }
 .jobs-toggle button { border: none; background: transparent; padding: 6px 14px; font-size: 13px; font-weight: 500; cursor: pointer; font-family: inherit; color: var(--color-text-secondary); min-height: 34px; }
 .jobs-toggle button.active { background: var(--color-text-primary); color: #fff; }
+.job-dates { font-size: 12px; color: var(--color-text-secondary); white-space: nowrap; }
+.job-dates strong { font-weight: 600; color: var(--color-text-primary); }
+.job-dates-sep { margin: 0 10px; color: var(--color-border-secondary, #ccc); }
 .job-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .prio-P0 { background: #fde2e1; color: #a61b1b; }
 .prio-P1 { background: #fde9d4; color: #9a4a00; }
@@ -2225,7 +2228,9 @@ async function toggleJobOpen(id, open) {
 function renderJobRow(j) {
   const assigned = expandAssignedTo(j.assignedTo);
   const assignedTxt = assigned.length ? assigned.map(n => workerInitials(n)).join(', ') : '';
-  const sched = (j.schedStart || j.schedEnd) ? `${j.schedStart ? fmtUKDate(j.schedStart) : '—'} → ${j.schedEnd ? fmtUKDate(j.schedEnd) : '—'}` : '';
+  const sched = (j.schedStart || j.schedEnd)
+    ? `<span class="job-dates"><span>Start Date:</span> <strong>${j.schedStart ? fmtUKDate(j.schedStart) : '—'}</strong><span class="job-dates-sep">|</span><span>End Date:</span> <strong>${j.schedEnd ? fmtUKDate(j.schedEnd) : '—'}</strong></span>`
+    : '';
   return `
     <div class="entry-row">
       <div class="row-between" style="gap:12px;">
@@ -2235,7 +2240,7 @@ function renderJobRow(j) {
           <span class="text-muted" style="font-size:12px;margin-left:8px;">${escWO(propLabel(j.property, 35))}${j.costCode ? ' · ' + escWO(j.costCode) : ''}</span>
         </div>
         <div class="job-actions">
-          ${sched ? `<span class="text-muted" style="font-size:12px;">${sched}</span>` : ''}
+          ${sched}
           ${j.open
             ? `<button class="btn btn-sm" onclick="toggleJobOpen('${escWO(j.id)}', false)">Close</button>`
             : `<button class="btn btn-sm" onclick="toggleJobOpen('${escWO(j.id)}', true)">Reopen</button>`}
