@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-25 (Schedule View: read-only grid with logged vs estimated hours) -->
+<!-- BUILD MARKER: NB-26 (Schedule: "Job Completed" tag instead of greying out closed jobs) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -162,7 +162,7 @@ textarea { height: 60px; resize: none; }
 .sched-item .sched-wo { font-weight: 700; }
 .sched-item .sched-note { font-style: italic; color: var(--color-text-secondary); }
 .sched-item.sched-status { font-weight: 700; text-align: center; padding: 8px 6px; }
-.sched-item.sched-closed { opacity: 0.6; }
+.done-tag { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 20px; background: #dff3e4; color: #1e6b34; white-space: nowrap; }
 .sched-ro .sched-item { cursor: default; }
 .sched-ro .sched-item:hover { outline: none; }
 .sv-hours { margin-top: 5px; padding-top: 4px; border-top: 0.5px solid var(--color-border-tertiary); font-size: 11px; color: var(--color-text-secondary); display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
@@ -504,13 +504,13 @@ textarea { height: 60px; resize: none; }
       <!-- Office sub-navigation -->
       <div class="office-subnav">
         <button class="active" onclick="switchOfficeTab('daily')" id="otab-daily">Daily View</button>
-        <button onclick="switchOfficeTab('schedview')" id="otab-schedview">Schedule</button>
         <button onclick="switchOfficeTab('entries')" id="otab-entries">Time Entries</button>
         <button onclick="switchOfficeTab('overtime')" id="otab-overtime">Overtime</button>
         <button onclick="switchOfficeTab('weekapprovals')" id="otab-weekapprovals">Weekly Approvals</button>
         <button onclick="switchOfficeTab('wocreate')" id="otab-wocreate">WO Creation</button>
         <button onclick="switchOfficeTab('jobs')" id="otab-jobs">Jobs</button>
-        <button onclick="switchOfficeTab('schedule')" id="otab-schedule">Schedule Creation</button>
+        <button onclick="switchOfficeTab('schedule')" id="otab-schedule">Schedule</button>
+        <button onclick="switchOfficeTab('schedview')" id="otab-schedview">Schedule View</button>
         <button onclick="switchOfficeTab('wohours')" id="otab-wohours">WO Hours</button>
         <button onclick="switchOfficeTab('workers')" id="otab-workers">Workers</button>
         <button onclick="switchOfficeTab('absences')" id="otab-absences">Absence Types</button>
@@ -4801,7 +4801,7 @@ function schedItemsFor(date, worker) {
 function schedJobText(it) {
   const j = jobs.find(x => String(x.id) === String(it.jobId));
   if (!j) return `<span class="sched-wo">${escWO(it.jobId)}</span>`;
-  return `<span class="sched-wo">${escWO(j.id)}</span>${j.priority ? ` <span class="prio prio-${escWO(j.priority)}" style="margin-left:2px;padding:0 6px;font-size:10px;">${escWO(j.priority)}</span>` : ''} · ${escWO(j.property || '')}${j.description ? ' – ' + escWO(j.description) : ''}${!j.open ? ' <em>(closed)</em>' : ''}`;
+  return `<span class="sched-wo">${escWO(j.id)}</span>${j.priority ? ` <span class="prio prio-${escWO(j.priority)}" style="margin-left:2px;padding:0 6px;font-size:10px;">${escWO(j.priority)}</span>` : ''} · ${escWO(j.property || '')}${j.description ? ' – ' + escWO(j.description) : ''}${!j.open ? '<div style="margin-top:4px;"><span class="done-tag">✓ Job Completed</span></div>' : ''}`;
 }
 
 function schedShiftWeek(n) { schedWeekStart = addDaysLocal(schedWeekStart || mondayOf(new Date()), 7 * n); renderScheduleGrid(); }
@@ -4873,7 +4873,7 @@ function renderScheduleInto(o) {
               ${over ? `<span class="over-flag" style="margin-left:0;">Over by ${fmtHrs(total - est)}h</span>` : ''}
             </div>`;
           }
-          return `<div class="sched-item${j && !j.open ? ' sched-closed' : ''}${it._pending ? ' sched-pending' : ''}${overCls}"${click(it.id)}>${schedJobText(it)}${it.note ? `<div class="sched-note">${escWO(it.note)}</div>` : ''}${hrsHtml}</div>`;
+          return `<div class="sched-item${it._pending ? ' sched-pending' : ''}${overCls}"${click(it.id)}>${schedJobText(it)}${it.note ? `<div class="sched-note">${escWO(it.note)}</div>` : ''}${hrsHtml}</div>`;
         }
         return `<div class="sched-item${it._pending ? ' sched-pending' : ''}"${click(it.id)}>${escWO(it.note)}</div>`;
       }).join('');
@@ -5204,7 +5204,7 @@ function renderWorkerWeek() {
         const logged = entries.filter(e => e.worker === currentWorker && String(e.jobId) === String(it.jobId) && normaliseDate(e.date) === ds)
           .reduce((t, e) => t + (parseFloat(e.hours) || 0), 0);
         cells = `
-          <td><div class="wk-wo">${escWO(it.jobId)}</div>${j && j.priority ? `<span class="prio prio-${escWO(j.priority)}" style="margin-left:0;display:inline-block;margin-top:3px;">${escWO(j.priority)}</span>` : ''}${j && !j.open ? '<div class="text-muted" style="font-size:10px;margin-top:2px;">Closed</div>' : ''}</td>
+          <td><div class="wk-wo">${escWO(it.jobId)}</div>${j && j.priority ? `<span class="prio prio-${escWO(j.priority)}" style="margin-left:0;display:inline-block;margin-top:3px;">${escWO(j.priority)}</span>` : ''}${j && !j.open ? '<div style="margin-top:4px;"><span class="done-tag">✓ Job Completed</span></div>' : ''}</td>
           <td>${j ? escWO(j.property || '') : ''}</td>
           <td class="wk-desc">${j ? escWO(j.description || '') : ''}</td>
           <td class="wk-note">${escWO(it.note || '')}</td>
