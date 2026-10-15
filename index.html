@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-22 (Worker My Week as a table per day) -->
+<!-- BUILD MARKER: NB-23 (Schedule: WO list filtered to jobs assigned to the clicked worker) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -604,6 +604,7 @@ textarea { height: 60px; resize: none; }
           <p class="text-muted" id="sched-modal-sub" style="font-size:12px;margin-top:2px;"></p>
           <label style="margin-top:14px;">Work order or status</label>
           <select id="sched-item"></select>
+          <p class="wo-hint" id="sched-item-hint"></p>
           <label id="sched-note-label">Note (optional)</label>
           <textarea id="sched-note" placeholder="e.g. meet electrician 1pm, access via Soad"></textarea>
           <div id="sched-multi">
@@ -4821,14 +4822,17 @@ function renderScheduleGrid() {
   document.getElementById('sched-grid').innerHTML = html;
 }
 
-function fillSchedItemSelect() {
+function fillSchedItemSelect(worker) {
   const sel = document.getElementById('sched-item');
-  const openJobs = jobs.filter(j => j.open).slice().sort((a, b) => (parseInt(String(b.id).replace(/\D/g, ''), 10) || 0) - (parseInt(String(a.id).replace(/\D/g, ''), 10) || 0));
+  const openJobs = jobs.filter(j => j.open && expandAssignedTo(j.assignedTo).includes(worker)).slice().sort((a, b) => (parseInt(String(b.id).replace(/\D/g, ''), 10) || 0) - (parseInt(String(a.id).replace(/\D/g, ''), 10) || 0));
   let html = '<option value="">Select...</option>';
-  html += '<optgroup label="Other"><option value="note:">Free text (no WO)</option></optgroup>';
+  if (openJobs.length) html += `<optgroup label="Open work orders assigned to ${escWO(worker)}">` + openJobs.map(j => `<option value="job:${escWO(j.id)}">${escWO(j.id)} · ${escWO(propLabel(j.property, 40))}${j.description ? ' · ' + escWO(j.description.length > 50 ? j.description.slice(0, 50) + '…' : j.description) : ''}</option>`).join('') + '</optgroup>';
   if (scheduleStatuses.length) html += '<optgroup label="Statuses">' + scheduleStatuses.map(st => `<option value="status:${escWO(st.name)}">${escWO(st.name)}</option>`).join('') + '</optgroup>';
-  if (openJobs.length) html += '<optgroup label="Open work orders">' + openJobs.map(j => `<option value="job:${escWO(j.id)}">${escWO(j.id)} · ${escWO(propLabel(j.property, 40))}${j.description ? ' · ' + escWO(j.description.length > 50 ? j.description.slice(0, 50) + '…' : j.description) : ''}</option>`).join('') + '</optgroup>';
+  html += '<optgroup label="Other"><option value="note:">Free text (no WO)</option></optgroup>';
   sel.innerHTML = html;
+  document.getElementById('sched-item-hint').textContent = openJobs.length
+    ? 'Showing the ' + openJobs.length + ' open work order' + (openJobs.length === 1 ? '' : 's') + ' assigned to ' + worker + '.'
+    : 'No open work orders are assigned to ' + worker + ' — assign them on the WO Creation or Jobs tab first.';
   if (!sel._ssAttached) ssAttach('sched-item', 'Search WO, location or status...'); else ssRefresh('sched-item');
 }
 
@@ -4838,7 +4842,8 @@ function renderSchedChips(elId, options, selected) {
 }
 
 function openSchedModal(itemId, date, worker) {
-  fillSchedItemSelect();
+  const forWorker = itemId ? ((schedule.find(x => x.id === itemId) || {}).worker || '') : worker;
+  fillSchedItemSelect(forWorker);
   const sel = document.getElementById('sched-item');
   const note = document.getElementById('sched-note');
   const start = schedWeekStart || mondayOf(new Date());
@@ -4848,7 +4853,8 @@ function openSchedModal(itemId, date, worker) {
     schedModalState = { id: it.id, date: it.date, worker: it.worker };
     const val = it.type === 'job' ? 'job:' + it.jobId : it.type === 'status' ? 'status:' + it.status : 'note:';
     if (!Array.from(sel.options).some(o => o.value === val)) {
-      const o = document.createElement('option'); o.value = val; o.textContent = it.type === 'job' ? it.jobId + ' (closed)' : it.status;
+      const oj = it.type === 'job' ? jobs.find(x => String(x.id) === String(it.jobId)) : null;
+      const o = document.createElement('option'); o.value = val; o.textContent = it.type === 'job' ? it.jobId + (oj && oj.open ? ' (no longer assigned)' : ' (closed)') : it.status;
       sel.appendChild(o);
     }
     sel.value = val;
