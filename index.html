@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-21 (Schedule: Mon–Fri only) -->
+<!-- BUILD MARKER: NB-22 (Worker My Week as a table per day) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -169,6 +169,16 @@ textarea { height: 60px; resize: none; }
 .sched-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.35); display: flex; align-items: flex-start; justify-content: center; z-index: 10000; padding: 60px 16px; overflow-y: auto; }
 .sched-modal-box { width: 100%; max-width: 560px; margin: 0; }
 .wk-day { margin-bottom: 12px; }
+.wk-table td { padding: 8px 10px; font-size: 12px; vertical-align: middle; border-right: 0.5px solid var(--color-border-tertiary); border-bottom: 0.5px solid var(--color-border-tertiary); }
+.wk-table td:last-child { border-right: none; }
+.wk-table td.day-cell { vertical-align: top; border-bottom: 0.5px solid var(--color-border-tertiary); }
+.wk-table td.day-cell.wk-is-today { box-shadow: inset 3px 0 0 var(--color-text-primary); }
+.wk-table td.wk-status-cell { font-weight: 700; font-size: 13px; }
+.wk-table td.wk-empty { color: var(--color-text-secondary); font-style: italic; }
+.wk-table .wk-wo { font-weight: 700; font-size: 13px; }
+.wk-table .wk-desc { color: var(--color-text-primary); }
+.wk-table .wk-note { font-style: italic; color: var(--color-text-secondary); }
+.wk-table .wk-logged { text-align: center; font-weight: 600; white-space: nowrap; }
 .wk-day-head { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; margin-bottom: 6px; }
 .wk-today { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 20px; background: var(--color-text-primary); color: #fff; }
 .wk-status { padding: 10px 12px; border-radius: var(--border-radius-md); font-weight: 700; font-size: 14px; margin-bottom: 6px; }
@@ -5092,42 +5102,60 @@ function renderWorkerWeek() {
   const today = localDateStr(new Date());
   document.getElementById('wk-week-title').textContent = 'Week ' + isoWeekNumber(start);
   document.getElementById('wk-week-range').textContent = shortDot(start) + ' to ' + shortDot(addDaysLocal(start, 4));
-  const dayCount = 5;
-  let html = '';
-  for (let i = 0; i < dayCount; i++) {
+  const COLS = 6;
+  let rows = '';
+  for (let i = 0; i < 5; i++) {
     const d = addDaysLocal(start, i), ds = localDateStr(d);
     const items = schedItemsFor(ds, currentWorker);
-    html += `<div class="wk-day"><div class="wk-day-head">${SCHED_DAY_NAMES[i]} ${ordinal(d.getDate())}${ds === today ? '<span class="wk-today">Today</span>' : ''}</div>`;
-    if (!items.length) html += '<p class="text-muted" style="font-size:13px;margin:0 0 6px;">Nothing scheduled</p>';
-    items.forEach(it => {
+    const span = Math.max(items.length, 1);
+    const isToday = ds === today;
+    const dayCell = `<td class="day-cell${isToday ? ' wk-is-today' : ''}" rowspan="${span}">
+        <div class="day-name">${SCHED_DAY_NAMES[i]}</div>
+        <div class="day-date">${fmtUKDate(ds)}</div>
+        ${isToday ? '<span class="wk-today" style="display:inline-block;margin-top:4px;">Today</span>' : ''}
+      </td>`;
+    if (!items.length) {
+      rows += `<tr class="day-row">${dayCell}<td class="wk-empty" colspan="${COLS}">Nothing scheduled</td></tr>`;
+      continue;
+    }
+    items.forEach((it, k) => {
+      let cells;
       if (it.type === 'status') {
         const c = statusColor(it.status);
-        html += `<div class="wk-status" style="background:${escWO(c)};color:${textOn(c)};">${escWO(it.status)}${it.note ? `<div style="font-weight:400;font-size:12px;font-style:italic;">${escWO(it.note)}</div>` : ''}</div>`;
-        return;
+        cells = `<td class="wk-status-cell" colspan="${COLS}" style="background:${escWO(c)};color:${textOn(c)};">${escWO(it.status)}${it.note ? ` <span style="font-weight:400;font-style:italic;">— ${escWO(it.note)}</span>` : ''}</td>`;
+      } else if (it.type === 'note') {
+        cells = `<td class="wk-wo">—</td><td colspan="3" class="wk-desc">${escWO(it.note)}</td><td></td><td></td>`;
+      } else {
+        const j = jobs.find(x => String(x.id) === String(it.jobId));
+        const canLog = j && isJobLoggable(j) && ds <= today;
+        const logged = entries.filter(e => e.worker === currentWorker && String(e.jobId) === String(it.jobId) && normaliseDate(e.date) === ds)
+          .reduce((t, e) => t + (parseFloat(e.hours) || 0), 0);
+        cells = `
+          <td><div class="wk-wo">${escWO(it.jobId)}</div>${j && j.priority ? `<span class="prio prio-${escWO(j.priority)}" style="margin-left:0;display:inline-block;margin-top:3px;">${escWO(j.priority)}</span>` : ''}${j && !j.open ? '<div class="text-muted" style="font-size:10px;margin-top:2px;">Closed</div>' : ''}</td>
+          <td>${j ? escWO(j.property || '') : ''}</td>
+          <td class="wk-desc">${j ? escWO(j.description || '') : ''}</td>
+          <td class="wk-note">${escWO(it.note || '')}</td>
+          <td class="wk-logged">${logged ? fmtHrs(logged) + 'h' : '—'}</td>
+          <td style="text-align:right;">${canLog ? `<button class="btn btn-sm" onclick="logTimeForJob('${escWO(it.jobId)}', '${ds}')">Log time</button>` : ''}</td>`;
       }
-      if (it.type === 'note') {
-        html += `<div class="entry-row"><p class="job-codes" style="margin:0;"><strong>${escWO(it.note)}</strong></p></div>`;
-        return;
-      }
-      const j = jobs.find(x => String(x.id) === String(it.jobId));
-      const canLog = j && isJobLoggable(j) && ds <= today;
-      html += `<div class="entry-row">
-        <div class="row-between" style="gap:10px;flex-wrap:wrap;">
-          <div>
-            <span style="font-size:14px;font-weight:700;">${escWO(it.jobId)}</span>
-            ${j && j.priority ? `<span class="prio prio-${escWO(j.priority)}">${escWO(j.priority)}</span>` : ''}
-            ${j ? `<span class="job-codes" style="margin-left:10px;"><span>Location:</span> <strong>${escWO(propLabel(j.property, 50))}</strong></span>` : ''}
-            ${j && !j.open ? '<span class="text-muted" style="font-size:11px;margin-left:6px;">(closed)</span>' : ''}
-          </div>
-          ${canLog ? `<button class="btn btn-sm" onclick="logTimeForJob('${escWO(it.jobId)}', '${ds}')">Log time</button>` : ''}
-        </div>
-        ${j && j.description ? `<p class="job-codes" style="margin-top:4px;"><span>Description:</span> <strong>${escWO(j.description)}</strong></p>` : ''}
-        ${it.note ? `<p class="job-codes"><span>Note:</span> <strong>${escWO(it.note)}</strong></p>` : ''}
-      </div>`;
+      rows += `<tr class="day-row">${k === 0 ? dayCell : ''}${cells}</tr>`;
     });
-    html += '</div>';
   }
-  document.getElementById('wk-days').innerHTML = html;
+  document.getElementById('wk-days').innerHTML = `
+    <div class="week-table-wrap">
+      <table class="week-table wk-table" style="table-layout:fixed;">
+        <thead><tr>
+          <th style="width:110px;">Day</th>
+          <th style="width:100px;">W/O Number</th>
+          <th style="width:190px;">Location</th>
+          <th>Description</th>
+          <th style="width:170px;">Note</th>
+          <th style="width:64px;text-align:center;">Logged</th>
+          <th style="width:100px;"></th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
 }
 
 // ══════════════════════════════════════════════════════════════════
