@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-19 (Schedule: office week grid + worker My Week) -->
+<!-- BUILD MARKER: NB-20 (Schedule: single-operative slots, instant save, locked delete, on-schedule flag, Excel export) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -163,6 +163,7 @@ textarea { height: 60px; resize: none; }
 .sched-item .sched-note { font-style: italic; color: var(--color-text-secondary); }
 .sched-item.sched-status { font-weight: 700; text-align: center; padding: 8px 6px; }
 .sched-item.sched-closed { opacity: 0.6; }
+.sched-item.sched-pending { opacity: 0.55; outline: 1px dashed var(--color-border-primary); }
 .sched-add { font-size: 11px; border: 1px dashed #bbb; background: transparent; border-radius: 6px; width: 100%; padding: 4px; cursor: pointer; color: var(--color-text-secondary); font-family: inherit; }
 .sched-add:hover { border-color: var(--color-text-primary); color: var(--color-text-primary); }
 .sched-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.35); display: flex; align-items: flex-start; justify-content: center; z-index: 10000; padding: 60px 16px; overflow-y: auto; }
@@ -578,7 +579,7 @@ textarea { height: 60px; resize: none; }
               <button class="btn btn-sm" onclick="schedGoToday()">This week</button>
             </div>
             <div style="display:flex;gap:8px;">
-              <button class="btn btn-sm" onclick="copyPreviousScheduleWeek()">Copy last week</button>
+              <button class="btn btn-sm" onclick="exportScheduleXlsx()">⬇ Export Excel</button>
               <button class="btn btn-sm" onclick="refreshOffice()">↻ Refresh</button>
             </div>
           </div>
@@ -598,8 +599,6 @@ textarea { height: 60px; resize: none; }
           <div id="sched-multi">
             <label>Days</label>
             <div class="wo-chips" id="sched-days"></div>
-            <label>Operatives</label>
-            <div class="wo-chips" id="sched-workers"></div>
           </div>
           <div class="form-footer" style="display:flex;gap:8px;justify-content:space-between;margin-top:1.25rem;">
             <button class="btn" id="sched-delete-btn" onclick="deleteSchedItem()" style="color:var(--color-text-error);">Delete</button>
@@ -1224,6 +1223,8 @@ function workerLogin() {
   renderEntriesByDate();
   workerJobsView = 'open';
   wkWeekStart = mondayOf(new Date());
+  const meW = workers.find(x => x.name === currentWorker);
+  document.getElementById('wtab-myweek').style.display = meW && !isOnSchedule(meW) ? 'none' : '';
   document.getElementById('wjobs-search').value = '';
   switchWorkerTab('log');
   setSyncStatus('worker', syncQueue.length ? 'pending' : 'synced',
@@ -3934,6 +3935,7 @@ function renderWorkersList() {
         <input type="text" id="pin-reset-${w.name.replace(/\s/g,'_')}" placeholder="New PIN" maxlength="4"
           style="width:80px;letter-spacing:3px;font-size:12px;padding:4px 8px;">
         <button class="btn btn-sm" onclick="resetPin('${w.name}')">Reset PIN</button>
+        <button class="btn btn-sm" onclick="toggleWorkerOnSchedule('${w.name.replace(/'/g, "\\'")}')">${isOnSchedule(w) ? 'On schedule ✓' : 'Off schedule'}</button>
         <button class="btn btn-sm" onclick="toggleWorker('${w.name}', ${active})">${active ? 'Deactivate' : 'Reactivate'}</button>
       </div>
     </div>`;
@@ -4685,10 +4687,41 @@ let schedModalState = null;
 let isSavingSched = false;
 const SCHED_DAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
+let schedPendingDeletes = new Set();
+let schedSyncChain = Promise.resolve();
+let schedPendingCount = 0;
+
 function setScheduleFromData(data) {
-  if (Array.isArray(data.schedule)) schedule = data.schedule.map(x => ({ ...x, sort: parseFloat(x.sort) || 0 }));
+  if (Array.isArray(data.schedule)) {
+    const server = data.schedule.map(x => ({ ...x, sort: parseFloat(x.sort) || 0 })).filter(x => !schedPendingDeletes.has(x.id));
+    const pendingLocal = schedule.filter(x => x._pending);
+    pendingLocal.forEach(p => {
+      const i = server.findIndex(x => x.id === p.id);
+      if (i > -1) server[i] = p; else server.push(p);
+    });
+    schedule = server;
+  }
   if (Array.isArray(data.scheduleStatuses)) scheduleStatuses = data.scheduleStatuses;
 }
+
+function isOnSchedule(w) { return !(w.onSchedule === false || String(w.onSchedule).toUpperCase() === 'FALSE'); }
+function scheduleOps() { return workers.filter(w => w.active !== false && w.active !== 'FALSE' && isOnSchedule(w)); }
+
+function setSchedModalBusy(busy) {
+  ['sched-save-btn', 'sched-delete-btn'].forEach(id => { const b = document.getElementById(id); if (b) b.disabled = busy; });
+}
+
+function schedEnqueue(task, onError) {
+  schedPendingCount++;
+  setSyncStatus('office', 'pending', 'Saving schedule (' + schedPendingCount + ')...');
+  schedSyncChain = schedSyncChain.then(task).catch(err => { onError(err); }).finally(() => {
+    schedPendingCount--;
+    if (!schedPendingCount) setSyncStatus('office', 'synced', 'Schedule saved');
+    else setSyncStatus('office', 'pending', 'Saving schedule (' + schedPendingCount + ')...');
+  });
+}
+
+function newSchedId() { return 'sc' + Date.now() + Math.random().toString(36).slice(2, 7); }
 
 function mondayOf(d) {
   const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
@@ -4750,7 +4783,7 @@ function renderScheduleGrid() {
   document.getElementById('sched-week-range').textContent = shortDot(start) + ' to ' + shortDot(addDaysLocal(start, 4));
   document.getElementById('sched-legend').innerHTML = scheduleStatuses.map(st =>
     `<span class="sched-pill" style="background:${escWO(st.color)};color:${textOn(st.color)};">${escWO(st.name)}</span>`).join('');
-  const ops = workers.filter(w => w.active !== false && w.active !== 'FALSE');
+  const ops = scheduleOps();
   if (!ops.length) { document.getElementById('sched-grid').innerHTML = '<tr><td style="padding:12px;">No active workers.</td></tr>'; return; }
   let html = `<thead><tr><th class="sched-corner">Week ${isoWeekNumber(start)}<br><span style="font-weight:400;">(${shortDot(start)} to ${shortDot(addDaysLocal(start, 4))})</span></th>`;
   html += ops.map(w => `<th title="${escWO(w.name)}">${escWO(w.name)}</th>`).join('') + '</tr></thead><tbody>';
@@ -4766,13 +4799,13 @@ function renderScheduleGrid() {
       html += items.map(it => {
         if (it.type === 'status') {
           const c = statusColor(it.status);
-          return `<div class="sched-item sched-status" style="background:${escWO(c)};color:${textOn(c)};" onclick="openSchedModal('${escWO(it.id)}')">${escWO(it.status)}${it.note ? `<div style="font-weight:400;font-style:italic;">${escWO(it.note)}</div>` : ''}</div>`;
+          return `<div class="sched-item sched-status${it._pending ? ' sched-pending' : ''}" style="background:${escWO(c)};color:${textOn(c)};" onclick="openSchedModal('${escWO(it.id)}')">${escWO(it.status)}${it.note ? `<div style="font-weight:400;font-style:italic;">${escWO(it.note)}</div>` : ''}</div>`;
         }
         if (it.type === 'job') {
           const j = jobs.find(x => String(x.id) === String(it.jobId));
-          return `<div class="sched-item${j && !j.open ? ' sched-closed' : ''}" onclick="openSchedModal('${escWO(it.id)}')">${schedJobText(it)}${it.note ? `<div class="sched-note">${escWO(it.note)}</div>` : ''}</div>`;
+          return `<div class="sched-item${j && !j.open ? ' sched-closed' : ''}${it._pending ? ' sched-pending' : ''}" onclick="openSchedModal('${escWO(it.id)}')">${schedJobText(it)}${it.note ? `<div class="sched-note">${escWO(it.note)}</div>` : ''}</div>`;
         }
-        return `<div class="sched-item" onclick="openSchedModal('${escWO(it.id)}')">${escWO(it.note)}</div>`;
+        return `<div class="sched-item${it._pending ? ' sched-pending' : ''}" onclick="openSchedModal('${escWO(it.id)}')">${escWO(it.note)}</div>`;
       }).join('');
       const addStyle = bg ? ` style="color:${textOn(bg)};border-color:${textOn(bg) === '#fff' ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.4)'};"` : '';
       html += `<button class="sched-add"${addStyle} onclick="openSchedModal(null, '${ds}', '${escWO(w.name).replace(/'/g, "\\'")}')">+ Add</button></div></td>`;
@@ -4825,15 +4858,14 @@ function openSchedModal(itemId, date, worker) {
     sel.value = '';
     note.value = '';
     document.getElementById('sched-modal-title').textContent = 'Add to schedule';
-    document.getElementById('sched-modal-sub').textContent = 'Pick the days and operatives — the clicked slot is pre-selected.';
+    document.getElementById('sched-modal-sub').textContent = worker + ' — tick any other days to add the same slot to them.';
     document.getElementById('sched-multi').style.display = '';
     document.getElementById('sched-delete-btn').style.display = 'none';
     const days = Array.from({ length: 7 }, (_, i) => addDaysLocal(start, i)).map((d, i) => ({ value: localDateStr(d), label: SCHED_DAY_NAMES[i].slice(0, 3) + ' ' + d.getDate(), title: fmtUKDate(localDateStr(d)) }));
     renderSchedChips('sched-days', days, new Set([date]));
-    const ops = workers.filter(w => w.active !== false && w.active !== 'FALSE').map(w => ({ value: w.name, label: workerInitials(w.name), title: w.name }));
-    renderSchedChips('sched-workers', ops, new Set([worker]));
   }
   ssRefresh('sched-item');
+  setSchedModalBusy(false);
   document.getElementById('sched-modal').style.display = 'flex';
 }
 
@@ -4842,7 +4874,7 @@ function closeSchedModal() {
   schedModalState = null;
 }
 
-async function saveSchedModal() {
+function saveSchedModal() {
   if (isSavingSched || !schedModalState) return;
   const val = document.getElementById('sched-item').value;
   const note = document.getElementById('sched-note').value.trim();
@@ -4851,81 +4883,207 @@ async function saveSchedModal() {
   const ref = val.slice(type.length + 1);
   if (type === 'note' && !note) { alert('Enter the text for this slot'); return; }
   if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to change the schedule'); return; }
-  let items;
+  isSavingSched = true;
+  setSchedModalBusy(true);
+  let items, previous = [];
   if (schedModalState.id) {
     const cur = schedule.find(x => x.id === schedModalState.id);
+    if (!cur) { isSavingSched = false; closeSchedModal(); return; }
+    previous = [{ ...cur }];
     items = [{ id: cur.id, date: cur.date, worker: cur.worker, type, jobId: type === 'job' ? ref : '', status: type === 'status' ? ref : '', note, sort: cur.sort, updatedBy: officeUserInitials() }];
   } else {
     const days = Array.from(document.querySelectorAll('#sched-days .wo-chip.on')).map(b => b.getAttribute('data-v'));
-    const ops = Array.from(document.querySelectorAll('#sched-workers .wo-chip.on')).map(b => b.getAttribute('data-v'));
-    if (!days.length || !ops.length) { alert('Pick at least one day and one operative'); return; }
+    if (!days.length) { alert('Pick at least one day'); isSavingSched = false; setSchedModalBusy(false); return; }
     const base = Date.now();
-    items = [];
-    days.forEach(d => ops.forEach(w => items.push({ date: d, worker: w, type, jobId: type === 'job' ? ref : '', status: type === 'status' ? ref : '', note, sort: base + items.length, createdBy: officeUserInitials() })));
+    items = days.map((d, i) => ({ id: newSchedId(), date: d, worker: schedModalState.worker, type, jobId: type === 'job' ? ref : '', status: type === 'status' ? ref : '', note, sort: base + i, createdBy: officeUserInitials() }));
   }
-  isSavingSched = true;
-  const btn = document.getElementById('sched-save-btn');
-  btn.disabled = true; btn.textContent = 'Saving...';
-  setSyncStatus('office', 'pending', 'Saving schedule...');
-  try {
+  items.forEach(it => {
+    const i = schedule.findIndex(x => x.id === it.id);
+    const local = { ...it, _pending: true };
+    if (i > -1) schedule[i] = { ...schedule[i], ...local }; else schedule.push(local);
+  });
+  isSavingSched = false;
+  closeSchedModal();
+  renderScheduleGrid();
+  const ids = items.map(x => x.id);
+  schedEnqueue(async () => {
     const result = await api('saveScheduleItems', { items, performedBy: currentOfficeUser });
     (result.items || []).forEach(it => {
       const i = schedule.findIndex(x => x.id === it.id);
-      if (i > -1) schedule[i] = { ...schedule[i], ...it }; else schedule.push(it);
+      if (i > -1) schedule[i] = { ...schedule[i], ...it, _pending: false };
     });
-    closeSchedModal();
+    schedule.forEach(x => { if (ids.includes(x.id)) x._pending = false; });
+    if (document.getElementById('office-tab-schedule').style.display === 'block') renderScheduleGrid();
+  }, err => {
+    schedule = schedule.filter(x => !ids.includes(x.id));
+    previous.forEach(p => schedule.push(p));
     renderScheduleGrid();
-    setSyncStatus('office', 'synced', 'Schedule saved');
-  } catch (err) {
-    setSyncStatus('office', 'error', 'Schedule not saved');
-    alert('Could not save the schedule: ' + (err.message || err));
-  } finally {
-    isSavingSched = false;
-    btn.disabled = false; btn.textContent = 'Save';
-  }
+    alert('Could not save the schedule — your change has been undone.\n\n' + (err.message || err));
+  });
 }
 
-async function deleteSchedItem() {
-  if (!schedModalState || !schedModalState.id) return;
+function deleteSchedItem() {
+  if (isSavingSched || !schedModalState || !schedModalState.id) return;
   if (!confirm('Remove this slot from the schedule?')) return;
   if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to change the schedule'); return; }
+  isSavingSched = true;
+  setSchedModalBusy(true);
   const id = schedModalState.id;
-  try {
-    await api('deleteScheduleItem', { id, performedBy: currentOfficeUser });
-    schedule = schedule.filter(x => x.id !== id);
-    closeSchedModal();
+  const removed = schedule.find(x => x.id === id);
+  schedule = schedule.filter(x => x.id !== id);
+  schedPendingDeletes.add(id);
+  isSavingSched = false;
+  closeSchedModal();
+  renderScheduleGrid();
+  schedEnqueue(async () => {
+    try {
+      await api('deleteScheduleItem', { id, performedBy: currentOfficeUser });
+    } catch (err) {
+      if (!/not found/i.test(err.message || '')) throw err;
+    } finally {
+      schedPendingDeletes.delete(id);
+    }
+  }, err => {
+    if (removed) schedule.push({ ...removed, _pending: false });
     renderScheduleGrid();
-    setSyncStatus('office', 'synced', 'Slot removed');
-  } catch (err) {
-    if (/not found/i.test(err.message || '')) { schedule = schedule.filter(x => x.id !== id); closeSchedModal(); renderScheduleGrid(); return; }
-    alert('Could not remove the slot: ' + (err.message || err));
-  }
+    alert('Could not remove the slot — it has been put back.\n\n' + (err.message || err));
+  });
 }
 
-async function copyPreviousScheduleWeek() {
+function loadExcelJS() {
+  if (window.ExcelJS) return Promise.resolve(window.ExcelJS);
+  return new Promise((resolve, reject) => {
+    const sc = document.createElement('script');
+    sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js';
+    sc.onload = () => resolve(window.ExcelJS);
+    sc.onerror = () => reject(new Error('Could not load the Excel library — check your connection'));
+    document.head.appendChild(sc);
+  });
+}
+
+function schedExportText(it) {
+  if (it.type === 'status') return it.status;
+  if (it.type === 'note') return it.note;
+  const j = jobs.find(x => String(x.id) === String(it.jobId));
+  const parts = [];
+  if (j && j.property) parts.push(j.property);
+  if (j && j.description) parts.push(j.description);
+  if (it.note) parts.push(it.note);
+  return parts.join(' - ') + (parts.length ? ' - ' : '') + it.jobId;
+}
+
+async function exportScheduleXlsx() {
+  let ExcelJS;
+  try { ExcelJS = await loadExcelJS(); } catch (e) { alert(e.message); return; }
   const start = schedWeekStart || mondayOf(new Date());
-  const prevStart = addDaysLocal(start, -7);
-  const prevDates = Array.from({ length: 7 }, (_, i) => localDateStr(addDaysLocal(prevStart, i)));
-  const source = schedule.filter(x => prevDates.includes(x.date));
-  if (!source.length) { alert('Nothing scheduled in the previous week to copy.'); return; }
-  const thisDates = Array.from({ length: 7 }, (_, i) => localDateStr(addDaysLocal(start, i)));
-  const existing = schedule.filter(x => thisDates.includes(x.date)).length;
-  if (!confirm('Copy ' + source.length + ' slot(s) from Week ' + isoWeekNumber(prevStart) + ' into Week ' + isoWeekNumber(start) + '?' + (existing ? '\n\nThis week already has ' + existing + ' slot(s) — copied slots are added alongside them.' : ''))) return;
-  if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to change the schedule'); return; }
-  const base = Date.now();
-  const items = source.map((x, i) => ({
-    date: localDateStr(addDaysLocal(new Date(x.date + 'T00:00:00'), 7)), worker: x.worker, type: x.type,
-    jobId: x.jobId, status: x.status, note: x.note, sort: base + i, createdBy: officeUserInitials()
-  }));
-  setSyncStatus('office', 'pending', 'Copying schedule...');
+  const wk = isoWeekNumber(start);
+  const dayCount = weekHasWeekendItems(start) ? 7 : 5;
+  const days = Array.from({ length: dayCount }, (_, i) => addDaysLocal(start, i));
+  const ops = scheduleOps();
+  const argb = hex => 'FF' + String(hex || '#888888').replace('#', '').toUpperCase();
+  const fill = hex => ({ type: 'pattern', pattern: 'solid', fgColor: { argb: argb(hex) } });
+  const thin = { style: 'thin', color: { argb: 'FF000000' } };
+  const med = { style: 'medium', color: { argb: 'FF000000' } };
+
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Week ' + wk, { views: [{ state: 'frozen', xSplit: 0, ySplit: 3, zoomScale: 91 }] });
+  ws.pageSetup = { paperSize: 9, orientation: 'portrait', scale: 42, margins: { left: 0.7, right: 0.7, top: 0.75, bottom: 0.75, header: 0.3, footer: 0.3 } };
+  ws.getColumn(1).width = 18.33;
+  for (let c = 2; c <= ops.length + 1; c++) ws.getColumn(c).width = 23.89;
+
+  const a1 = ws.getCell(1, 1);
+  a1.value = 'Labour Pool Operatives';
+  a1.font = { name: 'Calibri', size: 14, bold: true };
+  scheduleStatuses.forEach((st, i) => {
+    const c = ws.getCell(1, 3 + i);
+    c.value = st.name;
+    c.fill = fill(st.color);
+    c.font = { name: 'Calibri', size: 11, bold: true, color: { argb: textOn(st.color) === '#fff' ? 'FFFFFFFF' : 'FF000000' } };
+    c.border = { top: med, bottom: med, left: med, right: thin };
+    c.alignment = { horizontal: 'center', vertical: 'middle' };
+  });
+  ws.getRow(1).height = 19.5;
+
+  const a2 = ws.getCell(2, 1);
+  a2.value = 'Week ' + wk + ' (' + shortDot(start) + ' to ' + shortDot(addDaysLocal(start, 4)) + ')';
+  a2.font = { name: 'Calibri', size: 10, bold: true };
+  a2.alignment = { horizontal: 'left' };
+  [1, 2].forEach(c => { ws.getCell(2, c).fill = fill('#FFFF00'); ws.getCell(2, c).border = { top: med, bottom: med, left: c === 1 ? med : undefined }; });
+  ws.getRow(2).height = 15.75;
+
+  ops.forEach((w, i) => {
+    const c = ws.getCell(3, 2 + i);
+    c.value = w.name;
+    c.font = { name: 'Calibri', size: 14, bold: true };
+    c.fill = fill('#C6D9F1');
+    c.border = { top: med, bottom: med, left: med, right: i === ops.length - 1 ? med : undefined };
+    c.alignment = { horizontal: 'left', vertical: 'middle' };
+  });
+  ws.getRow(3).height = 19.5;
+
+  let r = 4;
+  days.forEach((d, di) => {
+    const ds = localDateStr(d);
+    const perOp = ops.map(w => schedItemsFor(ds, w.name));
+    const statusOf = perOp.map(list => list.find(x => x.type === 'status'));
+    const rowsNeeded = Math.max(4, ...perOp.map((list, i) => statusOf[i] ? 1 : list.length));
+    const dayCell = ws.getCell(r, 1);
+    dayCell.value = SCHED_DAY_NAMES[di] + ' ' + ordinal(d.getDate());
+    dayCell.font = { name: 'Calibri', size: 12, bold: true };
+    dayCell.alignment = { vertical: 'middle' };
+    for (let k = 0; k < rowsNeeded; k++) {
+      ws.getCell(r + k, 1).border = { top: k === 0 ? med : undefined, bottom: k === rowsNeeded - 1 ? med : undefined, left: med, right: med };
+      let maxLines = 1;
+      ops.forEach((w, oi) => {
+        const c = ws.getCell(r + k, 2 + oi);
+        const st = statusOf[oi];
+        let text = '';
+        if (st) {
+          c.fill = fill(statusColor(st.status));
+          if (k === 0) text = st.status + (st.note ? ' - ' + st.note : '');
+          c.font = { name: 'Calibri', size: 12, bold: true, color: { argb: textOn(statusColor(st.status)) === '#fff' ? 'FFFFFFFF' : 'FF000000' } };
+        } else {
+          const it = perOp[oi][k];
+          if (it) text = schedExportText(it);
+          c.font = { name: 'Calibri', size: 12, bold: true };
+        }
+        if (text) c.value = text;
+        c.alignment = { wrapText: true, vertical: 'middle' };
+        c.border = { top: k === 0 ? med : thin, bottom: k === rowsNeeded - 1 ? med : thin, left: med, right: oi === ops.length - 1 ? med : thin };
+        maxLines = Math.max(maxLines, Math.ceil(String(text).length / 20) || 1);
+      });
+      ws.getRow(r + k).height = Math.max(80.1, maxLines * 16 + 8);
+    }
+    r += rowsNeeded;
+  });
+
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'Labour Pool Schedule - Week ' + wk + ' (' + shortDot(start) + ').xlsx';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
+async function toggleWorkerOnSchedule(name) {
+  const w = workers.find(x => x.name === name);
+  if (!w) return;
+  const next = !isOnSchedule(w);
+  if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to change this'); return; }
+  const prev = w.onSchedule;
+  w.onSchedule = next;
+  renderWorkersList();
+  if (document.getElementById('office-tab-schedule').style.display === 'block') renderScheduleGrid();
   try {
-    const result = await api('saveScheduleItems', { items, performedBy: currentOfficeUser });
-    (result.items || []).forEach(it => schedule.push(it));
-    renderScheduleGrid();
-    setSyncStatus('office', 'synced', items.length + ' slot(s) copied');
+    await api('setWorkerOnSchedule', { name, onSchedule: next, performedBy: currentOfficeUser });
+    localStorage.setItem('workers', JSON.stringify(workers));
+    setSyncStatus('office', 'synced', name + (next ? ' added to' : ' removed from') + ' schedule');
   } catch (err) {
-    setSyncStatus('office', 'error', 'Copy failed');
-    alert('Could not copy the schedule: ' + (err.message || err));
+    w.onSchedule = prev;
+    renderWorkersList();
+    alert('Could not update ' + name + ': ' + (err.message || err));
   }
 }
 
