@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-09 (Jobs list: labelled Location/Cost Centre + Description) -->
+<!-- BUILD MARKER: NB-11 (Jobs list: sorted by WO number, highest first) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -135,10 +135,12 @@ textarea { height: 60px; resize: none; }
 .jobs-toggle button { border: none; background: transparent; padding: 6px 14px; font-size: 13px; font-weight: 500; cursor: pointer; font-family: inherit; color: var(--color-text-secondary); min-height: 34px; }
 .jobs-toggle button.active { background: var(--color-text-primary); color: #fff; }
 .job-dates { font-size: 12px; color: var(--color-text-secondary); white-space: nowrap; }
-.job-dates strong { font-weight: 600; color: var(--color-text-primary); }
+.job-dates span, .job-codes span { font-weight: 600; color: var(--color-text-primary); }
+.job-dates strong, .job-codes strong { font-weight: 400; color: var(--color-text-primary); }
+.job-dates .job-dates-sep, .job-codes .job-dates-sep { font-weight: 400; color: var(--color-border-secondary, #ccc); }
+.job-codes strong.job-cc { color: var(--color-text-secondary); }
 .job-dates-sep { margin: 0 10px; color: var(--color-border-secondary, #ccc); }
 .job-codes { margin-top: 2px; font-size: 12px; color: var(--color-text-secondary); line-height: 1.6; }
-.job-codes strong { font-weight: 600; color: var(--color-text-primary); }
 .job-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .prio-P0 { background: #fde2e1; color: #a61b1b; }
 .prio-P1 { background: #fde9d4; color: #9a4a00; }
@@ -2202,9 +2204,7 @@ function renderJobsList() {
   document.getElementById('jobs-view-closed').textContent = 'Closed (' + closedJobs.length + ')';
   const q = (document.getElementById('jobs-search').value || '').trim().toLowerCase();
   const woNum = id => { const m = /(\d+)/.exec(String(id)); return m ? parseInt(m[1], 10) : 0; };
-  let list = jobsView === 'open'
-    ? openJobs.slice().sort((a, b) => String(a.priority || 'P9').localeCompare(String(b.priority || 'P9')) || woNum(a.id) - woNum(b.id))
-    : closedJobs.slice().sort((a, b) => String(b.closedDate || '').localeCompare(String(a.closedDate || '')) || woNum(b.id) - woNum(a.id));
+  let list = (jobsView === 'open' ? openJobs : closedJobs).slice().sort((a, b) => woNum(b.id) - woNum(a.id));
   if (q) {
     list = list.filter(j => [j.id, j.property, j.description, j.costCentre, j.costCode, j.trade, j.priority, expandAssignedTo(j.assignedTo).map(workerInitials).join(' ')]
       .some(v => String(v || '').toLowerCase().includes(q)));
@@ -2253,9 +2253,9 @@ function renderJobRow(j) {
     <div class="entry-row">
       <div class="row-between" style="gap:12px;">
         <div>
-          <span style="font-size:13px;font-weight:500;">${j.id}</span>
+          <span style="font-size:14px;font-weight:700;">${j.id}</span>
           ${j.priority ? `<span class="prio prio-${escWO(j.priority)}">${escWO(j.priority)}</span>` : ''}
-          <span class="job-codes" style="margin-left:10px;"><span>Location:</span> <strong>${escWO(propLabel(j.property, 50))}</strong>${j.costCentre ? `<span class="job-dates-sep">|</span><span>Cost Centre:</span> <strong>${escWO(j.costCentre)}</strong>` : ''}</span>
+          <span class="job-codes" style="margin-left:10px;"><span>Location:</span> <strong>${escWO(propLabel(j.property, 50))}</strong>${j.costCentre ? `<span class="job-dates-sep">|</span><strong class="job-cc">${escWO(j.costCentre)}</strong>` : ''}</span>
         </div>
         <div class="job-actions">
           ${sched}
