@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-06 (Jobs tab: labelled Start Date | End Date) -->
+<!-- BUILD MARKER: NB-07 (WO Creation: Cost Centre rename, Cost Code + Trade pickers) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -448,8 +448,16 @@ textarea { height: 60px; resize: none; }
               <label>Location <span style="color:var(--color-text-error)">*</span></label>
               <div class="wo-loc-row">
                 <select id="wo-location" onchange="woLocationChanged()"></select>
-                <input type="text" id="wo-costcode" class="wo-readonly" readonly tabindex="-1" placeholder="Cost code">
+                <input type="text" id="wo-costcentre" class="wo-readonly" readonly tabindex="-1" placeholder="Cost centre" title="Cost centre">
               </div>
+            </div>
+            <div>
+              <label>Cost code <span style="color:var(--color-text-error)">*</span></label>
+              <select id="wo-costcode"></select>
+            </div>
+            <div>
+              <label>Trade <span style="color:var(--color-text-error)">*</span></label>
+              <select id="wo-trade"></select>
             </div>
             <div>
               <label>Priority <span style="color:var(--color-text-error)">*</span></label>
@@ -944,6 +952,7 @@ function loadInitialData() {
     });
     recurringJobs = (data.recurringJobs || []).map(j => ({ ...j, assignedTo: String(j.assignedTo || '') }));
     setPropertiesFromData(data.properties || []);
+    setCodeListsFromData(data);
     weekSubmissions = data.weekSubmissions || [];
     absenceTypes = (data.absenceTypes || []);
     overtimeRequests = (data.overtimeRequests || []);
@@ -1142,6 +1151,7 @@ async function pollJobs() {
     absenceTypes = data.absenceTypes || absenceTypes;
     overtimeRequests = data.overtimeRequests || overtimeRequests;
     if (data.properties) setPropertiesFromData(data.properties);
+    setCodeListsFromData(data);
     weekSubmissions = data.weekSubmissions || weekSubmissions;
     overtimeRequests = overtimeRequests.map(o => {
       if (o.property && o.description) return o;
@@ -2135,6 +2145,7 @@ async function refreshOffice() {
       });
         recurringJobs = (data.recurringJobs || []).map(j => ({ ...j, assignedTo: String(j.assignedTo || '') }));
     if (data.properties) setPropertiesFromData(data.properties);
+    setCodeListsFromData(data);
     weekSubmissions = data.weekSubmissions || weekSubmissions;
       absenceTypes = data.absenceTypes || [];
       overtimeRequests = data.overtimeRequests || [];
@@ -2193,7 +2204,7 @@ function renderJobsList() {
     ? openJobs.slice().sort((a, b) => String(a.priority || 'P9').localeCompare(String(b.priority || 'P9')) || woNum(a.id) - woNum(b.id))
     : closedJobs.slice().sort((a, b) => String(b.closedDate || '').localeCompare(String(a.closedDate || '')) || woNum(b.id) - woNum(a.id));
   if (q) {
-    list = list.filter(j => [j.id, j.property, j.description, j.costCode, j.priority, expandAssignedTo(j.assignedTo).map(workerInitials).join(' ')]
+    list = list.filter(j => [j.id, j.property, j.description, j.costCentre, j.costCode, j.trade, j.priority, expandAssignedTo(j.assignedTo).map(workerInitials).join(' ')]
       .some(v => String(v || '').toLowerCase().includes(q)));
   }
   el.innerHTML = list.length
@@ -2237,7 +2248,7 @@ function renderJobRow(j) {
         <div>
           <span style="font-size:13px;font-weight:500;">${j.id}</span>
           ${j.priority ? `<span class="prio prio-${escWO(j.priority)}">${escWO(j.priority)}</span>` : ''}
-          <span class="text-muted" style="font-size:12px;margin-left:8px;">${escWO(propLabel(j.property, 35))}${j.costCode ? ' · ' + escWO(j.costCode) : ''}</span>
+          <span class="text-muted" style="font-size:12px;margin-left:8px;">${escWO(propLabel(j.property, 35))}${j.costCentre ? ' · ' + escWO(j.costCentre) : ''}</span>
         </div>
         <div class="job-actions">
           ${sched}
@@ -2247,7 +2258,7 @@ function renderJobRow(j) {
         </div>
       </div>
       <p class="text-muted" style="margin-top:2px;font-size:12px;">${escWO(j.description || '')}</p>
-      <p style="margin-top:2px;font-size:11px;color:var(--color-text-secondary);">${assignedTxt ? 'Assigned: ' + escWO(assignedTxt) : 'Unassigned'}${j.reportedBy ? ' · Reported by ' + escWO(j.reportedBy) : ''}${j.reportedDate ? ' · ' + fmtUKDate(j.reportedDate) : ''}${!j.open && (j.closedDate || j.closedBy) ? ' · Closed' + (j.closedDate ? ' ' + fmtUKDate(j.closedDate) : '') + (j.closedBy ? ' by ' + escWO(j.closedBy) : '') : ''}</p>
+      <p style="margin-top:2px;font-size:11px;color:var(--color-text-secondary);">${j.trade ? `<span title="${escWO(codeDesc(woTrades, j.trade))}">Trade: ${escWO(j.trade)}</span> · ` : ''}${j.costCode ? `<span title="${escWO(codeDesc(woCostCodes, j.costCode))}">Cost code: ${escWO(j.costCode)}</span> · ` : ''}${assignedTxt ? 'Assigned: ' + escWO(assignedTxt) : 'Unassigned'}${j.reportedBy ? ' · Reported by ' + escWO(j.reportedBy) : ''}${j.reportedDate ? ' · ' + fmtUKDate(j.reportedDate) : ''}${!j.open && (j.closedDate || j.closedBy) ? ' · Closed' + (j.closedDate ? ' ' + fmtUKDate(j.closedDate) : '') + (j.closedBy ? ' by ' + escWO(j.closedBy) : '') : ''}</p>
     </div>`;
 }
 
@@ -4534,10 +4545,33 @@ var woLocations = [];
 let woSelectedWorkers = new Set();
 let isCreatingWO = false;
 
+var woCostCodes = [];
+var woTrades = [];
+
+function setCodeListsFromData(data) {
+  const norm = list => (list || []).map(c => ({ code: String(c.code || '').trim(), description: String(c.description || '').trim() })).filter(c => c.code);
+  if (data.costCodes) woCostCodes = norm(data.costCodes);
+  if (data.trades) woTrades = norm(data.trades);
+}
+
+function codeDesc(list, code) {
+  const c = list.find(x => x.code === String(code));
+  return c ? c.description : '';
+}
+
+function fillCodeSelect(selId, list, emptyLabel, missingLabel) {
+  const sel = document.getElementById(selId);
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">' + (list.length ? emptyLabel : missingLabel) + '</option>' +
+    list.map(c => `<option value="${escWO(c.code)}">${escWO(c.code)}${c.description ? ' – ' + escWO(c.description) : ''}</option>`).join('');
+  if (cur && list.find(c => c.code === cur)) sel.value = cur;
+  if (!sel._ssAttached) ssAttach(selId, 'Search ' + emptyLabel.replace(/^Select /, '').replace(/\.\.\.$/, '') + '...'); else ssRefresh(selId);
+}
+
 function setPropertiesFromData(list) {
   woLocations = (list || []).map(function(p) {
-    if (typeof p === 'string') return { name: p.trim(), costCode: '' };
-    return { name: String(p.name || '').trim(), costCode: String(p.costCode || '').trim() };
+    if (typeof p === 'string') return { name: p.trim(), costCentre: '' };
+    return { name: String(p.name || '').trim(), costCentre: String(p.costCentre || p.costCode || '').trim() };
   }).filter(function(p) { return p.name; });
   rjProperties = woLocations.map(function(p) { return p.name; });
 }
@@ -4608,6 +4642,9 @@ function initWOForm() {
   if (!locSel._ssAttached) ssAttach('wo-location', 'Search locations...'); else ssRefresh('wo-location');
   woLocationChanged();
 
+  fillCodeSelect('wo-costcode', woCostCodes, 'Select cost code...', 'No cost codes — add them to the CostCodes sheet');
+  fillCodeSelect('wo-trade', woTrades, 'Select trade...', 'No trades — add them to the Trades sheet');
+
   const prSel = document.getElementById('wo-priority');
   if (!prSel.options.length) {
     prSel.innerHTML = '<option value="">Select priority...</option>' +
@@ -4641,7 +4678,7 @@ function toggleWOAssign(btn) {
 function woLocationChanged() {
   const name = document.getElementById('wo-location').value;
   const loc = woLocations.find(p => p.name === name);
-  document.getElementById('wo-costcode').value = loc ? loc.costCode : '';
+  document.getElementById('wo-costcentre').value = loc ? loc.costCentre : '';
 }
 
 function woPriorityChanged() {
@@ -4672,7 +4709,9 @@ function woStartChanged() {
 function resetWOForm() {
   document.getElementById('wo-description').value = '';
   document.getElementById('wo-location').value = '';
+  document.getElementById('wo-costcentre').value = '';
   document.getElementById('wo-costcode').value = '';
+  document.getElementById('wo-trade').value = '';
   document.getElementById('wo-priority').value = '';
   document.getElementById('wo-sched-start').value = localDateStr(new Date());
   document.getElementById('wo-sched-end').value = '';
@@ -4685,6 +4724,8 @@ async function createWorkOrder() {
   if (isCreatingWO) return;
   const description = document.getElementById('wo-description').value.trim();
   const location = document.getElementById('wo-location').value;
+  const costCode = document.getElementById('wo-costcode').value;
+  const trade = document.getElementById('wo-trade').value;
   const priority = document.getElementById('wo-priority').value;
   const schedStart = document.getElementById('wo-sched-start').value;
   const schedEnd = document.getElementById('wo-sched-end').value;
@@ -4692,6 +4733,8 @@ async function createWorkOrder() {
 
   if (!description) { alert('Please enter a description of the works'); return; }
   if (!location) { alert('Please select a location'); return; }
+  if (!costCode) { alert('Please select a cost code'); return; }
+  if (!trade) { alert('Please select a trade'); return; }
   if (!p) { alert('Please select a priority'); return; }
   if (!p.none && (!schedStart || !schedEnd)) { alert('Please set a scheduled start and end date'); return; }
   if (schedStart && schedEnd && schedEnd < schedStart) { alert('Scheduled end date cannot be before the start date'); return; }
@@ -4701,7 +4744,9 @@ async function createWorkOrder() {
   const assignedNames = workers.filter(w => woSelectedWorkers.has(w.name)).map(w => w.name);
   const job = {
     property: location,
-    costCode: loc ? loc.costCode : '',
+    costCentre: loc ? loc.costCentre : '',
+    costCode,
+    trade,
     description,
     priority,
     reportedDate: localDateStr(new Date()),
