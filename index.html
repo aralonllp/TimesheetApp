@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-17 (Worker view: My Jobs tab with Open/Closed split) -->
+<!-- BUILD MARKER: NB-18 (Workers can close jobs; 5-day window to keep logging hours on closed jobs) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -1250,6 +1250,12 @@ function populateJobDropdown() {
     html += mineAll.map(j => `<option value="${j.id}">${j.id} · ${propLabel(j.property)} · ${j.description && j.description.length > 60 ? j.description.slice(0, 60) + '…' : (j.description || '')}</option>`).join('');
     html += `</optgroup>`;
   }
+  const recentlyClosed = jobs.filter(j => !j.open && isJobLoggable(j) && expandAssignedTo(j.assignedTo).includes(currentWorker));
+  if (recentlyClosed.length) {
+    html += `<optgroup label="Recently closed — hours still allowed">`;
+    html += recentlyClosed.map(j => `<option value="${j.id}">${j.id} · ${propLabel(j.property)} · ${j.description && j.description.length > 50 ? j.description.slice(0, 50) + '…' : (j.description || '')} · until ${fmtUKDate(closedGraceEnd(j))}</option>`).join('');
+    html += `</optgroup>`;
+  }
 
   const activeAbsenceTypes = absenceTypes.filter(a => a.active !== false && a.active !== 'FALSE');
   if (activeAbsenceTypes.length) {
@@ -1766,7 +1772,7 @@ function renderWeek(wc) {
                 <label>Job</label>
                 <select id="ej-w-${e.id}">
                   ${(() => {
-                    const openJobs = jobs.filter(j => j.open || j.id === e.jobId);
+                    const openJobs = jobs.filter(j => isJobLoggable(j) || j.id === e.jobId);
                     const absTypes = absenceTypes.filter(a => a.active !== false && a.active !== 'FALSE');
                     const fmt = j => `<option value="${j.id}" ${j.id === e.jobId ? 'selected' : ''}>${j.id} · ${propLabel(j.property || j.name || '')} · ${(j.description || j.name || '').slice(0,40)}</option>`;
                     let html = '';
@@ -4574,6 +4580,51 @@ async function deleteOTRequest(id) {
 // ══════════════════════════════════════════════════════════════════
 
 let workerJobsView = 'open';
+const CLOSED_GRACE_DAYS = 5;
+
+function closedGraceEnd(j) {
+  if (!j.closedDate) return '';
+  const d = new Date(String(j.closedDate).slice(0, 10) + 'T00:00:00');
+  if (isNaN(d.getTime())) return '';
+  d.setDate(d.getDate() + CLOSED_GRACE_DAYS);
+  return localDateStr(d);
+}
+
+function isJobLoggable(j) {
+  if (j.open) return true;
+  const end = closedGraceEnd(j);
+  return !!end && localDateStr(new Date()) <= end;
+}
+
+let isWorkerClosingJob = false;
+async function workerCloseJob(id) {
+  if (isWorkerClosingJob) return;
+  const job = jobs.find(j => j.id === id);
+  if (!job || !job.open) return;
+  if (!confirm('Close ' + id + '?\n\nYou can still log hours against it for ' + CLOSED_GRACE_DAYS + ' days.')) return;
+  if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to close a job'); return; }
+  isWorkerClosingJob = true;
+  setSyncStatus('worker', 'pending', 'Closing ' + id + '...');
+  try {
+    const result = await api('closeJob', { id, performedBy: currentWorker, closedBy: workerInitials(currentWorker) });
+    job.open = false;
+    job.closedDate = result.closedDate || localDateStr(new Date());
+    job.closedBy = result.closedBy || workerInitials(currentWorker);
+    localStorage.setItem('jobs', JSON.stringify(jobs));
+    const sel = document.getElementById('job-select');
+    const keep = sel.value;
+    populateJobDropdown();
+    sel.value = keep;
+    if (typeof ssSyncLabel === 'function') ssSyncLabel('job-select');
+    renderWorkerJobs();
+    setSyncStatus('worker', 'synced', id + ' closed');
+  } catch (err) {
+    setSyncStatus('worker', 'error', 'Could not close ' + id);
+    alert('Could not close ' + id + ': ' + (err.message || err));
+  } finally {
+    isWorkerClosingJob = false;
+  }
+}
 
 function switchWorkerTab(tab) {
   document.getElementById('wtab-log').classList.toggle('active', tab === 'log');
@@ -4635,12 +4686,13 @@ function renderWorkerJobRow(j, total, mine) {
         </div>
         <div class="job-actions">
           ${dates}
-          ${j.open ? `<button class="btn btn-sm" onclick="logTimeForJob('${escWO(j.id)}')">Log time</button>` : ''}
+          ${isJobLoggable(j) ? `<button class="btn btn-sm" onclick="logTimeForJob('${escWO(j.id)}')">Log time</button>` : ''}
+          ${j.open ? `<button class="btn btn-sm" onclick="workerCloseJob('${escWO(j.id)}')">Close job</button>` : ''}
         </div>
       </div>
       ${j.description ? `<p class="job-codes" style="margin-top:4px;"><span>Description:</span> <strong>${escWO(j.description)}</strong></p>` : ''}
       <p class="job-codes">${parts.join('<span class="job-dates-sep">|</span>')}</p>
-      <p style="margin-top:2px;font-size:11px;color:var(--color-text-secondary);">${others.length ? 'Also assigned: ' + escWO(others.map(workerInitials).join(', ')) + ' · ' : ''}Reported ${j.reportedDate ? fmtUKDate(j.reportedDate) : ''}${!j.open && j.closedDate ? ' · Closed ' + fmtUKDate(j.closedDate) : ''}</p>
+      <p style="margin-top:2px;font-size:11px;color:var(--color-text-secondary);">${others.length ? 'Also assigned: ' + escWO(others.map(workerInitials).join(', ')) + ' · ' : ''}Reported ${j.reportedDate ? fmtUKDate(j.reportedDate) : ''}${!j.open && j.closedDate ? ' · Closed ' + fmtUKDate(j.closedDate) + (j.closedBy ? ' by ' + escWO(j.closedBy) : '') : ''}${!j.open && isJobLoggable(j) ? ` · <span style="color:var(--color-text-warning, #9a4a00);font-weight:600;">Hours can be added until ${fmtUKDate(closedGraceEnd(j))}</span>` : ''}</p>
     </div>`;
 }
 
