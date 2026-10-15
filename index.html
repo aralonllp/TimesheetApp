@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-20 (Schedule: single-operative slots, instant save, locked delete, on-schedule flag, Excel export) -->
+<!-- BUILD MARKER: NB-21 (Schedule: Mon–Fri only) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -4743,11 +4743,6 @@ function isoWeekNumber(d) {
 function ordinal(n) { const s = ['th', 'st', 'nd', 'rd'], v = n % 100; return n + (s[(v - 20) % 10] || s[v] || s[0]); }
 function shortDot(d) { return String(d.getDate()).padStart(2, '0') + '.' + String(d.getMonth() + 1).padStart(2, '0') + '.' + String(d.getFullYear()).slice(2); }
 
-function weekHasWeekendItems(start, workerFilter) {
-  const sat = localDateStr(addDaysLocal(start, 5)), sun = localDateStr(addDaysLocal(start, 6));
-  return schedule.some(x => (x.date === sat || x.date === sun) && (!workerFilter || x.worker === workerFilter));
-}
-
 function statusColor(name) {
   const st = scheduleStatuses.find(x => x.name === name);
   return st ? st.color : '#888888';
@@ -4776,7 +4771,7 @@ function schedGoToday() { schedWeekStart = mondayOf(new Date()); renderScheduleG
 function renderScheduleGrid() {
   if (!schedWeekStart) schedWeekStart = mondayOf(new Date());
   const start = schedWeekStart;
-  const dayCount = weekHasWeekendItems(start) ? 7 : 5;
+  const dayCount = 5;
   const days = Array.from({ length: dayCount }, (_, i) => addDaysLocal(start, i));
   const today = localDateStr(new Date());
   document.getElementById('sched-week-title').textContent = 'Week ' + isoWeekNumber(start);
@@ -4861,7 +4856,7 @@ function openSchedModal(itemId, date, worker) {
     document.getElementById('sched-modal-sub').textContent = worker + ' — tick any other days to add the same slot to them.';
     document.getElementById('sched-multi').style.display = '';
     document.getElementById('sched-delete-btn').style.display = 'none';
-    const days = Array.from({ length: 7 }, (_, i) => addDaysLocal(start, i)).map((d, i) => ({ value: localDateStr(d), label: SCHED_DAY_NAMES[i].slice(0, 3) + ' ' + d.getDate(), title: fmtUKDate(localDateStr(d)) }));
+    const days = Array.from({ length: 5 }, (_, i) => addDaysLocal(start, i)).map((d, i) => ({ value: localDateStr(d), label: SCHED_DAY_NAMES[i].slice(0, 3) + ' ' + d.getDate(), title: fmtUKDate(localDateStr(d)) }));
     renderSchedChips('sched-days', days, new Set([date]));
   }
   ssRefresh('sched-item');
@@ -4977,7 +4972,7 @@ async function exportScheduleXlsx() {
   try { ExcelJS = await loadExcelJS(); } catch (e) { alert(e.message); return; }
   const start = schedWeekStart || mondayOf(new Date());
   const wk = isoWeekNumber(start);
-  const dayCount = weekHasWeekendItems(start) ? 7 : 5;
+  const dayCount = 5;
   const days = Array.from({ length: dayCount }, (_, i) => addDaysLocal(start, i));
   const ops = scheduleOps();
   const argb = hex => 'FF' + String(hex || '#888888').replace('#', '').toUpperCase();
@@ -5097,7 +5092,7 @@ function renderWorkerWeek() {
   const today = localDateStr(new Date());
   document.getElementById('wk-week-title').textContent = 'Week ' + isoWeekNumber(start);
   document.getElementById('wk-week-range').textContent = shortDot(start) + ' to ' + shortDot(addDaysLocal(start, 4));
-  const dayCount = weekHasWeekendItems(start, currentWorker) ? 7 : 5;
+  const dayCount = 5;
   let html = '';
   for (let i = 0; i < dayCount; i++) {
     const d = addDaysLocal(start, i), ds = localDateStr(d);
