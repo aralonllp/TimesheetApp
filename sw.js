@@ -3,12 +3,16 @@
 //  Caches the app shell for offline use
 // ══════════════════════════════════════════════════════════════════
 
-const CACHE_NAME = 'jobsystem-v1';
+const CACHE_NAME = 'jobsystem-v2';
 
 // Files to cache on install
 const PRECACHE_URLS = [
-  '/',
-  '/index.html'
+  './',
+  './index.html',
+  './manifest.json',
+  './icon-192.png',
+  './icon-512.png',
+  './apple-touch-icon.png'
 ];
 
 // Install — cache the app shell
@@ -52,7 +56,7 @@ self.addEventListener('fetch', event => {
           caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
           return response;
         })
-        .catch(() => caches.match('/index.html'))
+        .catch(() => caches.match('./index.html'))
     );
     return;
   }
