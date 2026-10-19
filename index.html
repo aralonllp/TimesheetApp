@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-29 (Installable app: manifest, LP icons, service worker path fixed for GitHub Pages sub-folder) -->
+<!-- BUILD MARKER: NB-30 (Send Schedules: choose recipients in a pop-up) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -604,7 +604,7 @@ textarea { height: 60px; resize: none; }
               <button class="btn btn-sm" onclick="schedGoToday()">This week</button>
             </div>
             <div style="display:flex;gap:8px;">
-              <button class="btn btn-sm btn-primary" id="send-schedules-btn" onclick="sendSchedules()">📣 Send Schedules</button>
+              <button class="btn btn-sm btn-primary" id="send-schedules-btn" onclick="sendSchedules()">Send Schedules</button>
               <button class="btn btn-sm" onclick="exportScheduleXlsx()">⬇ Export Excel</button>
               <button class="btn btn-sm" onclick="refreshOffice()">↻ Refresh</button>
             </div>
@@ -631,6 +631,20 @@ textarea { height: 60px; resize: none; }
           </div>
           <div class="sched-legend" id="sv-legend"></div>
           <div class="sched-scroll sched-ro"><table class="sched-grid" id="sv-grid"></table></div>
+        </div>
+      </div>
+
+      <div id="send-sched-modal" class="sched-modal" style="display:none;" onmousedown="if(event.target===this)closeSendSchedModal()">
+        <div class="card sched-modal-box">
+          <p class="section-heading">Send schedules</p>
+          <p class="text-muted" id="send-sched-week" style="font-size:12px;margin-top:2px;"></p>
+          <label style="margin-top:14px;">Send to</label>
+          <div class="wo-chips" id="send-sched-chips"></div>
+          <p class="wo-hint" id="send-sched-summary"></p>
+          <div class="form-footer" style="display:flex;gap:8px;justify-content:flex-end;margin-top:1.25rem;">
+            <button class="btn" onclick="closeSendSchedModal()">Cancel</button>
+            <button class="btn btn-primary" id="send-sched-confirm" onclick="confirmSendSchedules()">Send</button>
+          </div>
         </div>
       </div>
 
@@ -4850,22 +4864,61 @@ async function sendSchedules() {
     if (lines.length) recipients.push({ name: w.name, lines });
   });
   if (!recipients.length) { alert('Nobody has anything scheduled for ' + label + '.'); return; }
-  if (!confirm('Send ' + label + ' schedules to ' + recipients.length + ' worker(s)?\n\n' + recipients.map(r => '• ' + r.name).join('\n'))) return;
+  sendSchedState = { label, recipients, selected: new Set(recipients.map(r => r.name)) };
+  document.getElementById('send-sched-week').textContent = label + ' — everyone with something scheduled is selected. Tap to remove anyone you don\'t want to send to.';
+  renderSendSchedChips();
+  document.getElementById('send-sched-modal').style.display = 'flex';
+}
+
+let sendSchedState = null;
+
+function renderSendSchedChips() {
+  const st = sendSchedState;
+  document.getElementById('send-sched-chips').innerHTML = st.recipients.map(r =>
+    `<button type="button" class="wo-chip${st.selected.has(r.name) ? ' on' : ''}" title="${escWO(r.name)}" data-name="${escWO(r.name)}" onclick="toggleSendSchedChip(this)">${escWO(workerInitials(r.name))}</button>`).join('');
+  const chosen = st.recipients.filter(r => st.selected.has(r.name));
+  document.getElementById('send-sched-summary').textContent = chosen.length
+    ? chosen.map(r => workerInitials(r.name) + ' – ' + r.name + ' (' + r.lines.length + ' slot' + (r.lines.length === 1 ? '' : 's') + ')').join(' · ')
+    : 'Nobody selected';
+  const btn = document.getElementById('send-sched-confirm');
+  btn.disabled = !chosen.length;
+  btn.textContent = chosen.length ? 'Send to ' + chosen.length : 'Send';
+}
+
+function toggleSendSchedChip(el) {
+  const n = el.getAttribute('data-name');
+  if (sendSchedState.selected.has(n)) sendSchedState.selected.delete(n); else sendSchedState.selected.add(n);
+  renderSendSchedChips();
+}
+
+function closeSendSchedModal() {
+  document.getElementById('send-sched-modal').style.display = 'none';
+  sendSchedState = null;
+}
+
+async function confirmSendSchedules() {
+  const st = sendSchedState;
+  if (!st) return;
+  const chosen = st.recipients.filter(r => st.selected.has(r.name));
+  if (!chosen.length) return;
+  const confirmBtn = document.getElementById('send-sched-confirm');
+  confirmBtn.disabled = true; confirmBtn.textContent = 'Sending...';
   const btn = document.getElementById('send-schedules-btn');
-  btn.disabled = true; btn.textContent = 'Sending...';
-  recipients.forEach(r => notifyWorker(r.name, {
-    title: 'Your schedule — ' + label,
+  btn.disabled = true;
+  chosen.forEach(r => notifyWorker(r.name, {
+    title: 'Your schedule — ' + st.label,
     message: r.lines.join('\n'),
     priority: 3,
     tags: ['calendar']
   }));
   const res = await flushNtfyQueue();
-  btn.disabled = false; btn.textContent = '📣 Send Schedules';
+  btn.disabled = false;
+  closeSendSchedModal();
   if (res.failed) {
     setSyncStatus('office', 'error', res.failed + ' notification(s) waiting to send');
     alert('Sent ' + res.sent + '. ' + res.failed + ' could not be sent yet and will retry automatically.');
   } else {
-    setSyncStatus('office', 'synced', 'Schedules sent to ' + recipients.length + ' worker(s)');
+    setSyncStatus('office', 'synced', 'Schedules sent to ' + chosen.length + ' worker(s)');
   }
 }
 
