@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-27 (My Week: W/O column widened so Job Completed tag fits) -->
+<!-- BUILD MARKER: NB-28 (ntfy notifications from the office browser: job allocated, Send Schedules, previous-day hours reminder) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -386,6 +386,7 @@ textarea { height: 60px; resize: none; }
             <span class="sync-dot" id="worker-sync-dot"></span>
             <span id="worker-sync-text">—</span>
           </div>
+          <button class="btn" onclick="openNtfyHelp()" title="Phone notifications">🔔</button>
           <button class="btn" onclick="workerLogout()">Sign out</button>
         </div>
       </div>
@@ -506,7 +507,7 @@ textarea { height: 60px; resize: none; }
         <button class="active" onclick="switchOfficeTab('daily')" id="otab-daily">Daily View</button>
         <button onclick="switchOfficeTab('schedview')" id="otab-schedview">Schedule</button>
         <button onclick="switchOfficeTab('entries')" id="otab-entries">Time Entries</button>
-        <button onclick="switchOfficeTab('wocreate')" id="otab-wocreate">WO Creation</button>
+        <button onclick="switchOfficeTab('wocreate')" id="otab-wocreate">WO Creation</button>       
         <button onclick="switchOfficeTab('jobs')" id="otab-jobs">Jobs</button>
         <button onclick="switchOfficeTab('schedule')" id="otab-schedule">Schedule Creation</button>
         <button onclick="switchOfficeTab('overtime')" id="otab-overtime">Overtime</button>
@@ -595,6 +596,7 @@ textarea { height: 60px; resize: none; }
               <button class="btn btn-sm" onclick="schedGoToday()">This week</button>
             </div>
             <div style="display:flex;gap:8px;">
+              <button class="btn btn-sm btn-primary" id="send-schedules-btn" onclick="sendSchedules()">📣 Send Schedules</button>
               <button class="btn btn-sm" onclick="exportScheduleXlsx()">⬇ Export Excel</button>
               <button class="btn btn-sm" onclick="refreshOffice()">↻ Refresh</button>
             </div>
@@ -980,6 +982,27 @@ textarea { height: 60px; resize: none; }
     </div>
   </div>
 </div>
+
+      <div id="ntfy-modal" class="sched-modal" style="display:none;" onmousedown="if(event.target===this)this.style.display='none'">
+        <div class="card sched-modal-box">
+          <p class="section-heading">Phone notifications</p>
+          <p class="text-muted" style="font-size:13px;margin-top:6px;">Get new jobs, your weekly schedule and timesheet reminders on your phone.</p>
+          <ol style="font-size:13px;line-height:1.7;padding-left:18px;margin:12px 0;">
+            <li>Install the <strong>ntfy</strong> app from the App Store or Google Play.</li>
+            <li>On your phone, tap <a id="ntfy-sub-link" href="#" target="_blank" rel="noopener">this subscribe link</a>, or in the app tap <strong>+</strong> and enter the topic below.</li>
+          </ol>
+          <label>Your topic</label>
+          <div style="display:flex;gap:8px;">
+            <input type="text" id="ntfy-topic-box" readonly onclick="this.select()">
+            <button class="btn btn-sm" onclick="copyNtfyTopic()">Copy</button>
+          </div>
+          <p class="wo-hint">Keep this private — anyone with the topic name can see your notifications.</p>
+          <div class="form-footer" style="display:flex;justify-content:flex-end;gap:8px;margin-top:1rem;">
+            <button class="btn btn-sm" onclick="sendNtfyTestToMe()">Send me a test</button>
+            <button class="btn btn-primary btn-sm" onclick="document.getElementById('ntfy-modal').style.display='none'">Done</button>
+          </div>
+        </div>
+      </div>
 
 <script>
 // ══════════════════════════════════════════════════════════════════
@@ -2351,6 +2374,8 @@ async function refreshOffice() {
     setSyncStatus('office', 'error', 'Offline — cached data');
   }
   renderOfficeDashboard();
+  runPrevDayHoursReminder();
+  flushNtfyQueue();
 }
 
 let jobsView = 'open';
@@ -3970,6 +3995,7 @@ function renderWorkersList() {
         <span class="badge ${active ? 'badge-open' : 'badge-done'}" style="margin-left:8px;">${active ? 'Active' : 'Inactive'}</span>
       </div>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        ${ntfyTopicPrefix ? `<span class="text-muted" style="font-size:11px;" title="ntfy topic">🔔 ${escWO(workerNtfyTopic(w.name))}</span>` : ''}
         <span class="text-muted" style="font-size:12px;">PIN: <strong>${w.pin}</strong></span>
         <input type="text" id="pin-reset-${w.name.replace(/\s/g,'_')}" placeholder="New PIN" maxlength="4"
           style="width:80px;letter-spacing:3px;font-size:12px;padding:4px 8px;">
@@ -4715,6 +4741,187 @@ async function deleteOTRequest(id) {
 }
 
 // ══════════════════════════════════════════════════════════════════
+//  NOTIFICATIONS — ntfy, sent from this browser
+// ══════════════════════════════════════════════════════════════════
+
+const NTFY_SERVER = 'https://ntfy.sh';
+const NON_WORKING_STATUSES = ['Holiday', 'Bank Holiday', 'Festive Closure'];
+let ntfyTopicPrefix = (() => { try { return localStorage.getItem('ntfyTopicPrefix') || ''; } catch (e) { return ''; } })();
+let ntfyQueue = (() => { try { return JSON.parse(localStorage.getItem('ntfyQueue') || '[]'); } catch (e) { return []; } })();
+let ntfyFlushing = false;
+let prevDayReminderDone = false;
+
+function workerNtfyTopic(name) {
+  const slug = String(name || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return ntfyTopicPrefix ? ntfyTopicPrefix + '-' + slug : '';
+}
+
+function ntfyAppUrl() { return location.protocol.startsWith('http') ? location.origin + location.pathname : ''; }
+
+function ntfyPriorityForWO(p) { return { P0: 5, P1: 4, P2: 3, P3: 3, P4: 2, P5: 2 }[String(p || '').toUpperCase()] || 3; }
+
+function saveNtfyQueue() { try { localStorage.setItem('ntfyQueue', JSON.stringify(ntfyQueue)); } catch (e) {} }
+
+function notifyWorker(name, msg) {
+  const topic = workerNtfyTopic(name);
+  if (!topic) return;
+  const body = { topic, title: msg.title || '', message: msg.message || '', priority: msg.priority || 3, tags: msg.tags || [] };
+  const click = ntfyAppUrl();
+  if (click) body.click = click;
+  ntfyQueue.push({ id: Date.now() + Math.random(), body, worker: name });
+  saveNtfyQueue();
+}
+
+async function flushNtfyQueue() {
+  if (ntfyFlushing || !ntfyQueue.length || !navigator.onLine) return { sent: 0, failed: ntfyQueue.length };
+  ntfyFlushing = true;
+  let sent = 0;
+  try {
+    for (const item of [...ntfyQueue]) {
+      try {
+        const r = await fetch(NTFY_SERVER, { method: 'POST', body: JSON.stringify(item.body) });
+        if (r.ok || (r.status >= 400 && r.status < 429 && r.status !== 408)) {
+          ntfyQueue = ntfyQueue.filter(q => q.id !== item.id);
+          saveNtfyQueue();
+          if (r.ok) sent++;
+        } else if (r.status === 429) {
+          break;
+        }
+      } catch (e) {
+        break;
+      }
+    }
+  } finally {
+    ntfyFlushing = false;
+  }
+  return { sent, failed: ntfyQueue.length };
+}
+
+window.addEventListener('online', () => { flushNtfyQueue(); });
+
+function notifyJobAllocated(job, names) {
+  if (!names || !names.length) return;
+  const lines = [job.property || ''];
+  if (job.description) lines.push(job.description);
+  if (job.schedEnd) lines.push('Due by ' + fmtUKDate(job.schedEnd));
+  const urgent = String(job.priority).toUpperCase() === 'P0';
+  names.forEach(n => notifyWorker(n, {
+    title: (urgent ? 'URGENT: ' : 'New job: ') + job.id + (job.priority ? ' (' + job.priority + ')' : ''),
+    message: lines.filter(Boolean).join('\n'),
+    priority: ntfyPriorityForWO(job.priority),
+    tags: [urgent ? 'rotating_light' : 'hammer_and_wrench']
+  }));
+  flushNtfyQueue();
+}
+
+async function sendSchedules() {
+  if (!ntfyTopicPrefix) { alert('Notifications are not set up yet — run ntfySetup in Apps Script first.'); return; }
+  if (schedPendingCount > 0) { alert('The schedule is still saving — try again in a moment.'); return; }
+  const start = schedWeekStart || mondayOf(new Date());
+  const days = Array.from({ length: 5 }, (_, i) => addDaysLocal(start, i));
+  const label = 'Week ' + isoWeekNumber(start) + ' (' + shortDot(start) + ' – ' + shortDot(addDaysLocal(start, 4)) + ')';
+  const recipients = [];
+  scheduleOps().forEach(w => {
+    const lines = [];
+    days.forEach((d, i) => {
+      const items = schedItemsFor(localDateStr(d), w.name);
+      if (!items.length) return;
+      const dayLabel = SCHED_DAY_NAMES[i].slice(0, 3) + ' ' + d.getDate();
+      items.forEach(it => {
+        let text;
+        if (it.type === 'status') text = it.status;
+        else if (it.type === 'note') text = it.note;
+        else {
+          const j = jobs.find(x => String(x.id) === String(it.jobId));
+          text = it.jobId + (j && j.property ? ' · ' + j.property : '');
+        }
+        if (it.note && it.type !== 'note') text += ' (' + it.note + ')';
+        lines.push(dayLabel + ': ' + text);
+      });
+    });
+    if (lines.length) recipients.push({ name: w.name, lines });
+  });
+  if (!recipients.length) { alert('Nobody has anything scheduled for ' + label + '.'); return; }
+  if (!confirm('Send ' + label + ' schedules to ' + recipients.length + ' worker(s)?\n\n' + recipients.map(r => '• ' + r.name).join('\n'))) return;
+  const btn = document.getElementById('send-schedules-btn');
+  btn.disabled = true; btn.textContent = 'Sending...';
+  recipients.forEach(r => notifyWorker(r.name, {
+    title: 'Your schedule — ' + label,
+    message: r.lines.join('\n'),
+    priority: 3,
+    tags: ['calendar']
+  }));
+  const res = await flushNtfyQueue();
+  btn.disabled = false; btn.textContent = '📣 Send Schedules';
+  if (res.failed) {
+    setSyncStatus('office', 'error', res.failed + ' notification(s) waiting to send');
+    alert('Sent ' + res.sent + '. ' + res.failed + ' could not be sent yet and will retry automatically.');
+  } else {
+    setSyncStatus('office', 'synced', 'Schedules sent to ' + recipients.length + ' worker(s)');
+  }
+}
+
+function previousWorkingDay(from) {
+  let d = addDaysLocal(from, -1);
+  for (let i = 0; i < 14; i++) {
+    const dow = d.getDay();
+    if (dow !== 0 && dow !== 6 && !BANK_HOLIDAYS.includes(localDateStr(d))) return d;
+    d = addDaysLocal(d, -1);
+  }
+  return null;
+}
+
+async function runPrevDayHoursReminder() {
+  if (prevDayReminderDone || !currentOfficeUser || !ntfyTopicPrefix || !SCRIPT_URL || !navigator.onLine) return;
+  prevDayReminderDone = true;
+  const today = new Date();
+  const prev = previousWorkingDay(today);
+  if (!prev) return;
+  const ds = localDateStr(prev);
+  const missing = [];
+  workers.filter(w => w.active !== false && w.active !== 'FALSE').forEach(w => {
+    const st = schedule.find(x => x.date === ds && x.worker === w.name && x.type === 'status' && NON_WORKING_STATUSES.includes(x.status));
+    if (st) return;
+    const logged = entries.filter(e => e.worker === w.name && normaliseDate(e.date) === ds).reduce((t, e) => t + (parseFloat(e.hours) || 0), 0);
+    if (logged < 8) missing.push({ name: w.name, logged });
+  });
+  try {
+    const claim = await api('claimDailyTask', { task: 'prevDayHours', date: localDateStr(today), performedBy: currentOfficeUser });
+    if (!claim.claimed) return;
+  } catch (e) { return; }
+  if (!missing.length) return;
+  const dayLabel = SCHED_DAY_NAMES[(prev.getDay() + 6) % 7] + ' ' + fmtUKDate(ds);
+  missing.forEach(m => notifyWorker(m.name, {
+    title: 'Hours missing for ' + dayLabel,
+    message: (m.logged ? "You've logged " + fmtHrs(m.logged) + 'h of 8h' : 'No hours logged') + ' for ' + dayLabel + '. Please fill them in on the timesheet app.',
+    priority: 4,
+    tags: ['warning']
+  }));
+  await flushNtfyQueue();
+  setSyncStatus('office', 'synced', 'Hours reminders sent to ' + missing.length + ' worker(s)');
+}
+
+function openNtfyHelp() {
+  const topic = workerNtfyTopic(currentWorker);
+  if (!topic) { alert('Notifications are not set up yet — please ask the office.'); return; }
+  document.getElementById('ntfy-topic-box').value = topic;
+  document.getElementById('ntfy-sub-link').href = NTFY_SERVER + '/' + topic;
+  document.getElementById('ntfy-modal').style.display = 'flex';
+}
+
+function copyNtfyTopic() {
+  const box = document.getElementById('ntfy-topic-box');
+  box.select();
+  try { navigator.clipboard.writeText(box.value); } catch (e) { document.execCommand('copy'); }
+}
+
+async function sendNtfyTestToMe() {
+  notifyWorker(currentWorker, { title: 'Test notification', message: 'Notifications are working on this phone.', tags: ['white_check_mark'] });
+  const res = await flushNtfyQueue();
+  alert(res.failed ? 'Could not send right now — it will retry when you are back online.' : 'Test sent — check your phone.');
+}
+
+// ══════════════════════════════════════════════════════════════════
 //  SCHEDULE
 // ══════════════════════════════════════════════════════════════════
 
@@ -5399,6 +5606,10 @@ var woCostCodes = [];
 var woTrades = [];
 
 function setCodeListsFromData(data) {
+  if (typeof data.ntfyTopicPrefix === 'string') {
+    ntfyTopicPrefix = data.ntfyTopicPrefix;
+    try { localStorage.setItem('ntfyTopicPrefix', ntfyTopicPrefix); } catch (e) {}
+  }
   const norm = list => (list || []).map(c => ({ code: String(c.code || '').trim(), description: String(c.description || '').trim() })).filter(c => c.code);
   if (data.costCodes) woCostCodes = norm(data.costCodes);
   if (data.trades) woTrades = norm(data.trades);
@@ -5679,6 +5890,8 @@ async function createWorkOrder() {
       const upd = { ...job, id: editingJob.id, updatedBy: officeUserInitials() };
       delete upd.reportedDate; delete upd.reportedBy;
       const result = await api('updateJob', { job: upd });
+      const prevAssigned = new Set(expandAssignedTo(editingJob.assignedTo));
+      const newlyAdded = expandAssignedTo(upd.assignedTo).filter(n => !prevAssigned.has(n));
       Object.assign(editingJob, {
         property: upd.property, costCentre: upd.costCentre, costCode: upd.costCode, trade: upd.trade,
         estHours: upd.estHours, description: upd.description, priority: upd.priority,
@@ -5686,6 +5899,7 @@ async function createWorkOrder() {
       });
       if (result.updatedAt) { editingJob.updatedAt = result.updatedAt; editingJob.updatedBy = result.updatedBy; }
       localStorage.setItem('jobs', JSON.stringify(jobs));
+      if (newlyAdded.length) notifyJobAllocated(editingJob, newlyAdded);
       const savedId = editingJob.id;
       editingJobId = null;
       resetWOForm();
@@ -5710,6 +5924,7 @@ async function createWorkOrder() {
     const created = result.job || { ...job, id: result.id, open: true };
     created.open = true;
     jobs.push(created);
+    notifyJobAllocated(created, expandAssignedTo(created.assignedTo));
     localStorage.setItem('jobs', JSON.stringify(jobs));
     renderOfficeDashboard();
     resetWOForm();
