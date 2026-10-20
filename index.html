@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-33 (Locations: sorted by first letter then number; office Locations tab to add / edit / deactivate) -->
+<!-- BUILD MARKER: NB-34 (Recurring jobs: auto RWO0001 numbering, description + cost code + trade, no property) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -899,23 +899,27 @@ textarea { height: 60px; resize: none; }
             <p class="section-heading">Recurring jobs</p>
           </div>
           <div style="margin-bottom:1rem;padding-bottom:1rem;border-bottom:0.5px solid var(--color-border-tertiary);">
-            <p style="font-size:13px;font-weight:500;margin-bottom:0.75rem;">Add recurring job</p>
-            <div class="grid2">
-              <div>
-                <label style="margin-top:0;">W/O Number</label>
-                <input type="text" id="rj-id" placeholder="e.g. WO1234">
-              </div>
-              <div>
-                <label style="margin-top:0;">Property</label>
-                <input type="text" id="rj-property" placeholder="Property name">
-              </div>
+            <div class="row-between" style="margin-bottom:0.75rem;">
+              <p style="font-size:13px;font-weight:500;" id="rj-form-title">New recurring job</p>
+              <span class="text-muted" style="font-size:13px;">RWO number: <strong id="rj-next-id">—</strong></span>
             </div>
-            <div style="margin-top:12px;">
-              <label style="margin-top:0;">Description</label>
-              <input type="text" id="rj-description" placeholder="Job description">
+            <div>
+              <label style="margin-top:0;">Description <span style="color:var(--color-text-error)">*</span></label>
+              <input type="text" id="rj-description" placeholder="e.g. Property Check">
+            </div>
+            <div class="grid2" style="margin-top:12px;">
+              <div>
+                <label style="margin-top:0;">Cost code <span style="color:var(--color-text-error)">*</span></label>
+                <select id="rj-costcode"></select>
+              </div>
+              <div>
+                <label style="margin-top:0;">Trade <span style="color:var(--color-text-error)">*</span></label>
+                <select id="rj-trade"></select>
+              </div>
             </div>
             <div class="form-footer">
-              <button class="btn btn-primary" onclick="addRecurringJob()">Add job</button>
+              <button class="btn" id="rj-cancel-btn" style="display:none;" onclick="cancelEditRecurring()">Cancel</button>
+              <button class="btn btn-primary" id="rj-save-btn" onclick="addRecurringJob()">Add recurring job</button>
             </div>
           </div>
           <div id="recurring-job-list"><p class="text-muted">Loading...</p></div>
@@ -1465,13 +1469,13 @@ function populateJobDropdown() {
   const mineAll = [...mine, ...assignedRecurring.map(j => ({ ...j, _recurring: true }))];
   if (mineAll.length) {
     html += `<optgroup label="Your assigned jobs">`;
-    html += mineAll.map(j => `<option value="${j.id}">${j.id} · ${propLabel(j.property)} · ${j.description && j.description.length > 60 ? j.description.slice(0, 60) + '…' : (j.description || '')}</option>`).join('');
+    html += mineAll.map(j => `<option value="${j.id}">${j.id} · ${propLabel(j.property) ? propLabel(j.property) + ' · ' : ''}${j.description && j.description.length > 60 ? j.description.slice(0, 60) + '…' : (j.description || '')}</option>`).join('');
     html += `</optgroup>`;
   }
   const recentlyClosed = jobs.filter(j => !j.open && isJobLoggable(j) && expandAssignedTo(j.assignedTo).includes(currentWorker));
   if (recentlyClosed.length) {
     html += `<optgroup label="Recently closed — hours still allowed">`;
-    html += recentlyClosed.map(j => `<option value="${j.id}">${j.id} · ${propLabel(j.property)} · ${j.description && j.description.length > 50 ? j.description.slice(0, 50) + '…' : (j.description || '')} · until ${fmtUKDate(closedGraceEnd(j))}</option>`).join('');
+    html += recentlyClosed.map(j => `<option value="${j.id}">${j.id} · ${propLabel(j.property) ? propLabel(j.property) + ' · ' : ''}${j.description && j.description.length > 50 ? j.description.slice(0, 50) + '…' : (j.description || '')} · until ${fmtUKDate(closedGraceEnd(j))}</option>`).join('');
     html += `</optgroup>`;
   }
 
@@ -1992,7 +1996,7 @@ function renderWeek(wc) {
                   ${(() => {
                     const openJobs = jobs.filter(j => isJobLoggable(j) || j.id === e.jobId);
                     const absTypes = absenceTypes.filter(a => a.active !== false && a.active !== 'FALSE');
-                    const fmt = j => `<option value="${j.id}" ${j.id === e.jobId ? 'selected' : ''}>${j.id} · ${propLabel(j.property || j.name || '')} · ${(j.description || j.name || '').slice(0,40)}</option>`;
+                    const fmt = j => `<option value="${j.id}" ${j.id === e.jobId ? 'selected' : ''}>${j.id} · ${propLabel(j.property || j.name || '') ? propLabel(j.property || j.name || '') + ' · ' : ''}${(j.description || j.name || '').slice(0,40)}</option>`;
                     let html = '';
                     const assigned = openJobs.filter(j => expandAssignedTo(j.assignedTo).includes(currentWorker));
                     const recurr   = recurringJobs.filter(j => (j.active !== false && j.active !== 'FALSE') || j.id === e.jobId).filter(j => expandAssignedTo(j.assignedTo || '').includes(currentWorker));
@@ -2192,7 +2196,7 @@ function renderEntryRow(e, isOffice) {
             <label>Job</label>
             <select id="ej-${p}-${e.id}">
               ${[...jobs.filter(j => j.open || j.id === e.jobId), ...recurringJobs.filter(j => j.active !== false && j.active !== 'FALSE')].filter((j,i,a) => a.findIndex(x=>x.id===j.id)===i).map(j =>
-                `<option value="${j.id}" ${j.id === e.jobId ? 'selected' : ''}>${j.id} — ${propLabel(j.property)}</option>`
+                `<option value="${j.id}" ${j.id === e.jobId ? 'selected' : ''}>${j.id} — ${propLabel(j.property || j.description)}</option>`
               ).join('')}
             </select>
           </div>
@@ -2876,7 +2880,7 @@ function renderOfficeEntries() {
                       const others   = openJobs.filter(j => !expandAssignedTo(j.assignedTo).includes(e.worker));
                       const recurr   = recurringJobs.filter(j => j.active !== false && j.active !== 'FALSE' || j.id === e.jobId);
                       const absTypes = absenceTypes.filter(a => a.active !== false && a.active !== 'FALSE');
-                      const fmt = j => `<option value="${j.id}" ${j.id === e.jobId ? 'selected' : ''}>${j.id} · ${propLabel(j.property || j.name || '')} · ${(j.description || j.name || '').slice(0,40)}</option>`;
+                      const fmt = j => `<option value="${j.id}" ${j.id === e.jobId ? 'selected' : ''}>${j.id} · ${propLabel(j.property || j.name || '') ? propLabel(j.property || j.name || '') + ' · ' : ''}${(j.description || j.name || '').slice(0,40)}</option>`;
                       let html = '';
                       if (assigned.length) html += `<optgroup label="Assigned Jobs">${assigned.map(fmt).join('')}</optgroup>`;
                       if (others.length)   html += `<optgroup label="Other Jobs">${others.map(fmt).join('')}</optgroup>`;
@@ -2982,56 +2986,65 @@ async function saveEditOfficeEntries(id) {
   if (synced) setSyncStatus('office', 'synced', 'Saved to Sheets');
 }
 
+var editingRecurringId = null;
+
+function nextRecurringId() {
+  let max = 0;
+  recurringJobs.forEach(j => { const m = /^RWO(\d+)$/i.exec(String(j.id || '')); if (m) max = Math.max(max, parseInt(m[1], 10)); });
+  return 'RWO' + String(max + 1).padStart(4, '0');
+}
+
+function initRecurringForm() {
+  fillCodeSelect('rj-costcode', woCostCodes, 'Select cost code...', 'No cost codes — add them to the CostCodes sheet');
+  fillCodeSelect('rj-trade', woTrades, 'Select trade...', 'No trades — add them to the Trades sheet');
+  if (!editingRecurringId) document.getElementById('rj-next-id').textContent = nextRecurringId();
+}
+
+function recurringSortKey(j) {
+  const m = /^RWO(\d+)$/i.exec(String(j.id || ''));
+  return m ? parseInt(m[1], 10) : 1e9;
+}
+
 function renderRecurringJobsList() {
   const el = document.getElementById('recurring-job-list');
   if (!el) return;
+  if (document.getElementById('rj-costcode')) initRecurringForm();
   if (!recurringJobs.length) { el.innerHTML = '<p class="text-muted">No recurring jobs yet.</p>'; return; }
-  el.innerHTML = recurringJobs.map(j => {
+  const list = recurringJobs.slice().sort((a, b) => recurringSortKey(a) - recurringSortKey(b) || String(a.id).localeCompare(String(b.id)));
+  el.innerHTML = list.map(j => {
     const active = j.active !== false && j.active !== 'FALSE';
+    const idArg = escWO(JSON.stringify(j.id));
+    const codes = [];
+    if (j.costCode) codes.push(`<span>Cost Code:</span> <strong>${escWO(j.costCode + (codeDesc(woCostCodes, j.costCode) ? ' – ' + codeDesc(woCostCodes, j.costCode) : ''))}</strong>`);
+    if (j.trade) codes.push(`<span>Trade:</span> <strong>${escWO(j.trade + (codeDesc(woTrades, j.trade) ? ' – ' + codeDesc(woTrades, j.trade) : ''))}</strong>`);
     return `
-    <div class="entry-row" id="rj-row-${j.id}">
+    <div class="entry-row" id="rj-row-${escWO(j.id)}"${active ? '' : ' style="opacity:0.6;"'}>
       <div class="row-between">
         <div>
-          <span style="font-size:13px;font-weight:500;">${j.id}</span>
-          <span class="text-muted" style="font-size:12px;margin-left:8px;">${propLabel(j.property, 35)}</span>
-          <span class="badge ${active ? 'badge-open' : 'badge-done'}" style="margin-left:8px;">${active ? 'Active' : 'Inactive'}</span>
+          <span style="font-size:13px;font-weight:500;">${escWO(j.id)}</span>
+          <span style="font-size:13px;margin-left:8px;">${escWO(j.description || '')}</span>
+          ${active ? '' : '<span class="badge" style="margin-left:8px;background:var(--color-background-secondary);color:var(--color-text-secondary);">Inactive</span>'}
         </div>
         <div style="display:flex;gap:8px;">
-          <button class="btn btn-sm" onclick="toggleEditRecurring('${j.id}')">Edit</button>
-          <button class="btn btn-sm" onclick="toggleAssignRecurring('${j.id}')">Assign</button>
-          <button class="btn btn-sm" onclick="toggleRecurringJob('${j.id}', ${active})">${active ? 'Deactivate' : 'Reactivate'}</button>
+          <button class="btn btn-sm" onclick="editRecurring(${idArg})">Edit</button>
+          <button class="btn btn-sm" onclick="toggleAssignRecurring(${idArg})">Assign</button>
+          <button class="btn btn-sm" onclick="toggleRecurringJob(${idArg}, ${active})">${active ? 'Deactivate' : 'Reactivate'}</button>
         </div>
       </div>
-      <p class="text-muted" style="margin-top:2px;font-size:12px;">${j.description || ''}</p>
-      ${j.assignedTo ? `<p style="margin-top:2px;font-size:11px;color:var(--color-text-secondary);">Assigned: ${j.assignedTo}</p>` : '<p style="margin-top:2px;font-size:11px;color:var(--color-text-secondary);">Unassigned</p>'}
-      <div class="entry-edit" id="rj-edit-${j.id}" style="display:none;">
-        <div class="edit-grid">
-          <div class="edit-field">
-            <label>Property</label>
-            <input type="text" id="rj-ep-${j.id}" value="${j.property || ''}">
-          </div>
-          <div class="edit-field">
-            <label>Description</label>
-            <input type="text" id="rj-ed-${j.id}" value="${j.description || ''}">
-          </div>
-        </div>
-        <div class="edit-actions">
-          <button class="btn btn-primary btn-sm" onclick="saveEditRecurring('${j.id}')">Save</button>
-          <button class="btn btn-sm" onclick="toggleEditRecurring('${j.id}')">Cancel</button>
-        </div>
-      </div>
-      <div id="rj-assign-${j.id}" style="display:none;margin-top:0.75rem;padding:0.75rem;background:var(--color-background-secondary);border-radius:var(--border-radius-md);">
+      ${codes.length ? `<p class="text-muted" style="margin-top:2px;font-size:12px;">${codes.join(' · ')}</p>` : ''}
+      <p style="margin-top:2px;font-size:11px;color:var(--color-text-secondary);">${j.assignedTo ? 'Assigned: ' + escWO(j.assignedTo) : 'Unassigned'}</p>
+      <div id="rj-assign-${escWO(j.id)}" style="display:none;margin-top:0.75rem;padding:0.75rem;background:var(--color-background-secondary);border-radius:var(--border-radius-md);">
         <p style="font-size:12px;font-weight:500;margin-bottom:0.5rem;">Assign workers</p>
         <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:0.75rem;">
           ${workers.filter(w => w.active !== false && w.active !== 'FALSE').map(w => `
             <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">
-              <input type="checkbox" value="${w.name}" ${(j.assignedTo || '').split(',').map(s=>s.trim()).filter(Boolean).includes(w.name) ? 'checked' : ''}>
-              ${w.name}
+              <input type="checkbox" value="${escWO(w.name)}" ${(j.assignedTo || '').split(',').map(s => s.trim()).filter(Boolean).includes(w.name) ? 'checked' : ''}>
+              ${escWO(w.name)}
             </label>`).join('')}
         </div>
         <div class="edit-actions">
-          <button class="btn btn-primary btn-sm" onclick="saveAssignRecurring('${j.id}')">Save</button>
-          <button class="btn btn-sm" onclick="toggleAssignRecurring('${j.id}')">Cancel</button>
+          <button class="btn btn-primary btn-sm" onclick="saveAssignRecurring(${idArg})">Save</button>
+          <button class="btn btn-sm" onclick="toggleAssignRecurring(${idArg})">Cancel</button>
         </div>
       </div>
     </div>`;
@@ -3043,64 +3056,99 @@ function toggleAssignRecurring(id) {
   if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
 }
 
+async function sendRecurringUpdate(j, fields, okMsg) {
+  localStorage.setItem('recurringJobs', JSON.stringify(recurringJobs));
+  renderRecurringJobsList();
+  populateJobDropdown();
+  const { synced } = await queueOrSend('saveRecurringJob', { job: Object.assign({ id: j.id }, fields), performedBy: currentOfficeUser || 'Office' });
+  if (synced) setSyncStatus('office', 'synced', okMsg);
+}
+
 async function saveAssignRecurring(id) {
   const j = recurringJobs.find(j => j.id === id);
   if (!j) return;
   const panel = document.getElementById('rj-assign-' + id);
-  const checked = Array.from(panel.querySelectorAll('input[type=checkbox]:checked')).map(cb => cb.value);
-  j.assignedTo = checked.join(', ');
-  localStorage.setItem('recurringJobs', JSON.stringify(recurringJobs));
-  toggleAssignRecurring(id);
-  renderRecurringJobsList();
-  populateJobDropdown();
-  const { synced } = await queueOrSend('saveRecurringJob', { job: j });
-  if (synced) setSyncStatus('office', 'synced', 'Assignments saved');
+  j.assignedTo = Array.from(panel.querySelectorAll('input[type=checkbox]:checked')).map(cb => cb.value).join(', ');
+  await sendRecurringUpdate(j, { assignedTo: j.assignedTo }, 'Assignments saved');
 }
 
-function toggleEditRecurring(id) {
-  const el = document.getElementById('rj-edit-' + id);
-  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
-}
-
-async function saveEditRecurring(id) {
+function editRecurring(id) {
   const j = recurringJobs.find(j => j.id === id);
   if (!j) return;
-  j.property = document.getElementById('rj-ep-' + id).value.trim();
-  j.description = document.getElementById('rj-ed-' + id).value.trim();
-  localStorage.setItem('recurringJobs', JSON.stringify(recurringJobs));
-  renderRecurringJobsList();
-  populateJobDropdown();
-  const { synced } = await queueOrSend('saveRecurringJob', { job: j });
-  if (synced) setSyncStatus('office', 'synced', 'Recurring job updated');
+  editingRecurringId = j.id;
+  initRecurringForm();
+  document.getElementById('rj-description').value = j.description || '';
+  ensureSelectOption('rj-costcode', j.costCode, j.costCode);
+  document.getElementById('rj-costcode').value = j.costCode || '';
+  ssRefresh('rj-costcode');
+  ensureSelectOption('rj-trade', j.trade, j.trade);
+  document.getElementById('rj-trade').value = j.trade || '';
+  ssRefresh('rj-trade');
+  document.getElementById('rj-form-title').textContent = 'Edit recurring job';
+  document.getElementById('rj-next-id').textContent = j.id;
+  document.getElementById('rj-save-btn').textContent = 'Save changes';
+  document.getElementById('rj-cancel-btn').style.display = '';
+  document.getElementById('rj-description').focus();
+  document.getElementById('rj-description').scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
+function cancelEditRecurring() {
+  editingRecurringId = null;
+  document.getElementById('rj-description').value = '';
+  document.getElementById('rj-costcode').value = '';
+  ssRefresh('rj-costcode');
+  document.getElementById('rj-trade').value = '';
+  ssRefresh('rj-trade');
+  document.getElementById('rj-form-title').textContent = 'New recurring job';
+  document.getElementById('rj-save-btn').textContent = 'Add recurring job';
+  document.getElementById('rj-cancel-btn').style.display = 'none';
+  document.getElementById('rj-next-id').textContent = nextRecurringId();
 }
 
 async function toggleRecurringJob(id, currentlyActive) {
   const j = recurringJobs.find(j => j.id === id);
   if (!j) return;
+  if (currentlyActive && !confirm('Deactivate ' + j.id + ' (' + (j.description || '') + ')?\n\nWorkers will no longer be able to log time against it. Existing entries are kept, and you can reactivate it at any time.')) return;
   j.active = !currentlyActive;
-  localStorage.setItem('recurringJobs', JSON.stringify(recurringJobs));
-  renderRecurringJobsList();
-  populateJobDropdown();
-  const { synced } = await queueOrSend('saveRecurringJob', { job: j });
-  if (synced) setSyncStatus('office', 'synced', 'Recurring job updated');
+  await sendRecurringUpdate(j, { active: j.active }, j.id + (j.active ? ' reactivated' : ' deactivated'));
 }
 
 async function addRecurringJob() {
-  const id = document.getElementById('rj-id').value.trim();
-  const property = document.getElementById('rj-property').value.trim();
-  const description = document.getElementById('rj-description').value.trim();
-  if (!id || !property) { alert('Please enter a W/O number and property.'); return; }
-  if (recurringJobs.find(j => j.id.toLowerCase() === id.toLowerCase())) { alert('A recurring job with that ID already exists.'); return; }
-  const job = { id, property, description, active: true };
-  recurringJobs.push(job);
-  localStorage.setItem('recurringJobs', JSON.stringify(recurringJobs));
-  document.getElementById('rj-id').value = '';
-  document.getElementById('rj-property').value = '';
-  document.getElementById('rj-description').value = '';
-  renderRecurringJobsList();
-  populateJobDropdown();
-  const { synced } = await queueOrSend('saveRecurringJob', { job });
-  if (synced) setSyncStatus('office', 'synced', 'Recurring job saved');
+  const description = document.getElementById('rj-description').value.trim().replace(/\s+/g, ' ');
+  const costCode = document.getElementById('rj-costcode').value;
+  const trade = document.getElementById('rj-trade').value;
+  if (!description) { alert('Please enter a description'); return; }
+  if (!costCode) { alert('Please select a cost code'); return; }
+  if (!trade) { alert('Please select a trade'); return; }
+  const dupe = recurringJobs.find(j => j.id !== editingRecurringId && String(j.description || '').trim().toLowerCase() === description.toLowerCase());
+  if (dupe && !confirm(dupe.id + ' is already called "' + dupe.description + '"' + (dupe.active === false || dupe.active === 'FALSE' ? ' (inactive)' : '') + '. Save anyway?')) return;
+
+  if (editingRecurringId) {
+    const j = recurringJobs.find(j => j.id === editingRecurringId);
+    if (!j) { cancelEditRecurring(); return; }
+    Object.assign(j, { description, costCode, trade });
+    cancelEditRecurring();
+    await sendRecurringUpdate(j, { description, costCode, trade }, j.id + ' updated');
+    return;
+  }
+
+  if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to create a recurring job'); return; }
+  const btn = document.getElementById('rj-save-btn');
+  btn.disabled = true;
+  try {
+    const res = await api('saveRecurringJob', { job: { description, costCode, trade, assignedTo: '' }, performedBy: currentOfficeUser || 'Office' });
+    if (!res || res.error || !res.id) throw new Error((res && res.error) || 'No RWO number returned');
+    recurringJobs.push({ id: res.id, property: '', description, costCode, trade, active: true, assignedTo: '' });
+    cancelEditRecurring();
+    localStorage.setItem('recurringJobs', JSON.stringify(recurringJobs));
+    renderRecurringJobsList();
+    populateJobDropdown();
+    setSyncStatus('office', 'synced', res.id + ' created');
+  } catch (err) {
+    alert('Could not create recurring job: ' + (err.message || err));
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 function toggleOfficeAddEntry() {
@@ -3253,7 +3301,7 @@ function populateOfficeEntryJobDropdown() {
   const assigned = openJobs.filter(j => expandAssignedTo(j.assignedTo).includes(selectedWorker));
   const others = openJobs.filter(j => !expandAssignedTo(j.assignedTo).includes(selectedWorker));
   const activeRecurring = recurringJobs.filter(j => j.active !== false && j.active !== 'FALSE');
-  const fmt = j => `<option value="${j.id}">${j.id} · ${propLabel(j.property)}${j.description ? ' · ' + (j.description.length > 40 ? j.description.slice(0,40) + '…' : j.description) : ''}</option>`;
+  const fmt = j => `<option value="${j.id}">${j.id}${j.property ? ' · ' + propLabel(j.property) : ''}${j.description ? ' · ' + (j.description.length > 40 ? j.description.slice(0,40) + '…' : j.description) : ''}</option>`;
   let html = '<option value="">Select a job...</option>';
   if (assigned.length) html += `<optgroup label="Assigned Jobs">${assigned.map(fmt).join('')}</optgroup>`;
   if (others.length)   html += `<optgroup label="Other Jobs">${others.map(fmt).join('')}</optgroup>`;
@@ -3470,7 +3518,7 @@ function renderDailyView() {
                         const others   = openJobs.filter(j => !expandAssignedTo(j.assignedTo).includes(e.worker));
                         const recurr   = recurringJobs.filter(j => j.active !== false && j.active !== 'FALSE' || j.id === e.jobId);
                         const absTypes = absenceTypes.filter(a => a.active !== false && a.active !== 'FALSE');
-                        const fmt = j => `<option value="${j.id}" ${j.id === e.jobId ? 'selected' : ''}>${j.id} · ${propLabel(j.property || j.name || '')} · ${(j.description || j.name || '').slice(0,40)}</option>`;
+                        const fmt = j => `<option value="${j.id}" ${j.id === e.jobId ? 'selected' : ''}>${j.id} · ${propLabel(j.property || j.name || '') ? propLabel(j.property || j.name || '') + ' · ' : ''}${(j.description || j.name || '').slice(0,40)}</option>`;
                         let html = '';
                         if (assigned.length) html += `<optgroup label="Assigned Jobs">${assigned.map(fmt).join('')}</optgroup>`;
                         if (others.length)   html += `<optgroup label="Other Jobs">${others.map(fmt).join('')}</optgroup>`;
@@ -3567,7 +3615,7 @@ function populateDailyEntryJobDropdown() {
   const assigned = openJobs.filter(j => expandAssignedTo(j.assignedTo).includes(selectedWorker));
   const others = openJobs.filter(j => !expandAssignedTo(j.assignedTo).includes(selectedWorker));
   const activeAbsTypes = absenceTypes.filter(a => a.active !== false && a.active !== 'FALSE');
-  const fmt = j => `<option value="${j.id}">${j.id} · ${propLabel(j.property)}${j.description ? ' · ' + (j.description.length > 40 ? j.description.slice(0,40) + '…' : j.description) : ''}</option>`;
+  const fmt = j => `<option value="${j.id}">${j.id}${j.property ? ' · ' + propLabel(j.property) : ''}${j.description ? ' · ' + (j.description.length > 40 ? j.description.slice(0,40) + '…' : j.description) : ''}</option>`;
   let html = '<option value="">Select a job...</option>';
   if (assigned.length) html += `<optgroup label="Assigned Jobs">${assigned.map(fmt).join('')}</optgroup>`;
   if (others.length)   html += `<optgroup label="Other Jobs">${others.map(fmt).join('')}</optgroup>`;
