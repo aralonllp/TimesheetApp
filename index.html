@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-30 (Send Schedules: choose recipients in a pop-up) -->
+<!-- BUILD MARKER: NB-31 (Schedule notification: short "ready to be viewed" message) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -656,7 +656,7 @@ textarea { height: 60px; resize: none; }
           <select id="sched-item"></select>
           <p class="wo-hint" id="sched-item-hint"></p>
           <label id="sched-note-label">Note (optional)</label>
-          <textarea id="sched-note" placeholder="e.g. meet electrician 1pm, access via side entrance"></textarea>
+          <textarea id="sched-note" placeholder="e.g. meet electrician 1pm, access via Soad"></textarea>
           <div id="sched-multi">
             <label>Days</label>
             <div class="wo-chips" id="sched-days"></div>
@@ -4864,7 +4864,7 @@ async function sendSchedules() {
     if (lines.length) recipients.push({ name: w.name, lines });
   });
   if (!recipients.length) { alert('Nobody has anything scheduled for ' + label + '.'); return; }
-  sendSchedState = { label, recipients, selected: new Set(recipients.map(r => r.name)) };
+  sendSchedState = { label, start, recipients, selected: new Set(recipients.map(r => r.name)) };
   document.getElementById('send-sched-week').textContent = label + ' — everyone with something scheduled is selected. Tap to remove anyone you don\'t want to send to.';
   renderSendSchedChips();
   document.getElementById('send-sched-modal').style.display = 'flex';
@@ -4905,9 +4905,11 @@ async function confirmSendSchedules() {
   confirmBtn.disabled = true; confirmBtn.textContent = 'Sending...';
   const btn = document.getElementById('send-schedules-btn');
   btn.disabled = true;
+  const slash = d => String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getFullYear()).slice(2);
+  const wkText = 'Week ' + isoWeekNumber(st.start) + ' ' + slash(st.start) + ' - ' + slash(addDaysLocal(st.start, 4));
   chosen.forEach(r => notifyWorker(r.name, {
-    title: 'Your schedule — ' + st.label,
-    message: r.lines.join('\n'),
+    title: 'Schedule updated',
+    message: 'Your schedule for ' + wkText + ' has been updated and is ready to be viewed.',
     priority: 3,
     tags: ['calendar']
   }));
