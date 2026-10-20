@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-34 (Recurring jobs: auto RWO0001 numbering, description + cost code + trade, no property) -->
+<!-- BUILD MARKER: NB-36 (Recurring jobs in their own group in the worker job search; per-worker daily hours, default 8) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -67,6 +67,7 @@ textarea { height: 60px; resize: none; }
 .btn-primary { background: var(--color-text-primary); color: #fff; border-color: var(--color-text-primary); }
 .btn-sm { font-size: 12px; padding: 4px 10px; min-height: 32px; }
 .btn:hover { opacity: 0.8; }
+.btn:disabled { opacity: 0.5; cursor: wait; pointer-events: none; }
 .row-between { display: flex; justify-content: space-between; align-items: center; }
 .text-muted { font-size: 13px; color: var(--color-text-secondary); }
 .login-wrap { max-width: 560px; margin: 1.5rem auto; }
@@ -1466,10 +1467,14 @@ function populateJobDropdown() {
 
   const assignedRecurring = recurringJobs.filter(j => j.active !== false && j.active !== 'FALSE' && expandAssignedTo(j.assignedTo || '').includes(currentWorker));
   const mine = open.filter(j => expandAssignedTo(j.assignedTo).includes(currentWorker));
-  const mineAll = [...mine, ...assignedRecurring.map(j => ({ ...j, _recurring: true }))];
-  if (mineAll.length) {
+  if (mine.length) {
     html += `<optgroup label="Your assigned jobs">`;
-    html += mineAll.map(j => `<option value="${j.id}">${j.id} · ${propLabel(j.property) ? propLabel(j.property) + ' · ' : ''}${j.description && j.description.length > 60 ? j.description.slice(0, 60) + '…' : (j.description || '')}</option>`).join('');
+    html += mine.map(j => `<option value="${j.id}">${j.id} · ${propLabel(j.property) ? propLabel(j.property) + ' · ' : ''}${j.description && j.description.length > 60 ? j.description.slice(0, 60) + '…' : (j.description || '')}</option>`).join('');
+    html += `</optgroup>`;
+  }
+  if (assignedRecurring.length) {
+    html += `<optgroup label="Recurring jobs">`;
+    html += assignedRecurring.map(j => `<option value="${j.id}">${j.id} · ${escWO(j.description || '')}</option>`).join('');
     html += `</optgroup>`;
   }
   const recentlyClosed = jobs.filter(j => !j.open && isJobLoggable(j) && expandAssignedTo(j.assignedTo).includes(currentWorker));
@@ -1510,7 +1515,7 @@ function updateHoursPlaceholder() {
   const logged = entries
     .filter(e => e.worker === currentWorker && normaliseDate(e.date) === norm)
     .reduce((sum, e) => sum + parseFloat(e.hours || 0), 0);
-  const remaining = Math.max(0, 8 - logged);
+  const remaining = Math.max(0, workerDailyHours(currentWorker) - logged);
   input.placeholder = remaining > 0 ? remaining + 'h remaining' : 'Day complete';
 }
 
@@ -1675,7 +1680,7 @@ async function submitEntry() {
   const alreadyLogged = entries
     .filter(e => e.worker === currentWorker && normaliseDate(e.date) === norm && !e.overtimeStatus)
     .reduce((sum, e) => sum + parseFloat(e.hours || 0), 0);
-  const isOvertime = isWeekend || (alreadyLogged + hours > 8);
+  const isOvertime = isWeekend || (alreadyLogged + hours > workerDailyHours(currentWorker));
 
   if (isOvertime) {
     const jobObj = jobs.find(j => j.id === jobId) || recurringJobs.find(j => j.id === jobId) || absenceTypes.find(a => a.id === jobId);
@@ -1821,7 +1826,7 @@ function isWeekFulfilled(workerName, wc) {
     if (hasAbsence) continue;
 
     const hoursLogged = dayEntries.reduce((s, e) => s + parseFloat(e.hours || 0), 0);
-    if (hoursLogged !== 8) return false;
+    if (hoursLogged !== workerDailyHours(workerName)) return false;
   }
   return true;
 }
@@ -1897,7 +1902,7 @@ function renderWeek(wc) {
     const isBankHoliday = BANK_HOLIDAYS.includes(dayStr);
     const dow_flag = new Date(dayStr + 'T12:00:00').getDay();
     const isWeekendDay = dow_flag === 0 || dow_flag === 6;
-    const shouldFlag = inFlagRange && !isBankHoliday && !absence && !isWeekendDay && hoursLogged < 8;
+    const shouldFlag = inFlagRange && !isBankHoliday && !absence && !isWeekendDay && hoursLogged < workerDailyHours(currentWorker);
 
     const dayCellContent = isBankHoliday
       ? `<div class="day-absence">Bank Holiday</div>`
@@ -2750,7 +2755,7 @@ function renderOfficeEntries() {
       const isBankHoliday = BANK_HOLIDAYS.includes(dayStr);
       const dow_flag = new Date(dayStr + 'T12:00:00').getDay();
       const isWeekendDay = dow_flag === 0 || dow_flag === 6;
-      const shouldFlag = inFlagRange && !isBankHoliday && !absence && !isWeekendDay && hoursLogged < 8;
+      const shouldFlag = inFlagRange && !isBankHoliday && !absence && !isWeekendDay && hoursLogged < workerDailyHours(worker.name);
 
       const dayNames = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
       const dayDate2 = new Date(dayStr + 'T00:00:00');
@@ -3028,7 +3033,7 @@ function renderRecurringJobsList() {
         <div style="display:flex;gap:8px;">
           <button class="btn btn-sm" onclick="editRecurring(${idArg})">Edit</button>
           <button class="btn btn-sm" onclick="toggleAssignRecurring(${idArg})">Assign</button>
-          <button class="btn btn-sm" onclick="toggleRecurringJob(${idArg}, ${active})">${active ? 'Deactivate' : 'Reactivate'}</button>
+          <button class="btn btn-sm" onclick="toggleRecurringJob(${idArg}, ${active}, this)">${active ? 'Deactivate' : 'Reactivate'}</button>
         </div>
       </div>
       ${codes.length ? `<p class="text-muted" style="margin-top:2px;font-size:12px;">${codes.join(' · ')}</p>` : ''}
@@ -3043,7 +3048,7 @@ function renderRecurringJobsList() {
             </label>`).join('')}
         </div>
         <div class="edit-actions">
-          <button class="btn btn-primary btn-sm" onclick="saveAssignRecurring(${idArg})">Save</button>
+          <button class="btn btn-primary btn-sm" onclick="saveAssignRecurring(${idArg}, this)">Save</button>
           <button class="btn btn-sm" onclick="toggleAssignRecurring(${idArg})">Cancel</button>
         </div>
       </div>
@@ -3056,20 +3061,44 @@ function toggleAssignRecurring(id) {
   if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
 }
 
-async function sendRecurringUpdate(j, fields, okMsg) {
-  localStorage.setItem('recurringJobs', JSON.stringify(recurringJobs));
-  renderRecurringJobsList();
-  populateJobDropdown();
-  const { synced } = await queueOrSend('saveRecurringJob', { job: Object.assign({ id: j.id }, fields), performedBy: currentOfficeUser || 'Office' });
-  if (synced) setSyncStatus('office', 'synced', okMsg);
+const RJ_OLD_SCRIPT_MSG = 'The Apps Script is still running the previous version. In Apps Script go to Deploy → Manage deployments → Edit (pencil) → Version: New version → Deploy, then try again.';
+
+function setRecurringBusy(id, busyBtn, busyText) {
+  const row = document.getElementById('rj-row-' + id);
+  const btns = row ? Array.from(row.querySelectorAll('button')) : [];
+  if (busyBtn && btns.indexOf(busyBtn) === -1) btns.push(busyBtn);
+  const saved = btns.map(b => ({ b, text: b.textContent, dis: b.disabled }));
+  btns.forEach(b => { b.disabled = true; });
+  if (busyBtn && busyText) busyBtn.textContent = busyText;
+  return () => saved.forEach(x => { x.b.disabled = x.dis; x.b.textContent = x.text; });
 }
 
-async function saveAssignRecurring(id) {
-  const j = recurringJobs.find(j => j.id === id);
-  if (!j) return;
+async function sendRecurringUpdate(id, fields, okMsg, busyBtn, busyText) {
+  if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to change recurring jobs'); return false; }
+  const j = recurringJobs.find(x => x.id === id);
+  if (!j) return false;
+  const release = setRecurringBusy(id, busyBtn, busyText);
+  try {
+    const res = await api('saveRecurringJob', { job: Object.assign({ id }, fields), performedBy: currentOfficeUser || 'Office' });
+    if (!res || res.id !== id) throw new Error(RJ_OLD_SCRIPT_MSG);
+    Object.assign(j, fields);
+    localStorage.setItem('recurringJobs', JSON.stringify(recurringJobs));
+    renderRecurringJobsList();
+    populateJobDropdown();
+    setSyncStatus('office', 'synced', okMsg);
+    return true;
+  } catch (err) {
+    release();
+    alert('Could not save ' + id + ': ' + (err.message || err));
+    return false;
+  }
+}
+
+async function saveAssignRecurring(id, btn) {
   const panel = document.getElementById('rj-assign-' + id);
-  j.assignedTo = Array.from(panel.querySelectorAll('input[type=checkbox]:checked')).map(cb => cb.value).join(', ');
-  await sendRecurringUpdate(j, { assignedTo: j.assignedTo }, 'Assignments saved');
+  if (!panel) return;
+  const assignedTo = Array.from(panel.querySelectorAll('input[type=checkbox]:checked')).map(cb => cb.value).join(', ');
+  await sendRecurringUpdate(id, { assignedTo }, 'Assignments saved', btn, 'Saving…');
 }
 
 function editRecurring(id) {
@@ -3105,12 +3134,11 @@ function cancelEditRecurring() {
   document.getElementById('rj-next-id').textContent = nextRecurringId();
 }
 
-async function toggleRecurringJob(id, currentlyActive) {
+async function toggleRecurringJob(id, currentlyActive, btn) {
   const j = recurringJobs.find(j => j.id === id);
   if (!j) return;
   if (currentlyActive && !confirm('Deactivate ' + j.id + ' (' + (j.description || '') + ')?\n\nWorkers will no longer be able to log time against it. Existing entries are kept, and you can reactivate it at any time.')) return;
-  j.active = !currentlyActive;
-  await sendRecurringUpdate(j, { active: j.active }, j.id + (j.active ? ' reactivated' : ' deactivated'));
+  await sendRecurringUpdate(id, { active: !currentlyActive }, j.id + (currentlyActive ? ' deactivated' : ' reactivated'), btn, currentlyActive ? 'Deactivating…' : 'Reactivating…');
 }
 
 async function addRecurringJob() {
@@ -3123,21 +3151,24 @@ async function addRecurringJob() {
   const dupe = recurringJobs.find(j => j.id !== editingRecurringId && String(j.description || '').trim().toLowerCase() === description.toLowerCase());
   if (dupe && !confirm(dupe.id + ' is already called "' + dupe.description + '"' + (dupe.active === false || dupe.active === 'FALSE' ? ' (inactive)' : '') + '. Save anyway?')) return;
 
+  const btn = document.getElementById('rj-save-btn');
+  if (btn.disabled) return;
   if (editingRecurringId) {
-    const j = recurringJobs.find(j => j.id === editingRecurringId);
-    if (!j) { cancelEditRecurring(); return; }
-    Object.assign(j, { description, costCode, trade });
-    cancelEditRecurring();
-    await sendRecurringUpdate(j, { description, costCode, trade }, j.id + ' updated');
+    const id = editingRecurringId;
+    const cancelBtn = document.getElementById('rj-cancel-btn');
+    cancelBtn.disabled = true;
+    const ok = await sendRecurringUpdate(id, { description, costCode, trade }, id + ' updated', btn, 'Saving…');
+    cancelBtn.disabled = false;
+    if (ok) cancelEditRecurring();
     return;
   }
 
   if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to create a recurring job'); return; }
-  const btn = document.getElementById('rj-save-btn');
   btn.disabled = true;
+  btn.textContent = 'Creating…';
   try {
     const res = await api('saveRecurringJob', { job: { description, costCode, trade, assignedTo: '' }, performedBy: currentOfficeUser || 'Office' });
-    if (!res || res.error || !res.id) throw new Error((res && res.error) || 'No RWO number returned');
+    if (!res || !/^RWO\d+$/i.test(String(res.id || ''))) throw new Error(RJ_OLD_SCRIPT_MSG);
     recurringJobs.push({ id: res.id, property: '', description, costCode, trade, active: true, assignedTo: '' });
     cancelEditRecurring();
     localStorage.setItem('recurringJobs', JSON.stringify(recurringJobs));
@@ -3148,6 +3179,7 @@ async function addRecurringJob() {
     alert('Could not create recurring job: ' + (err.message || err));
   } finally {
     btn.disabled = false;
+    btn.textContent = editingRecurringId ? 'Save changes' : 'Add recurring job';
   }
 }
 
@@ -3259,7 +3291,7 @@ async function submitMultiAddEntries() {
     for (const ds of datesToLog) {
       const entry = {
         id: uid(),
-        worker, jobId, date: ds, hours: 8, comments: comments || '',
+        worker, jobId, date: ds, hours: workerDailyHours(worker), comments: comments || '',
         amendments: [{ by: currentOfficeUser || 'Office', at: new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }), note: 'Created via Multi-Add Entries' }],
         createdAt: new Date().toISOString(),
         property: '',
@@ -3323,7 +3355,7 @@ async function submitOfficeEntry() {
   const dayOfWeek_oe = new Date(date + 'T12:00:00').getDay();
   const isWeekend_oe = dayOfWeek_oe === 0 || dayOfWeek_oe === 6;
   const alreadyLogged = entries.filter(e => e.worker === worker && normaliseDate(e.date) === date).reduce((s, e) => s + parseFloat(e.hours || 0), 0);
-  const isOvertime_oe = isWeekend_oe || (alreadyLogged + hours > 8);
+  const isOvertime_oe = isWeekend_oe || (alreadyLogged + hours > workerDailyHours(worker));
   const allJobs = [...jobs, ...recurringJobs];
   const jobObj = allJobs.find(j => j.id === jobId);
   const entry_oe = {
@@ -3463,7 +3495,7 @@ function renderDailyView() {
     const isBankHoliday = BANK_HOLIDAYS.includes(todayStr);
     const dow_flag_dv = new Date(todayStr + 'T12:00:00').getDay();
     const isWeekendDay = dow_flag_dv === 0 || dow_flag_dv === 6;
-    const shouldFlag = !isBankHoliday && !absence && !isWeekendDay && hoursLogged < 8;
+    const shouldFlag = !isBankHoliday && !absence && !isWeekendDay && hoursLogged < workerDailyHours(worker.name);
 
     const statusBadge = isBankHoliday
       ? `<span class="badge badge-done" style="margin-left:8px;">Bank Holiday</span>`
@@ -3634,7 +3666,7 @@ async function submitDailyEntry() {
   const dayOfWeek_de = new Date(date + 'T12:00:00').getDay();
   const isWeekend_de = dayOfWeek_de === 0 || dayOfWeek_de === 6;
   const alreadyLogged = entries.filter(e => e.worker === worker && normaliseDate(e.date) === date).reduce((s, e) => s + parseFloat(e.hours || 0), 0);
-  const isOvertime_de = isWeekend_de || (alreadyLogged + hours > 8);
+  const isOvertime_de = isWeekend_de || (alreadyLogged + hours > workerDailyHours(worker));
   const allJobs = [...jobs, ...recurringJobs, ...absenceTypes];
   const jobObj = allJobs.find(j => j.id === jobId);
   const entry_de = { id: uid(), worker, jobId, date, hours, comments, amendments: [{ by: currentOfficeUser || 'Office', at: new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }), note: 'Created by Office' }], createdAt: new Date().toISOString(), property: isRecurringJobId(jobId) ? (rjPropGetValue('rj-prop-dae') || (jobObj ? jobObj.property : '')) : (jobObj ? jobObj.property : ''), description: jobObj ? (jobObj.description || jobObj.name || '') : '', performedBy: currentOfficeUser || 'Office' };
@@ -4109,6 +4141,9 @@ function renderWorkersList() {
       </div>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         ${ntfyTopicPrefix ? `<span class="text-muted" style="font-size:11px;" title="ntfy topic">🔔 ${escWO(workerNtfyTopic(w.name))}</span>` : ''}
+        <label class="text-muted" style="font-size:12px;margin:0;display:flex;align-items:center;gap:4px;font-weight:400;">Daily hours
+          <input type="number" min="0.25" max="24" step="0.25" value="${workerDailyHours(w.name)}" style="width:68px;font-size:12px;padding:4px 6px;" onchange="setWorkerDailyHoursUI('${w.name.replace(/'/g, "\\'")}', this)">
+        </label>
         <span class="text-muted" style="font-size:12px;">PIN: <strong>${w.pin}</strong></span>
         <input type="text" id="pin-reset-${w.name.replace(/\s/g,'_')}" placeholder="New PIN" maxlength="4"
           style="width:80px;letter-spacing:3px;font-size:12px;padding:4px 8px;">
@@ -5046,7 +5081,8 @@ async function runPrevDayHoursReminder(src) {
     const st = srcSchedule.find(x => x.date === ds && nm(x.worker) === name && x.type === 'status' && NON_WORKING_STATUSES.includes(x.status));
     if (st) return;
     const logged = srcEntries.filter(e => nm(e.worker) === name && normaliseDate(e.date) === ds).reduce((t, e) => t + (parseFloat(e.hours) || 0), 0);
-    if (logged < 8) missing.push({ name, logged });
+    const dh = parseFloat(w.dailyHours) > 0 ? parseFloat(w.dailyHours) : DEFAULT_DAILY_HOURS;
+    if (logged < dh) missing.push({ name, logged, dh });
   });
   try {
     const claim = await api('claimDailyTask', { task: 'prevDayHours', date: todayStr, performedBy: currentOfficeUser });
@@ -5057,7 +5093,7 @@ async function runPrevDayHoursReminder(src) {
   const dayLabel = SCHED_DAY_NAMES[(prev.getDay() + 6) % 7] + ' ' + fmtUKDate(ds);
   missing.forEach(m => notifyWorker(m.name, {
     title: 'Hours missing for ' + dayLabel,
-    message: (m.logged ? "You've logged " + fmtHrs(m.logged) + 'h of 8h' : 'No hours logged') + ' for ' + dayLabel + '. Please fill them in on the timesheet app.',
+    message: (m.logged ? "You've logged " + fmtHrs(m.logged) + 'h of ' + fmtHrs(m.dh) + 'h' : 'No hours logged') + ' for ' + dayLabel + '. Please fill them in on the timesheet app.',
     priority: 4,
     tags: ['warning']
   }));
@@ -5134,6 +5170,13 @@ function setScheduleFromData(data) {
   if (Array.isArray(data.scheduleStatuses)) scheduleStatuses = data.scheduleStatuses;
 }
 
+const DEFAULT_DAILY_HOURS = 8;
+function workerDailyHours(name) {
+  const n = String(name || '').trim();
+  const w = workers.find(x => String(x.name || '').trim() === n);
+  const h = w ? parseFloat(w.dailyHours) : NaN;
+  return h > 0 ? h : DEFAULT_DAILY_HOURS;
+}
 function isOnSchedule(w) { return !(w.onSchedule === false || String(w.onSchedule).toUpperCase() === 'FALSE'); }
 function scheduleOps() { return workers.filter(w => w.active !== false && w.active !== 'FALSE' && isOnSchedule(w)); }
 
@@ -5536,6 +5579,27 @@ async function exportScheduleXlsx() {
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 }
 
+async function setWorkerDailyHoursUI(name, input) {
+  const w = workers.find(x => x.name === name);
+  if (!w) return;
+  const prev = workerDailyHours(name);
+  const h = parseFloat(input.value);
+  if (!(h > 0 && h <= 24)) { input.value = prev; alert('Daily hours must be between 0 and 24'); return; }
+  if (h === prev) return;
+  if (!navigator.onLine || !SCRIPT_URL) { input.value = prev; alert('You need to be online to change this'); return; }
+  input.disabled = true;
+  try {
+    await api('setWorkerDailyHours', { name, hours: h, performedBy: currentOfficeUser });
+    w.dailyHours = h;
+    localStorage.setItem('workers', JSON.stringify(workers));
+    setSyncStatus('office', 'synced', name + ' daily hours set to ' + h);
+  } catch (err) {
+    input.value = prev;
+    alert('Could not update ' + name + ': ' + (err.message || err));
+  } finally {
+    input.disabled = false;
+  }
+}
 async function toggleWorkerOnSchedule(name) {
   const w = workers.find(x => x.name === name);
   if (!w) return;
