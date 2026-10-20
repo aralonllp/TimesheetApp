@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-36 (Recurring jobs in their own group in the worker job search; per-worker daily hours, default 8) -->
+<!-- BUILD MARKER: NB-37 (Jobs tab: expand arrow shows every time entry logged against the WO) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -158,6 +158,20 @@ textarea { height: 60px; resize: none; }
 .job-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .over-flag { font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 600; margin-left: 6px; background: #fde2e1; color: #a61b1b; }
 .job-codes strong.hrs-over { color: #a61b1b; font-weight: 600; }
+.job-expand { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; margin-right: 6px; border: 0.5px solid var(--color-border-secondary); border-radius: var(--border-radius-md); background: transparent; cursor: pointer; vertical-align: middle; padding: 0; color: var(--color-text-primary); }
+.job-expand svg { width: 12px; height: 12px; transition: transform 0.15s; }
+.job-expand.open svg { transform: rotate(90deg); }
+.job-entries { margin-top: 10px; border-top: 0.5px solid var(--color-border-tertiary); padding-top: 8px; overflow-x: auto; }
+.job-entries table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.job-entries th { text-align: left; font-weight: 600; padding: 6px 8px; border-bottom: 0.5px solid var(--color-border-secondary); white-space: nowrap; color: var(--color-text-secondary); }
+.job-entries td { padding: 6px 8px; border-bottom: 0.5px solid var(--color-border-tertiary); vertical-align: top; }
+.job-entries td.num, .job-entries th.num { text-align: right; white-space: nowrap; }
+.job-entries td.nowrap { white-space: nowrap; }
+.job-entries tr.je-pending td { color: var(--color-text-secondary); font-style: italic; }
+.job-entries tfoot td { font-weight: 600; border-bottom: none; }
+.job-entries .je-summary { font-size: 12px; color: var(--color-text-secondary); margin-bottom: 6px; }
+.job-entries .je-summary strong { color: var(--color-text-primary); font-weight: 600; }
+.je-tag { font-size: 10px; padding: 1px 6px; border-radius: 10px; font-weight: 600; background: var(--color-background-secondary); color: var(--color-text-secondary); margin-left: 4px; font-style: normal; }
 .sched-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .sched-week-title { font-size: 15px; font-weight: 700; }
 .sched-week-range { font-size: 12px; color: var(--color-text-secondary); }
@@ -2529,6 +2543,7 @@ function renderJobRow(j, hoursByJob) {
     <div class="entry-row">
       <div class="row-between" style="gap:12px;">
         <div>
+          <button class="job-expand${expandedJobs.has(String(j.id)) ? ' open' : ''}" title="Show time entries" aria-expanded="${expandedJobs.has(String(j.id))}" onclick="toggleJobEntries('${escWO(j.id)}', this)"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M4 2l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
           <span style="font-size:14px;font-weight:700;">${j.id}</span>
           ${j.priority ? `<span class="prio prio-${escWO(j.priority)}">${escWO(j.priority)}</span>` : ''}
           ${over ? `<span class="over-flag" title="Estimated ${fmtHrs(est)}h, actual ${fmtHrs(actual)}h">Over by ${fmtHrs(actual - est)}h</span>` : ''}
@@ -2545,7 +2560,72 @@ function renderJobRow(j, hoursByJob) {
       ${j.description ? `<p class="job-codes" style="margin-top:4px;"><span>Description:</span> <strong>${escWO(j.description)}</strong></p>` : ''}
       ${codesLine}
       <p style="margin-top:2px;font-size:11px;color:var(--color-text-secondary);">${assignedTxt ? 'Assigned: ' + escWO(assignedTxt) : 'Unassigned'}${j.reportedBy ? ' · Reported by ' + escWO(j.reportedBy) : ''}${j.reportedDate ? ' · ' + fmtUKDate(j.reportedDate) : ''}${j.updatedAt ? ' · Edited By: ' + (j.updatedBy ? escWO(j.updatedBy) : '—') + ' : ' + fmtUKDate(localDateStr(new Date(j.updatedAt))) : ''}${j.reopenedDate || j.reopenedBy ? ' · Reopened By: ' + (j.reopenedBy ? escWO(j.reopenedBy) : '—') + (j.reopenedDate ? ' : ' + fmtUKDate(j.reopenedDate) : '') : ''}${!j.open && (j.closedDate || j.closedBy) ? ' · Closed By: ' + (j.closedBy ? escWO(j.closedBy) : '—') + (j.closedDate ? ' : ' + fmtUKDate(j.closedDate) : '') : ''}</p>
+      <div class="job-entries" id="job-entries-${escWO(j.id)}"${expandedJobs.has(String(j.id)) ? '' : ' style="display:none;"'}>${expandedJobs.has(String(j.id)) ? renderJobEntriesTable(j.id) : ''}</div>
     </div>`;
+}
+
+const expandedJobs = new Set();
+
+function toggleJobEntries(id, btn) {
+  const key = String(id);
+  const panel = document.getElementById('job-entries-' + key);
+  if (!panel) return;
+  const open = !expandedJobs.has(key);
+  if (open) { expandedJobs.add(key); panel.innerHTML = renderJobEntriesTable(key); panel.style.display = ''; }
+  else { expandedJobs.delete(key); panel.style.display = 'none'; panel.innerHTML = ''; }
+  btn.classList.toggle('open', open);
+  btn.setAttribute('aria-expanded', open);
+}
+
+function renderJobEntriesTable(id) {
+  const key = String(id);
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const rows = entries.filter(e => String(e.jobId) === key).map(e => ({ e, date: normaliseDate(e.date), pending: false }));
+  overtimeRequests.filter(o => String(o.jobId) === key && o.status === 'pending')
+    .forEach(o => rows.push({ e: { worker: o.worker, hours: o.hours, comments: o.workerComment || '', isOvertime: true, timeRange: o.timeRange }, date: normaliseDate(o.date), pending: true }));
+  if (!rows.length) return '<p class="text-muted" style="font-size:12px;padding:4px 0;">No time logged against this job yet.</p>';
+  rows.sort((a, b) => a.date.localeCompare(b.date) || String(a.e.worker).localeCompare(String(b.e.worker)));
+
+  const byWorker = {};
+  let total = 0, pendingTotal = 0;
+  rows.forEach(r => {
+    const h = parseFloat(r.e.hours) || 0;
+    if (r.pending) { pendingTotal += h; return; }
+    total += h;
+    byWorker[r.e.worker] = (byWorker[r.e.worker] || 0) + h;
+  });
+  const summary = Object.keys(byWorker).sort((a, b) => byWorker[b] - byWorker[a])
+    .map(w => '<strong>' + escWO(workerInitials(w) || w) + '</strong> ' + fmtHrs(byWorker[w]) + 'h').join(' · ');
+
+  const body = rows.map(r => {
+    const e = r.e;
+    const d = new Date(r.date + 'T12:00:00');
+    const amends = Array.isArray(e.amendments) ? e.amendments : [];
+    const created = amends.find(a => /^Created/i.test(a.note || ''));
+    const changes = amends.filter(a => !/^Created/i.test(a.note || ''));
+    const last = changes.length ? changes[changes.length - 1] : null;
+    const ot = e.isOvertime
+      ? 'Overtime' + (e.timeRange ? ' ' + escWO(e.timeRange) : (e.overtimeStart && e.overtimeEnd ? ' ' + escWO(e.overtimeStart) + '–' + escWO(e.overtimeEnd) : ''))
+      : 'Standard';
+    const logged = (e.createdAt ? fmtUKDate(localDateStr(new Date(e.createdAt))) : '') + (created && created.by ? ' by ' + escWO(created.by) : '');
+    const amendTxt = last ? 'Amended' + (last.by ? ' by ' + escWO(last.by) : '') + (last.at ? ' · ' + escWO(last.at) : '') + (changes.length > 1 ? ' (' + changes.length + ' changes)' : '') : '';
+    return `<tr class="${r.pending ? 'je-pending' : ''}">
+      <td class="nowrap">${isNaN(d) ? escWO(r.date) : dayNames[d.getDay()] + ' ' + fmtUKDate(r.date)}</td>
+      <td class="nowrap">${escWO(e.worker || '')}</td>
+      <td class="num">${fmtHrs(parseFloat(e.hours) || 0)}h</td>
+      <td class="nowrap">${ot}${r.pending ? '<span class="je-tag">Pending approval</span>' : ''}</td>
+      <td>${escWO(e.comments || '')}</td>
+      <td class="nowrap" style="color:var(--color-text-secondary);">${logged}${amendTxt ? '<br>' + amendTxt : ''}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <p class="je-summary">${rows.length - rows.filter(r => r.pending).length} entr${rows.length - rows.filter(r => r.pending).length === 1 ? 'y' : 'ies'}${summary ? ' · ' + summary : ''}</p>
+    <table>
+      <thead><tr><th>Date</th><th>Worker</th><th class="num">Hours</th><th>Type</th><th>Comments</th><th>Logged / amended</th></tr></thead>
+      <tbody>${body}</tbody>
+      <tfoot><tr><td colspan="2">Total</td><td class="num">${fmtHrs(total)}h</td><td colspan="3" style="font-weight:400;color:var(--color-text-secondary);">${pendingTotal ? '+ ' + fmtHrs(pendingTotal) + 'h overtime awaiting approval (not counted)' : ''}</td></tr></tfoot>
+    </table>`;
 }
 
 function renderOfficeDashboard() {
