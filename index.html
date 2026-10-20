@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-32 (Hours reminder: from 09:00 daily, checks every 5 min while an office screen is open) -->
+<!-- BUILD MARKER: NB-33 (Locations: sorted by first letter then number; office Locations tab to add / edit / deactivate) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -127,6 +127,11 @@ textarea { height: 60px; resize: none; }
 .badge { font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 500; }
 .badge-open { background: var(--color-background-info); color: var(--color-text-info); }
 .badge-done { background: var(--color-background-success); color: var(--color-text-success); }
+.loc-form-grid { display: grid; grid-template-columns: 3fr 1fr; gap: 12px; }
+@media (max-width: 600px) { .loc-form-grid { grid-template-columns: 1fr; } }
+.loc-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+.loc-row.loc-inactive .loc-name { color: var(--color-text-secondary); text-decoration: line-through; }
+.loc-letter { font-size: 11px; font-weight: 600; color: var(--color-text-secondary); letter-spacing: 1px; padding: 10px 0 4px; border-bottom: 0.5px solid var(--color-border-tertiary); }
 .badge-amended { background: var(--color-background-warning); color: var(--color-text-warning); font-size: 10px; padding: 1px 6px; margin-left: 6px; }
 .badge-pending { background: #fff3cd; color: #856404; font-size: 10px; padding: 1px 6px; margin-left: 6px; }
 .wo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
@@ -522,6 +527,7 @@ textarea { height: 60px; resize: none; }
         <button onclick="switchOfficeTab('weekapprovals')" id="otab-weekapprovals">Weekly Approvals</button>
         <button onclick="switchOfficeTab('wohours')" id="otab-wohours">WO Hours</button>
         <button onclick="switchOfficeTab('workers')" id="otab-workers">Workers</button>
+        <button onclick="switchOfficeTab('locations')" id="otab-locations">Locations</button>
         <button onclick="switchOfficeTab('absences')" id="otab-absences">Absence Types</button>
         <button onclick="switchOfficeTab('recurring')" id="otab-recurring">Recurring Jobs</button>
       </div>
@@ -977,6 +983,40 @@ textarea { height: 60px; resize: none; }
       </div>
       </div><!-- end workers card -->
       </div><!-- end workers tab -->
+
+      <!-- Locations tab -->
+      <div id="office-tab-locations" style="display:none;">
+        <div class="card">
+          <div class="row-between card-header">
+            <p class="section-heading">Locations</p>
+            <span class="text-muted" style="font-size:13px;" id="loc-count"></span>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
+            <input type="text" id="loc-search" placeholder="Search locations or cost centres..." oninput="renderLocationsList()" style="flex:1;min-width:200px;">
+            <label style="margin:0;display:flex;align-items:center;gap:6px;font-size:13px;font-weight:400;white-space:nowrap;cursor:pointer;">
+              <input type="checkbox" id="loc-show-inactive" onchange="renderLocationsList()" style="width:auto;margin:0;"> Show inactive
+            </label>
+          </div>
+          <div id="locations-list"><p class="text-muted">Loading...</p></div>
+          <div style="margin-top:1rem;padding-top:1rem;border-top:0.5px solid var(--color-border-tertiary);">
+            <p style="font-size:13px;font-weight:500;margin-bottom:0.75rem;" id="loc-form-title">Add new location</p>
+            <div class="loc-form-grid">
+              <div>
+                <label style="margin-top:0;">Location</label>
+                <input type="text" id="loc-name" placeholder="e.g. 19 The Boltons" onkeydown="if(event.key==='Enter'){event.preventDefault();saveLocation();}">
+              </div>
+              <div>
+                <label style="margin-top:0;">Cost centre</label>
+                <input type="text" id="loc-cc" placeholder="e.g. 0123" onkeydown="if(event.key==='Enter'){event.preventDefault();saveLocation();}">
+              </div>
+            </div>
+            <div class="form-footer">
+              <button class="btn" id="loc-cancel-btn" style="display:none;" onclick="cancelLocationEdit()">Cancel</button>
+              <button class="btn btn-primary" id="loc-save-btn" onclick="saveLocation()">Add location</button>
+            </div>
+          </div>
+        </div>
+      </div><!-- end locations tab -->
     </div>
   </div>
 
@@ -3986,7 +4026,7 @@ async function officeReviewOvertime(id, status) {
 }
 
 function switchOfficeTab(tab) {
-  const tabs = ['daily','wocreate','jobs','schedule','schedview','wohours','entries','absences','workers','recurring','overtime','weekapprovals'];
+  const tabs = ['daily','wocreate','jobs','schedule','schedview','wohours','entries','absences','workers','locations','recurring','overtime','weekapprovals'];
   tabs.forEach(t => {
     const el = document.getElementById('office-tab-' + t);
     const btn = document.getElementById('otab-' + t);
@@ -4003,6 +4043,7 @@ function switchOfficeTab(tab) {
   if (tab === 'wocreate') initWOForm();
   if (tab === 'schedule') renderScheduleGrid();
   if (tab === 'schedview') renderScheduleView();
+  if (tab === 'locations') renderLocationsList();
 }
 
 // ── Workers management ───────────────────────────────────────────
@@ -5724,12 +5765,156 @@ function fillCodeSelect(selId, list, emptyLabel, missingLabel) {
   if (!sel._ssAttached) ssAttach(selId, 'Search ' + emptyLabel.replace(/^Select /, '').replace(/\.\.\.$/, '') + '...'); else ssRefresh(selId);
 }
 
+var locationsAll = [];   // every location on the Properties sheet, including deactivated ones
+
+// Sort key: alphabetical from the first letter of the name (ignoring the leading
+// house / flat number), then by that leading number. "19A" or "1st" count as part
+// of the number. e.g. "1 Eaton Place" < "40 Eaton Place" < "Flat 3, 7/9 Chesham Street"
+// < "19 The Boltons".
+function locationSortParts(name) {
+  var m = String(name || '').match(/^((?:[^A-Za-z]|(?<=\d)(?:st|nd|rd|th)\b|(?<=\d)[A-Za-z](?![A-Za-z]))*)([\s\S]*)$/i);
+  var prefix = (m ? m[1] : '').trim();
+  var rest = (m ? m[2] : String(name || '')).trim();
+  var numMatch = prefix.match(/\d+(?:\.\d+)?/);
+  return { rest: rest, prefix: prefix, num: numMatch ? parseFloat(numMatch[0]) : -1 };
+}
+function compareLocationNames(a, b) {
+  var pa = locationSortParts(a), pb = locationSortParts(b);
+  var c = pa.rest.localeCompare(pb.rest, 'en-GB', { numeric: true, sensitivity: 'base' });
+  if (c) return c;
+  if (pa.num !== pb.num) return pa.num - pb.num;
+  return pa.prefix.localeCompare(pb.prefix, 'en-GB', { numeric: true, sensitivity: 'base' });
+}
+
 function setPropertiesFromData(list) {
-  woLocations = (list || []).map(function(p) {
-    if (typeof p === 'string') return { name: p.trim(), costCentre: '' };
-    return { name: String(p.name || '').trim(), costCentre: String(p.costCentre || p.costCode || '').trim() };
+  locationsAll = (list || []).map(function(p) {
+    if (typeof p === 'string') return { name: p.trim(), costCentre: '', active: true };
+    var act = p.active;
+    return {
+      name: String(p.name || '').trim(),
+      costCentre: String(p.costCentre || p.costCode || '').trim(),
+      active: !(act === false || String(act).toUpperCase() === 'FALSE')
+    };
   }).filter(function(p) { return p.name; });
+  locationsAll.sort(function(a, b) { return compareLocationNames(a.name, b.name); });
+  woLocations = locationsAll.filter(function(p) { return p.active; });
   rjProperties = woLocations.map(function(p) { return p.name; });
+  var tab = document.getElementById('office-tab-locations');
+  if (tab && tab.style.display === 'block') renderLocationsList();
+}
+
+// ── Locations management (office) ────────────────────────────────
+var editingLocationName = null;
+
+function locationsFilterText() {
+  var el = document.getElementById('loc-search');
+  return el ? el.value.trim().toLowerCase() : '';
+}
+
+function renderLocationsList() {
+  var el = document.getElementById('locations-list');
+  if (!el) return;
+  var q = locationsFilterText();
+  var showInactive = document.getElementById('loc-show-inactive').checked;
+  var inactiveCount = locationsAll.filter(function(p) { return !p.active; }).length;
+  document.getElementById('loc-count').textContent = woLocations.length + ' active' + (inactiveCount ? ' · ' + inactiveCount + ' inactive' : '');
+  var list = locationsAll.filter(function(p) {
+    if (!showInactive && !p.active) return false;
+    if (!q) return true;
+    return p.name.toLowerCase().indexOf(q) > -1 || p.costCentre.toLowerCase().indexOf(q) > -1;
+  });
+  if (!locationsAll.length) { el.innerHTML = '<p class="text-muted">No locations yet — add the first one below.</p>'; return; }
+  if (!list.length) { el.innerHTML = '<p class="text-muted">No locations match.</p>'; return; }
+  var lastLetter = null, html = '';
+  list.forEach(function(p) {
+    var letter = (locationSortParts(p.name).rest.charAt(0) || '#').toUpperCase();
+    if (letter !== lastLetter) { html += '<div class="loc-letter">' + escWO(letter) + '</div>'; lastLetter = letter; }
+    var nameArg = escWO(JSON.stringify(p.name));
+    html += '<div class="entry-row loc-row' + (p.active ? '' : ' loc-inactive') + '">' +
+      '<div style="flex:1;min-width:200px;">' +
+        '<span class="loc-name" style="font-size:13px;font-weight:500;">' + escWO(p.name) + '</span>' +
+        (p.active ? '' : '<span class="badge" style="margin-left:8px;background:var(--color-background-secondary);color:var(--color-text-secondary);">Inactive</span>') +
+      '</div>' +
+      '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+        '<span class="text-muted" style="font-size:12px;">Cost centre: <strong>' + (p.costCentre ? escWO(p.costCentre) : '—') + '</strong></span>' +
+        '<button class="btn btn-sm" onclick="editLocation(' + nameArg + ')">Edit</button>' +
+        '<button class="btn btn-sm" onclick="toggleLocationActive(' + nameArg + ')">' + (p.active ? 'Deactivate' : 'Reactivate') + '</button>' +
+      '</div>' +
+    '</div>';
+  });
+  el.innerHTML = html;
+}
+
+function editLocation(name) {
+  var p = locationsAll.find(function(x) { return x.name === name; });
+  if (!p) return;
+  editingLocationName = p.name;
+  document.getElementById('loc-name').value = p.name;
+  document.getElementById('loc-cc').value = p.costCentre;
+  document.getElementById('loc-form-title').textContent = 'Edit location';
+  document.getElementById('loc-save-btn').textContent = 'Save changes';
+  document.getElementById('loc-cancel-btn').style.display = '';
+  document.getElementById('loc-name').focus();
+  document.getElementById('loc-name').scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
+function cancelLocationEdit() {
+  editingLocationName = null;
+  document.getElementById('loc-name').value = '';
+  document.getElementById('loc-cc').value = '';
+  document.getElementById('loc-form-title').textContent = 'Add new location';
+  document.getElementById('loc-save-btn').textContent = 'Add location';
+  document.getElementById('loc-cancel-btn').style.display = 'none';
+}
+
+function applyLocationsLocally(next) {
+  setPropertiesFromData(next);
+  renderLocationsList();
+  var woTab = document.getElementById('office-tab-wocreate');
+  if (woTab && woTab.style.display === 'block') initWOForm();
+}
+
+async function sendLocation(prop, okMsg) {
+  if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to change locations'); return false; }
+  var before = locationsAll.map(function(p) { return Object.assign({}, p); });
+  var next = locationsAll.filter(function(p) { return p.name !== (prop.originalName || prop.name); });
+  next.push({ name: prop.name, costCentre: prop.costCentre, active: prop.active });
+  applyLocationsLocally(next);
+  try {
+    var res = await api('saveProperty', { property: prop, performedBy: currentOfficeUser });
+    if (res && res.error) throw new Error(res.error);
+    setSyncStatus('office', 'synced', okMsg);
+    return true;
+  } catch (err) {
+    applyLocationsLocally(before);
+    alert('Could not save location: ' + (err.message || err));
+    return false;
+  }
+}
+
+async function saveLocation() {
+  var name = document.getElementById('loc-name').value.trim().replace(/\s+/g, ' ');
+  var cc = document.getElementById('loc-cc').value.trim();
+  if (!name) { alert('Please enter the location'); return; }
+  var original = editingLocationName;
+  var clash = locationsAll.find(function(p) { return p.name.toLowerCase() === name.toLowerCase() && p.name !== original; });
+  if (clash) { alert('"' + clash.name + '" already exists' + (clash.active ? '' : ' (inactive — tick Show inactive to reactivate it)')); return; }
+  var existing = original ? locationsAll.find(function(p) { return p.name === original; }) : null;
+  var prop = { name: name, costCentre: cc, active: existing ? existing.active : true };
+  if (original) prop.originalName = original;
+  var btn = document.getElementById('loc-save-btn');
+  btn.disabled = true;
+  var ok = await sendLocation(prop, original ? 'Location updated' : 'Location added');
+  btn.disabled = false;
+  if (ok) cancelLocationEdit();
+}
+
+async function toggleLocationActive(name) {
+  var p = locationsAll.find(function(x) { return x.name === name; });
+  if (!p) return;
+  if (p.active && !confirm('Deactivate "' + p.name + '"?\n\nIt will no longer appear when creating work orders. Existing jobs keep it, and you can reactivate it at any time.')) return;
+  await sendLocation({ name: p.name, costCentre: p.costCentre, active: !p.active, originalName: p.name },
+    p.name + (p.active ? ' deactivated' : ' reactivated'));
 }
 
 function escWO(v) {
@@ -5798,7 +5983,7 @@ function initWOForm() {
 
   const locSel = document.getElementById('wo-location');
   const curLoc = locSel.value;
-  locSel.innerHTML = '<option value="">' + (woLocations.length ? 'Select location...' : 'No locations — add them to the Properties sheet') + '</option>' +
+  locSel.innerHTML = '<option value="">' + (woLocations.length ? 'Select location...' : 'No locations — add them in the Locations tab') + '</option>' +
     woLocations.map(p => `<option value="${escWO(p.name)}">${escWO(propLabel(p.name, 70))}</option>`).join('');
   if (curLoc && woLocations.find(p => p.name === curLoc)) locSel.value = curLoc;
   if (!locSel._ssAttached) ssAttach('wo-location', 'Search locations...'); else ssRefresh('wo-location');
@@ -5839,7 +6024,7 @@ function toggleWOAssign(btn) {
 
 function woLocationChanged() {
   const name = document.getElementById('wo-location').value;
-  const loc = woLocations.find(p => p.name === name);
+  const loc = locationsAll.find(p => p.name === name);
   document.getElementById('wo-costcentre').value = loc ? loc.costCentre : '';
 }
 
@@ -5886,7 +6071,7 @@ function editJob(id) {
   ensureSelectOption('wo-location', job.property, job.property);
   document.getElementById('wo-location').value = job.property || '';
   ssRefresh('wo-location');
-  const loc = woLocations.find(p => p.name === job.property);
+  const loc = locationsAll.find(p => p.name === job.property);
   document.getElementById('wo-costcentre').value = loc ? loc.costCentre : (job.costCentre || '');
 
   ensureSelectOption('wo-costcode', job.costCode, job.costCode);
@@ -5957,7 +6142,7 @@ async function createWorkOrder() {
   if (schedStart && schedEnd && schedEnd < schedStart) { alert('Scheduled end date cannot be before the start date'); return; }
   if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to create a work order'); return; }
 
-  const loc = woLocations.find(x => x.name === location);
+  const loc = locationsAll.find(x => x.name === location);
   const assignedNames = workers.filter(w => woSelectedWorkers.has(w.name)).map(w => w.name);
   const editingJob = editingJobId ? jobs.find(j => j.id === editingJobId) : null;
   const job = {
