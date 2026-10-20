@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-31 (Schedule notification: short "ready to be viewed" message) -->
+<!-- BUILD MARKER: NB-32 (Hours reminder: from 09:00 daily, checks every 5 min while an office screen is open) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -2309,6 +2309,7 @@ async function officeLogin() {
     const result = await api('officeLogin', { user, password: p });
     if (result.success) {
       currentOfficeUser = user;
+      startReminderTimer();
       document.getElementById('office-login-screen').style.display = 'none';
       document.getElementById('office-screen').style.display = 'block';
       document.querySelector('.app').classList.add('office-wide');
@@ -2326,6 +2327,7 @@ async function officeLogin() {
 
 function officeLogout() {
   currentOfficeUser = null;
+  stopReminderTimer();
   document.getElementById('office-login-screen').style.display = 'block';
   document.getElementById('office-screen').style.display = 'none';
   document.getElementById('office-pin').value = '';
@@ -4771,7 +4773,9 @@ const NON_WORKING_STATUSES = ['Holiday', 'Bank Holiday', 'Festive Closure'];
 let ntfyTopicPrefix = (() => { try { return localStorage.getItem('ntfyTopicPrefix') || ''; } catch (e) { return ''; } })();
 let ntfyQueue = (() => { try { return JSON.parse(localStorage.getItem('ntfyQueue') || '[]'); } catch (e) { return []; } })();
 let ntfyFlushing = false;
-let prevDayReminderDone = false;
+const REMINDER_HOUR = 9;
+let prevDayReminderDate = '';
+let reminderTimer = null;
 
 function workerNtfyTopic(name) {
   const slug = String(name || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
@@ -4934,24 +4938,32 @@ function previousWorkingDay(from) {
   return null;
 }
 
-async function runPrevDayHoursReminder() {
-  if (prevDayReminderDone || !currentOfficeUser || !ntfyTopicPrefix || !SCRIPT_URL || !navigator.onLine) return;
-  prevDayReminderDone = true;
+async function runPrevDayHoursReminder(src) {
+  if (!currentOfficeUser || !ntfyTopicPrefix || !SCRIPT_URL || !navigator.onLine) return;
   const today = new Date();
+  const todayStr = localDateStr(today);
+  if (prevDayReminderDate === todayStr || today.getHours() < REMINDER_HOUR) return;
+  prevDayReminderDate = todayStr;
   const prev = previousWorkingDay(today);
   if (!prev) return;
   const ds = localDateStr(prev);
+  const srcWorkers = (src && src.workers) || workers;
+  const srcEntries = (src && src.entries) || entries;
+  const srcSchedule = (src && src.schedule) || schedule;
+  const nm = v => String(v || '').trim().replace(/\s+/g, ' ');
   const missing = [];
-  workers.filter(w => w.active !== false && w.active !== 'FALSE').forEach(w => {
-    const st = schedule.find(x => x.date === ds && x.worker === w.name && x.type === 'status' && NON_WORKING_STATUSES.includes(x.status));
+  srcWorkers.filter(w => w.active !== false && w.active !== 'FALSE').forEach(w => {
+    const name = nm(w.name);
+    const st = srcSchedule.find(x => x.date === ds && nm(x.worker) === name && x.type === 'status' && NON_WORKING_STATUSES.includes(x.status));
     if (st) return;
-    const logged = entries.filter(e => e.worker === w.name && normaliseDate(e.date) === ds).reduce((t, e) => t + (parseFloat(e.hours) || 0), 0);
-    if (logged < 8) missing.push({ name: w.name, logged });
+    const logged = srcEntries.filter(e => nm(e.worker) === name && normaliseDate(e.date) === ds).reduce((t, e) => t + (parseFloat(e.hours) || 0), 0);
+    if (logged < 8) missing.push({ name, logged });
   });
   try {
-    const claim = await api('claimDailyTask', { task: 'prevDayHours', date: localDateStr(today), performedBy: currentOfficeUser });
+    const claim = await api('claimDailyTask', { task: 'prevDayHours', date: todayStr, performedBy: currentOfficeUser });
+    if (claim.busy) { prevDayReminderDate = ''; return; }
     if (!claim.claimed) return;
-  } catch (e) { return; }
+  } catch (e) { prevDayReminderDate = ''; return; }
   if (!missing.length) return;
   const dayLabel = SCHED_DAY_NAMES[(prev.getDay() + 6) % 7] + ' ' + fmtUKDate(ds);
   missing.forEach(m => notifyWorker(m.name, {
@@ -4962,6 +4974,26 @@ async function runPrevDayHoursReminder() {
   }));
   await flushNtfyQueue();
   setSyncStatus('office', 'synced', 'Hours reminders sent to ' + missing.length + ' worker(s)');
+}
+
+async function reminderTick() {
+  if (!currentOfficeUser || !navigator.onLine) return;
+  const now = new Date();
+  if (now.getHours() < REMINDER_HOUR || prevDayReminderDate === localDateStr(now)) return;
+  try {
+    const data = await api('getData');
+    if (typeof data.ntfyTopicPrefix === 'string') ntfyTopicPrefix = data.ntfyTopicPrefix;
+    await runPrevDayHoursReminder({ workers: data.workers || [], entries: data.entries || [], schedule: data.schedule || [] });
+  } catch (e) { /* try again next tick */ }
+}
+
+function startReminderTimer() {
+  if (reminderTimer) clearInterval(reminderTimer);
+  reminderTimer = setInterval(reminderTick, 5 * 60 * 1000);
+}
+
+function stopReminderTimer() {
+  if (reminderTimer) { clearInterval(reminderTimer); reminderTimer = null; }
 }
 
 function openNtfyHelp() {
