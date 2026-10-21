@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-43 (Locations add form at top; schedule note placeholder; Recurring Jobs tab after Weekly Approvals) -->
+<!-- BUILD MARKER: NB-45 (Entries crossing daily hours split into normal + overtime; office user full names in logs) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -385,7 +385,6 @@ textarea { height: 60px; resize: none; }
 .rj-prop-wrap.rj-visible { display: block; }
 .rj-prop-wrap > label { font-size: 13px; color: var(--color-text-secondary); display: block; margin-bottom: 6px; margin-top: 0; font-weight: normal; }
 </style>
-  <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 </head>
 <body>
 <div class="app">
@@ -1156,7 +1155,7 @@ function trackRecentEntry(entry) {
   recentlyCreatedEntries.push({ entry, at: Date.now() });
   recentlyCreatedEntries = recentlyCreatedEntries.filter(r => Date.now() - r.at < RECENT_ENTRY_WINDOW_MS);
 }
-let dailyViewDate = new Date().toISOString().slice(0, 10);
+let dailyViewDate = localDateStr(new Date());
 let currentWorker = null;
 let syncQueue = JSON.parse(localStorage.getItem('syncQueue') || '[]');
 let pollTimer = null;
@@ -1381,7 +1380,7 @@ function workerLogin() {
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('timesheet-screen').style.display = 'block';
   document.getElementById('worker-greeting').textContent = 'Hello, ' + w;
-  document.getElementById('entry-date').value = new Date().toISOString().split('T')[0];
+  document.getElementById('entry-date').value = localDateStr(new Date());
   populateJobDropdown();
   renderEntriesByDate();
   workerJobsView = 'open';
@@ -1547,7 +1546,7 @@ function updateHoursPlaceholder() {
   const dateEl = document.getElementById('entry-date');
   const input = document.getElementById('entry-hours');
   if (!dateEl || !input || !currentWorker) return;
-  const norm = normaliseDate(dateEl.value || new Date().toISOString().slice(0, 10));
+  const norm = normaliseDate(dateEl.value || localDateStr(new Date()));
   const logged = entries
     .filter(e => e.worker === currentWorker && normaliseDate(e.date) === norm)
     .reduce((sum, e) => sum + parseFloat(e.hours || 0), 0);
@@ -1608,8 +1607,33 @@ function updateOvertimeDuration() {
   document.getElementById('ot-duration').textContent = `Duration: ${start} – ${end} (${hrs}h)`;
 }
 
+// Hours already logged as normal time (not overtime) for a worker on a date
+function normalHoursLogged(worker, ds) {
+  return entries.filter(e => e.worker === worker && normaliseDate(e.date) === ds && !e.isOvertime && !e.overtimeStatus)
+    .reduce((t, e) => t + (parseFloat(e.hours) || 0), 0);
+}
+
+// On a weekday, the part of an entry that still fits in the worker's normal
+// day is saved as normal time once the overtime part is confirmed.
+let pendingOvertimeNormal = null;
+function startOvertime(entry, isWeekend) {
+  pendingOvertimeNormal = null;
+  if (!isWeekend) {
+    const remaining = Math.round(Math.max(0, workerDailyHours(entry.worker) - normalHoursLogged(entry.worker, normaliseDate(entry.date))) * 100) / 100;
+    if (remaining > 0 && remaining < entry.hours) {
+      pendingOvertimeNormal = { ...entry, id: uid(), hours: remaining, amendments: (entry.amendments || []).slice() };
+      entry.hours = Math.round((entry.hours - remaining) * 100) / 100;
+    }
+  }
+  showOvertimeModal(entry, isWeekend);
+  if (pendingOvertimeNormal) {
+    document.getElementById('ot-message').textContent = fmtHrs(pendingOvertimeNormal.hours) + 'h will be saved as normal time to complete the ' + fmtHrs(workerDailyHours(entry.worker)) + 'h day. Please confirm the time range for the remaining ' + fmtHrs(entry.hours) + 'h of overtime.';
+  }
+}
+
 function cancelOvertime() {
   pendingOvertimeEntry = null;
+  pendingOvertimeNormal = null;
   document.getElementById('overtime-modal').style.display = 'none';
 }
 
@@ -1629,6 +1653,8 @@ async function confirmOvertime() {
   const timeRange = start + ' – ' + end;
 
   const entry = pendingOvertimeEntry;
+  const normalPart = pendingOvertimeNormal;
+  pendingOvertimeNormal = null;
   entry.overtimeStatus = 'pending';
   entry.overtimeTimeRange = timeRange;
   entry.overtimeHours = otHours;
@@ -1661,6 +1687,10 @@ async function confirmOvertime() {
   try {
     overtimeRequests.push(otRequest);
     localStorage.setItem('overtimeRequests', JSON.stringify(overtimeRequests));
+    if (normalPart) {
+      entries.push(normalPart); trackRecentEntry(normalPart);
+      localStorage.setItem('entries', JSON.stringify(entries));
+    }
 
     document.getElementById('overtime-modal').style.display = 'none';
     pendingOvertimeEntry = null;
@@ -1678,6 +1708,10 @@ async function confirmOvertime() {
     renderOfficeEntries();
     renderDailyView();
 
+    if (normalPart) {
+      if (typeof updateHoursPlaceholder === 'function') updateHoursPlaceholder();
+      await queueOrSend('addEntry', { entry: { ...normalPart, amendments: amendmentsToString(normalPart.amendments) } });
+    }
     const { synced } = await queueOrSend('saveOvertimeRequest', { request: otRequest });
     if (synced) {
       showToast('toast-worker');
@@ -1714,14 +1748,16 @@ async function submitEntry() {
   const dayOfWeek = new Date(date + 'T12:00:00').getDay();
   const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
   const alreadyLogged = entries
-    .filter(e => e.worker === currentWorker && normaliseDate(e.date) === norm && !e.overtimeStatus)
+    .filter(e => e.worker === currentWorker && normaliseDate(e.date) === norm && !e.overtimeStatus && !e.isOvertime)
     .reduce((sum, e) => sum + parseFloat(e.hours || 0), 0);
   const isOvertime = isWeekend || (alreadyLogged + hours > workerDailyHours(currentWorker));
 
   if (isOvertime) {
+    if (isRecurringJobId(jobId) && !rjPropGetValue('rj-prop-worker')) { alert('Please select a property for this recurring job.'); return; }
+    if (isRecurringJobId(jobId) && !comments.trim()) { alert('Please add a comment for this recurring job.'); return; }
     const jobObj = jobs.find(j => j.id === jobId) || recurringJobs.find(j => j.id === jobId) || absenceTypes.find(a => a.id === jobId);
     const entry = { id: uid(), worker: currentWorker, jobId, date, hours, comments, amendments: [], createdAt: new Date().toISOString(), property: isRecurringJobId(jobId) ? (rjPropGetValue('rj-prop-worker') || (jobObj ? jobObj.property : '')) : (jobObj ? jobObj.property : ''), description: jobObj ? (jobObj.description || jobObj.name || '') : '' };
-    showOvertimeModal(entry, isWeekend);
+    startOvertime(entry, isWeekend);
     return;
   }
 
@@ -1823,7 +1859,7 @@ function normaliseDate(d) {
     return parts[2] + '-' + parts[1] + '-' + parts[0];
   }
   const dt = new Date(s);
-  if (!isNaN(dt.getTime())) return dt.toISOString().slice(0, 10);
+  if (!isNaN(dt.getTime())) return localDateStr(dt);
   return s;
 }
 
@@ -1861,8 +1897,8 @@ function isWeekFulfilled(workerName, wc) {
     const hasAbsence = dayEntries.some(e => absenceTypes.some(a => a.id === e.jobId));
     if (hasAbsence) continue;
 
-    const hoursLogged = dayEntries.reduce((s, e) => s + parseFloat(e.hours || 0), 0);
-    if (hoursLogged !== workerDailyHours(workerName)) return false;
+    const hoursLogged = dayEntries.filter(e => !e.isOvertime).reduce((s, e) => s + parseFloat(e.hours || 0), 0);
+    if (hoursLogged < workerDailyHours(workerName)) return false;
   }
   return true;
 }
@@ -2165,7 +2201,7 @@ function populateAbsenceEntryForm() {
   const activeAbsTypes = absenceTypes.filter(a => a.active !== false && a.active !== 'FALSE');
   jobSel.innerHTML = '<option value="">Select absence type...</option>' + activeAbsTypes.map(a => `<option value="${a.id}">${a.id} · ${a.name}</option>`).join('');
   const dateEl = document.getElementById('abs-entry-date');
-  if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0,10);
+  if (dateEl && !dateEl.value) dateEl.value = localDateStr(new Date());
 }
 
 async function submitAbsenceEntry() {
@@ -2198,7 +2234,7 @@ async function submitAbsenceEntry() {
 function renderEntriesByDate() {
   const container = document.getElementById('entries-by-date');
   const dateVal = document.getElementById('entry-date') ? document.getElementById('entry-date').value : '';
-  const wc = getWeekCommencing(dateVal || new Date().toISOString().slice(0, 10));
+  const wc = getWeekCommencing(dateVal || localDateStr(new Date()));
   container.innerHTML = renderWeek(wc);
   initInlineJobSelects();
 }
@@ -2645,7 +2681,7 @@ async function toggleJobOpen(id, open) {
   isTogglingJob = true;
   setSyncStatus('office', 'pending', (open ? 'Reopening ' : 'Closing ') + id + '...');
   try {
-    const result = await api(open ? 'reopenJob' : 'closeJob', { id, performedBy: currentOfficeUser, closedBy: officeUserInitials() });
+    const result = await api(open ? 'reopenJob' : 'closeJob', { id, performedBy: officeUserName(), closedBy: officeUserInitials() });
     job.open = open;
     job.closedDate = result.closedDate || '';
     job.closedBy = result.closedBy || '';
@@ -2790,9 +2826,9 @@ function renderOfficeDashboard() {
     owSel.innerHTML = '<option value="">All workers</option>' + active.map(w => `<option value="${w.name}">${w.name}</option>`).join('');
   }
   const today = new Date();
-  const todayStr = today.toISOString().slice(0,10);
+  const todayStr = localDateStr(today);
   const prev7 = new Date(today); prev7.setDate(today.getDate() - 7);
-  const prev7Str = prev7.toISOString().slice(0,10);
+  const prev7Str = localDateStr(prev7);
   const fromEl = document.getElementById('oe-date-from');
   const toEl = document.getElementById('oe-date-to');
   if (fromEl && !fromEl.value) fromEl.value = prev7Str;
@@ -3208,7 +3244,7 @@ async function sendRecurringUpdate(id, fields, okMsg, busyBtn, busyText) {
   if (!j) return false;
   const release = setRecurringBusy(id, busyBtn, busyText);
   try {
-    const res = await api('saveRecurringJob', { job: Object.assign({ id }, fields), performedBy: currentOfficeUser || 'Office' });
+    const res = await api('saveRecurringJob', { job: Object.assign({ id }, fields), performedBy: officeUserName() });
     if (!res || res.id !== id) throw new Error(RJ_OLD_SCRIPT_MSG);
     Object.assign(j, fields);
     localStorage.setItem('recurringJobs', JSON.stringify(recurringJobs));
@@ -3296,7 +3332,7 @@ async function addRecurringJob() {
   btn.disabled = true;
   btn.textContent = 'Creating…';
   try {
-    const res = await api('saveRecurringJob', { job: { description, costCode, trade, assignedTo: '' }, performedBy: currentOfficeUser || 'Office' });
+    const res = await api('saveRecurringJob', { job: { description, costCode, trade, assignedTo: '' }, performedBy: officeUserName() });
     if (!res || !/^RWO\d+$/i.test(String(res.id || ''))) throw new Error(RJ_OLD_SCRIPT_MSG);
     recurringJobs.push({ id: res.id, property: '', description, costCode, trade, active: true, assignedTo: '' });
     cancelEditRecurring();
@@ -3319,7 +3355,7 @@ function toggleOfficeAddEntry() {
   form.style.display = open ? 'block' : 'none';
   btn.textContent = open ? '✕ Cancel' : '+ Add entry';
   if (open) {
-    document.getElementById('oae-date').value = new Date().toISOString().slice(0,10);
+    document.getElementById('oae-date').value = localDateStr(new Date());
     const workerSel = document.getElementById('oae-worker');
     const active = workers.filter(w => w.active !== false && w.active !== 'FALSE');
     workerSel.innerHTML = '<option value="">Select worker...</option>' + active.map(w => `<option value="${w.name}">${w.name}</option>`).join('');
@@ -3339,7 +3375,7 @@ function toggleMultiAddEntry() {
   form.style.display = open ? 'block' : 'none';
   btn.textContent = open ? '✕ Cancel' : '+ Multi-Add Entries';
   if (open) {
-    const today = new Date().toISOString().slice(0,10);
+    const today = localDateStr(new Date());
     document.getElementById('mae-date-from').value = today;
     document.getElementById('mae-date-to').value = today;
     document.getElementById('mae-comments').value = '';
@@ -3421,12 +3457,12 @@ async function submitMultiAddEntries() {
       const entry = {
         id: uid(),
         worker, jobId, date: ds, hours: workerDailyHours(worker), comments: comments || '',
-        amendments: [{ by: currentOfficeUser || 'Office', at: new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }), note: 'Created via Multi-Add Entries' }],
+        amendments: [{ by: officeUserName() || 'Office', at: new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }), note: 'Created via Multi-Add Entries' }],
         createdAt: new Date().toISOString(),
         property: '',
         description: absType ? (absType.name || absType.id) : jobId,
         isOvertime: false,
-        performedBy: currentOfficeUser || 'Office'
+        performedBy: officeUserName()
       };
       entries.push(entry); trackRecentEntry(entry);
       localStorage.setItem('entries', JSON.stringify(entries));
@@ -3483,21 +3519,21 @@ async function submitOfficeEntry() {
   if (!worker || !jobId || !date || isNaN(hours)) { alert('Please fill in all required fields.'); return; }
   const dayOfWeek_oe = new Date(date + 'T12:00:00').getDay();
   const isWeekend_oe = dayOfWeek_oe === 0 || dayOfWeek_oe === 6;
-  const alreadyLogged = entries.filter(e => e.worker === worker && normaliseDate(e.date) === date).reduce((s, e) => s + parseFloat(e.hours || 0), 0);
+  const alreadyLogged = normalHoursLogged(worker, date);
   const isOvertime_oe = isWeekend_oe || (alreadyLogged + hours > workerDailyHours(worker));
   const allJobs = [...jobs, ...recurringJobs];
   const jobObj = allJobs.find(j => j.id === jobId);
   const entry_oe = {
     id: uid(), worker, jobId, date, hours, comments,
-    amendments: [{ by: currentOfficeUser || 'Office', at: new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }), note: 'Created by Office' }],
+    amendments: [{ by: officeUserName() || 'Office', at: new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }), note: 'Created by Office' }],
     createdAt: new Date().toISOString(),
     property: isRecurringJobId(jobId) ? (rjPropGetValue('rj-prop-oae') || (jobObj ? jobObj.property : '')) : (jobObj ? jobObj.property : ''),
     description: jobObj ? jobObj.description : '',
-    performedBy: currentOfficeUser || 'Office'
+    performedBy: officeUserName()
   };
   if (isRecurringJobId(jobId) && !rjPropGetValue('rj-prop-oae')) { alert('Please select a property for this recurring job.'); return; }
   if (isRecurringJobId(jobId) && !comments.trim()) { alert('Please add a comment for this recurring job.'); return; }
-  if (isOvertime_oe) { showOvertimeModal(entry_oe, isWeekend_oe); return; }
+  if (isOvertime_oe) { startOvertime(entry_oe, isWeekend_oe); return; }
   const entry = entry_oe;
   entries.push(entry); trackRecentEntry(entry);
   localStorage.setItem('entries', JSON.stringify(entries));
@@ -3532,7 +3568,7 @@ async function deleteEntry(id, isOffice) {
     updateHoursPlaceholder();
   }
   try {
-    const { synced } = await queueOrSend('deleteEntry', { id, performedBy: isOffice ? (currentOfficeUser || 'Office') : undefined });
+    const { synced } = await queueOrSend('deleteEntry', { id, performedBy: isOffice ? (officeUserName() || 'Office') : undefined });
     if (synced) setSyncStatus(isOffice ? 'office' : 'worker', 'synced', 'Entry deleted');
   } finally {
     pendingDeleteEntryIds.delete(String(id));
@@ -3590,7 +3626,7 @@ function changeDailyViewDate(delta) {
 }
 
 function jumpToTodayDailyView() {
-  dailyViewDate = new Date().toISOString().slice(0, 10);
+  dailyViewDate = localDateStr(new Date());
   renderDailyView();
 }
 
@@ -3601,7 +3637,7 @@ function renderDailyView() {
   if (!el) return;
 
   const todayStr = dailyViewDate;
-  const isActuallyToday = todayStr === new Date().toISOString().slice(0, 10);
+  const isActuallyToday = todayStr === localDateStr(new Date());
   const todayFmt = fmtDate(todayStr);
   if (heading) heading.textContent = todayFmt;
   if (todayBtn) todayBtn.style.display = isActuallyToday ? 'none' : 'inline-block';
@@ -3794,14 +3830,14 @@ async function submitDailyEntry() {
   if (!worker || !jobId || isNaN(hours)) { alert('Please fill in all required fields.'); return; }
   const dayOfWeek_de = new Date(date + 'T12:00:00').getDay();
   const isWeekend_de = dayOfWeek_de === 0 || dayOfWeek_de === 6;
-  const alreadyLogged = entries.filter(e => e.worker === worker && normaliseDate(e.date) === date).reduce((s, e) => s + parseFloat(e.hours || 0), 0);
+  const alreadyLogged = normalHoursLogged(worker, date);
   const isOvertime_de = isWeekend_de || (alreadyLogged + hours > workerDailyHours(worker));
   const allJobs = [...jobs, ...recurringJobs, ...absenceTypes];
   const jobObj = allJobs.find(j => j.id === jobId);
-  const entry_de = { id: uid(), worker, jobId, date, hours, comments, amendments: [{ by: currentOfficeUser || 'Office', at: new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }), note: 'Created by Office' }], createdAt: new Date().toISOString(), property: isRecurringJobId(jobId) ? (rjPropGetValue('rj-prop-dae') || (jobObj ? jobObj.property : '')) : (jobObj ? jobObj.property : ''), description: jobObj ? (jobObj.description || jobObj.name || '') : '', performedBy: currentOfficeUser || 'Office' };
+  const entry_de = { id: uid(), worker, jobId, date, hours, comments, amendments: [{ by: officeUserName() || 'Office', at: new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }), note: 'Created by Office' }], createdAt: new Date().toISOString(), property: isRecurringJobId(jobId) ? (rjPropGetValue('rj-prop-dae') || (jobObj ? jobObj.property : '')) : (jobObj ? jobObj.property : ''), description: jobObj ? (jobObj.description || jobObj.name || '') : '', performedBy: officeUserName() };
   if (isRecurringJobId(jobId) && !rjPropGetValue('rj-prop-dae')) { alert('Please select a property for this recurring job.'); return; }
   if (isRecurringJobId(jobId) && !comments.trim()) { alert('Please add a comment for this recurring job.'); return; }
-  if (isOvertime_de) { showOvertimeModal(entry_de, isWeekend_de); return; }
+  if (isOvertime_de) { startOvertime(entry_de, isWeekend_de); return; }
   const entry = entry_de;
   entries.push(entry); trackRecentEntry(entry);
   localStorage.setItem('entries', JSON.stringify(entries));
@@ -4045,7 +4081,7 @@ async function toggleOTSegmentLock(id, segIdx, lock) {
   if (!o) return;
   const segments = getOTSegments(o);
   segments[segIdx].approved = lock;
-  segments[segIdx].approvedBy = lock ? (currentOfficeUser || 'Office') : '';
+  segments[segIdx].approvedBy = lock ? (officeUserName() || 'Office') : '';
   segments[segIdx].approvedAt = lock ? new Date().toISOString() : '';
   await saveOTSegmentsToBackend(o, segments);
 }
@@ -4054,7 +4090,7 @@ async function saveOTSegmentsToBackend(o, segments) {
   o.rateSegments = JSON.stringify(segments);
   localStorage.setItem('overtimeRequests', JSON.stringify(overtimeRequests));
   renderOvertimeTab();
-  await api('saveOTRate', { id: o.id, rateSegments: o.rateSegments, performedBy: currentOfficeUser || 'Office' });
+  await api('saveOTRate', { id: o.id, rateSegments: o.rateSegments, performedBy: officeUserName() });
 }
 
 function renderOvertimeTab() {
@@ -4220,7 +4256,7 @@ async function officeReviewOvertime(id, status) {
   const reviewComment = commentEl ? commentEl.value.trim() : '';
   if (approveBtn) { approveBtn.disabled = true; approveBtn.textContent = status === 'approved' ? 'Approving…' : 'Approve'; }
   if (declineBtn) { declineBtn.disabled = true; declineBtn.textContent = status === 'declined' ? 'Declining…' : 'Decline'; }
-  const reviewedBy = currentOfficeUser || 'Office';
+  const reviewedBy = officeUserName() || 'Office';
   setSyncStatus('office', 'pending', 'Updating overtime...');
   const result = await api('reviewOvertimeRequest', { id, status, reviewedBy, reviewComment });
   if (result.error) {
@@ -4316,10 +4352,10 @@ function renderWorkersList() {
         <span class="text-muted" style="font-size:12px;">PIN: <strong>${w.pin}</strong></span>
         <input type="text" id="pin-reset-${w.name.replace(/\s/g,'_')}" placeholder="New PIN" maxlength="4"
           style="width:80px;letter-spacing:3px;font-size:12px;padding:4px 8px;">
-        <button class="btn btn-sm" onclick="resetPin('${w.name}')">Reset PIN</button>
+        <button class="btn btn-sm" onclick="resetPin('${w.name.replace(/'/g, "\\'")}')">Reset PIN</button>
         <button class="btn btn-sm" onclick="toggleWorkerOnSchedule('${w.name.replace(/'/g, "\\'")}')">${isOnSchedule(w) ? 'On schedule ✓' : 'Off schedule'}</button>
         <button class="btn btn-sm" onclick="toggleWorkerWeekendCover('${w.name.replace(/'/g, "\\'")}')">${isWeekendCoverWorker(w) ? 'Weekend rota ✓' : 'Not on weekend rota'}</button>
-        <button class="btn btn-sm" onclick="toggleWorker('${w.name}', ${active})">${active ? 'Deactivate' : 'Reactivate'}</button>
+        <button class="btn btn-sm" onclick="toggleWorker('${w.name.replace(/'/g, "\\'")}', ${active})">${active ? 'Deactivate' : 'Reactivate'}</button>
       </div>
     </div>`;
   }).join('');
@@ -4365,6 +4401,7 @@ async function toggleWorker(name, currentlyActive) {
 }
 
 async function exportXLSX() {
+  try { await loadExcelJS(); } catch (e) { alert(e.message); return; }
   const workerFilter = document.getElementById('oe-worker-filter')?.value || '';
   const fromVal      = document.getElementById('oe-date-from')?.value || '';
   const toVal        = document.getElementById('oe-date-to')?.value || '';
@@ -4537,6 +4574,7 @@ async function exportXLSX() {
 }
 
 async function exportOvertimeXLSX() {
+  try { await loadExcelJS(); } catch (e) { alert(e.message); return; }
   const fromVal = document.getElementById('ot-date-from')?.value || '';
   const toVal   = document.getElementById('ot-date-to')?.value || '';
   const inRange = o => {
@@ -4623,6 +4661,7 @@ async function exportOvertimeXLSX() {
 //     rate, and whether/by-whom the request was approved.
 //  2) a per-worker total of hours at each rate, for payroll reconciliation.
 async function exportOvertimeRateReport() {
+  try { await loadExcelJS(); } catch (e) { alert(e.message); return; }
   const fromVal = document.getElementById('ot-date-from')?.value || '';
   const toVal   = document.getElementById('ot-date-to')?.value || '';
   const inRange = o => {
@@ -5005,7 +5044,7 @@ async function deleteOTRequest(id) {
   renderEntriesByDate();
   renderOfficeEntries && renderOfficeEntries();
   renderOvertimeTab && renderOvertimeTab();
-  const { synced } = await queueOrSend('deleteOTRequest', { id, performedBy: currentOfficeUser || undefined });
+  const { synced } = await queueOrSend('deleteOTRequest', { id, performedBy: officeUserName() });
   if (synced) setSyncStatus(currentOfficeUser ? 'office' : 'worker', 'synced', 'OT request deleted');
 }
 
@@ -5213,7 +5252,7 @@ async function runPrevDayHoursReminder(src) {
     if (logged < dh) missing.push({ name, logged, dh });
   });
   try {
-    const claim = await api('claimDailyTask', { task: 'prevDayHours', date: todayStr, performedBy: currentOfficeUser });
+    const claim = await api('claimDailyTask', { task: 'prevDayHours', date: todayStr, performedBy: officeUserName() });
     if (claim.busy) { prevDayReminderDate = ''; return; }
     if (!claim.claimed) return;
   } catch (e) { prevDayReminderDate = ''; return; }
@@ -5364,7 +5403,7 @@ function renderWeekendCover() {
 
 function applyWeekendCoverResult(res) {
   const i = weekendCover.findIndex(x => x.weekStart === res.weekStart);
-  const rec = { weekStart: res.weekStart, worker: res.worker || '', updatedBy: res.updatedBy || currentOfficeUser || '', updatedAt: res.updatedAt || new Date().toISOString() };
+  const rec = { weekStart: res.weekStart, worker: res.worker || '', updatedBy: res.updatedBy || officeUserName(), updatedAt: res.updatedAt || new Date().toISOString() };
   if (i > -1) weekendCover[i] = rec; else weekendCover.push(rec);
   const removed = new Set(res.removedIds || []);
   const mon = new Date(res.weekStart + 'T00:00:00');
@@ -5383,7 +5422,7 @@ async function setWeekendCoverUI(weekStart, sel) {
   const selects = Array.from(document.querySelectorAll(`tr[data-week="${weekStart}"] select, tr[data-week="${weekStart}"] button`));
   selects.forEach(x => { x.disabled = true; });
   try {
-    const res = await api('setWeekendCover', { weekStart, worker, performedBy: currentOfficeUser });
+    const res = await api('setWeekendCover', { weekStart, worker, performedBy: officeUserName() });
     if (!res || res.weekStart !== weekStart) throw new Error('The Apps Script is still running the previous version — publish a new deployment version and try again.');
     applyWeekendCoverResult(res);
     renderWeekendCover();
@@ -5430,7 +5469,7 @@ async function runWeekendCoverReminder(src) {
   const rec = list.find(x => x.weekStart === ws);
   if (!rec || !String(rec.worker || '').trim()) return;
   try {
-    const claim = await api('claimDailyTask', { task: 'weekendCover', date: todayStr, performedBy: currentOfficeUser });
+    const claim = await api('claimDailyTask', { task: 'weekendCover', date: todayStr, performedBy: officeUserName() });
     if (claim.busy) { weekendReminderDate = ''; return; }
     if (!claim.claimed) return;
   } catch (e) { weekendReminderDate = ''; return; }
@@ -5448,7 +5487,7 @@ async function toggleWorkerWeekendCover(name) {
   w.weekendCover = next;
   renderWorkersList();
   try {
-    const res = await api('setWorkerWeekendCover', { name, weekendCover: next, performedBy: currentOfficeUser });
+    const res = await api('setWorkerWeekendCover', { name, weekendCover: next, performedBy: officeUserName() });
     if (!res || !res.success) throw new Error('The Apps Script is still running the previous version — publish a new deployment version.');
     localStorage.setItem('workers', JSON.stringify(workers));
     if (document.getElementById('office-tab-weekendcover').style.display === 'block') renderWeekendCover();
@@ -5750,7 +5789,7 @@ function saveSchedModal() {
   renderScheduleGrid();
   const ids = items.map(x => x.id);
   schedEnqueue(async () => {
-    const result = await api('saveScheduleItems', { items, performedBy: currentOfficeUser });
+    const result = await api('saveScheduleItems', { items, performedBy: officeUserName() });
     (result.items || []).forEach(it => {
       const i = schedule.findIndex(x => x.id === it.id);
       if (i > -1) schedule[i] = { ...schedule[i], ...it, _pending: false };
@@ -5780,7 +5819,7 @@ function deleteSchedItem() {
   renderScheduleGrid();
   schedEnqueue(async () => {
     try {
-      await api('deleteScheduleItem', { id, performedBy: currentOfficeUser });
+      await api('deleteScheduleItem', { id, performedBy: officeUserName() });
     } catch (err) {
       if (!/not found/i.test(err.message || '')) throw err;
     } finally {
@@ -5919,7 +5958,7 @@ async function setWorkerDailyHoursUI(name, input) {
   if (!navigator.onLine || !SCRIPT_URL) { input.value = prev; alert('You need to be online to change this'); return; }
   input.disabled = true;
   try {
-    await api('setWorkerDailyHours', { name, hours: h, performedBy: currentOfficeUser });
+    await api('setWorkerDailyHours', { name, hours: h, performedBy: officeUserName() });
     w.dailyHours = h;
     localStorage.setItem('workers', JSON.stringify(workers));
     setSyncStatus('office', 'synced', name + ' daily hours set to ' + h);
@@ -5940,7 +5979,7 @@ async function toggleWorkerOnSchedule(name) {
   renderWorkersList();
   if (document.getElementById('office-tab-schedule').style.display === 'block') renderScheduleGrid();
   try {
-    await api('setWorkerOnSchedule', { name, onSchedule: next, performedBy: currentOfficeUser });
+    await api('setWorkerOnSchedule', { name, onSchedule: next, performedBy: officeUserName() });
     localStorage.setItem('workers', JSON.stringify(workers));
     setSyncStatus('office', 'synced', name + (next ? ' added to' : ' removed from') + ' schedule');
   } catch (err) {
@@ -6324,7 +6363,7 @@ async function sendLocation(prop, okMsg) {
   next.push({ name: prop.name, costCentre: prop.costCentre, active: prop.active });
   applyLocationsLocally(next);
   try {
-    var res = await api('saveProperty', { property: prop, performedBy: currentOfficeUser });
+    var res = await api('saveProperty', { property: prop, performedBy: officeUserName() });
     if (res && res.error) throw new Error(res.error);
     setSyncStatus('office', 'synced', okMsg);
     return true;
@@ -6378,6 +6417,12 @@ function workerInitials(name) {
   const w = workers.find(x => x.name === name);
   if (w && w.initials) return String(w.initials).trim().toUpperCase();
   return String(name || '').trim().split(/\s+/).map(p => p.charAt(0)).join('').toUpperCase();
+}
+
+function officeUserName() {
+  if (!currentOfficeUser) return '';
+  const u = OFFICE_USERS[currentOfficeUser];
+  return u ? u.name : String(currentOfficeUser).replace(/_/g, ' ');
 }
 
 function officeUserInitials() {
@@ -6601,7 +6646,7 @@ async function createWorkOrder() {
     assignedTo: assignedNames.join(', '),
     schedStart: schedStart || '',
     schedEnd: schedEnd || '',
-    performedBy: currentOfficeUser
+    performedBy: officeUserName()
   };
 
   const btn = document.getElementById('wo-create-btn');
@@ -6877,7 +6922,7 @@ async function reviewWeek(id, status, btn) {
   buttonsInRow.forEach(b => b.disabled = true);
   if (btn) btn.textContent = status === 'approved' ? 'Approving…' : 'Declining…';
   try {
-    const reviewedBy = currentOfficeUser || currentWorker || 'Office';
+    const reviewedBy = officeUserName() || currentWorker || 'Office';
     const { synced } = await queueOrSend('reviewWeekSubmission', { id, status, reviewedBy });
     const sub = weekSubmissions.find(w => w.id === id);
     if (sub) {
