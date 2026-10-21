@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-41 (Schedule Creation: no + Add on Sat/Sun rows) -->
+<!-- BUILD MARKER: NB-42 (LLP overtime rates: Mon 07:00–Sat 18:00 1.5x, Sat 18:00–Mon 07:00 2.0x, bank holidays 2.0x, office closure 0.5x; weekend cover hours flagged UK Standby) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -3817,26 +3817,63 @@ async function submitDailyEntry() {
   if (synced) setSyncStatus('office', 'synced', 'Entry saved to Sheets');
 }
 
-// ── Overtime rate suggestion (DEMO — rules confirmed pending HR meeting) ──
-// Weekdays: 07:00-08:00 and 17:00-21:00 = 1.5x; 21:00-07:00 = 2.0x
-// Sat/Sun: 07:00-21:00 = 1.5x; 21:00-07:00 = 2.0x
-// Bank holidays: 1.0x (already paid as salary — OT processed at normal rate)
-// Based on the OT request's start time only — a request spanning a rate
-// boundary (e.g. 8pm-10pm) is not split across two rates in this version.
+// ── Overtime rates (LLP) ─────────────────────────────────────────
+// Mon 07:00 – Sat 18:00            1.5x
+// Sat 18:00 – Mon 07:00 (Sunday)   2.0x
+// Bank holidays (incl. Christmas)  2.0x
+// Office closure days              processed as 0.5x (paid 1.5x, base already in salary)
+const OFFICE_CLOSURE_STATUSES = ['Festive Closure'];
+const STANDBY_START_MIN = 17 * 60;   // Friday close of business
+const STANDBY_END_MIN = 7 * 60;      // Monday (or first working day after a bank holiday)
+
+function isOfficeClosureDay(ds) {
+  return schedule.some(x => x.date === ds && x.type === 'status' && OFFICE_CLOSURE_STATUSES.includes(x.status));
+}
+
 function getOTRateSuggestion(dateStr, startTime) {
-  if (BANK_HOLIDAYS.includes(dateStr)) return '1.0';
+  if (BANK_HOLIDAYS.includes(dateStr)) return '2.0';
+  if (isOfficeClosureDay(dateStr)) return '0.5';
+  const dow = new Date(dateStr + 'T12:00:00').getDay();
+  const m = otTimeToMinutes(startTime);
+  if (dow === 0) return '2.0';
+  if (dow === 6) return m < 18 * 60 ? '1.5' : '2.0';
+  if (dow === 1) return m < 7 * 60 ? '2.0' : '1.5';
+  return '1.5';
+}
+
+function otDateShift(dateStr, days) {
+  const d = new Date(dateStr + 'T12:00:00');
+  d.setDate(d.getDate() + days);
+  return localDateStr(d);
+}
+
+// True when the worker is on the weekend cover rota for this weekend and the
+// moment falls between Friday 17:00 and 07:00 on the next working day.
+function otIsStandby(worker, dateStr, minute) {
+  if (!worker || !weekendCover.length) return false;
   const d = new Date(dateStr + 'T12:00:00');
   const dow = d.getDay();
-  const isWeekend = dow === 0 || dow === 6;
-  const parts = (startTime || '').split(':').map(Number);
-  const startMinutes = (parts[0] || 0) * 60 + (parts[1] || 0);
-  if (isWeekend) {
-    return (startMinutes >= 7 * 60 && startMinutes < 21 * 60) ? '1.5' : '2.0';
-  }
-  if ((startMinutes >= 7 * 60 && startMinutes < 8 * 60) || (startMinutes >= 17 * 60 && startMinutes < 21 * 60)) return '1.5';
-  if (startMinutes >= 21 * 60 || startMinutes < 7 * 60) return '2.0';
-  return '1.5'; // outside normal OT hours entirely - safe fallback, always manually adjustable
+  const fri = otDateShift(dateStr, dow >= 5 ? 5 - dow : -(dow + 2));
+  const mon = otDateShift(fri, -4);
+  const rec = weekendCover.find(x => x.weekStart === mon);
+  if (!rec || String(rec.worker || '').trim() !== String(worker).trim()) return false;
+  let endDay = otDateShift(fri, 3);
+  while (BANK_HOLIDAYS.includes(endDay)) endDay = otDateShift(endDay, 1);
+  const startKey = fri + ' ' + otMinutesToTime(STANDBY_START_MIN);
+  const endKey = endDay + ' ' + otMinutesToTime(STANDBY_END_MIN);
+  const key = dateStr + ' ' + otMinutesToTime(minute);
+  return key >= startKey && key < endKey;
 }
+
+function otSegIsStandby(o, seg) {
+  const date = normaliseDate(o.date);
+  const reqStart = otTimeToMinutes(((o.timeRange || '').split(/\s*[–-]\s*/)[0] || seg.start).trim() || seg.start);
+  let m = otTimeToMinutes(seg.start);
+  if (m < reqStart) m += 1440;
+  return otIsStandby(o.worker, otDateShift(date, Math.floor(m / 1440)), m % 1440);
+}
+
+function otRateLabel(rate, standby) { return (rate ? rate + 'x' : '') + (standby ? ' UK Standby' : ''); }
 
 // ── OT rate segments — a single OT request can span multiple rate bands
 // (e.g. 06:00-08:00 crosses the weekday 2.0x/1.5x boundary at 07:00), so
@@ -3869,7 +3906,7 @@ function getOTSegments(o) {
     const rate = o.rate || getOTRateSuggestion(normaliseDate(o.date), start);
     return [{ start, end, rate, approved: (o.rateApproved === true || o.rateApproved === 'TRUE') }];
   }
-  return autoSplitOTSegments(normaliseDate(o.date), start, end);
+  return autoSplitOTSegments(normaliseDate(o.date), start, end, o.worker);
 }
 
 // Rate at an absolute minute offset from a base date (offset can exceed
@@ -3888,14 +3925,15 @@ function otRateAtAbsoluteMinute(baseDateStr, absMin) {
 // Auto-split a raw start–end range into segments wherever the applicable
 // rate actually changes (weekday/weekend 07:00 and 21:00 boundaries, and
 // any weekday/weekend/bank-holiday transition at midnight).
-function autoSplitOTSegments(dateStr, start, end) {
+function autoSplitOTSegments(dateStr, start, end, worker) {
   let s = otTimeToMinutes(start);
   let e = otTimeToMinutes(end);
   if (e <= s) e += 1440;
+  const keyAt = t => otRateAtAbsoluteMinute(dateStr, t) + '|' + otIsStandby(worker, otDateShift(dateStr, Math.floor(t / 1440)), ((t % 1440) + 1440) % 1440);
   const cutPoints = [];
-  let prevRate = otRateAtAbsoluteMinute(dateStr, s);
+  let prevRate = keyAt(s);
   for (let t = s + 1; t < e; t++) {
-    const r = otRateAtAbsoluteMinute(dateStr, t);
+    const r = keyAt(t);
     if (r !== prevRate) { cutPoints.push(t); prevRate = r; }
   }
   const points = [s, ...cutPoints, e];
@@ -4101,10 +4139,12 @@ function renderOvertimeTab() {
       const rateCells = `
         <td style="padding:6px 10px;font-size:12px;vertical-align:top;">
           <select id="ot-rate-${o.id}-${segIdx}" ${locked ? 'disabled' : ''} onchange="updateOTSegmentRate('${o.id}', ${segIdx}, this.value)" style="font-size:12px;padding:2px 4px;width:64px;">
+                <option value="0.5" ${seg.rate === '0.5' ? 'selected' : ''}>0.5x</option>
                 <option value="1.0" ${seg.rate === '1.0' ? 'selected' : ''}>1.0x</option>
                 <option value="1.5" ${seg.rate === '1.5' ? 'selected' : ''}>1.5x</option>
                 <option value="2.0" ${seg.rate === '2.0' ? 'selected' : ''}>2.0x</option>
               </select>
+          ${otSegIsStandby(o, seg) ? '<div><span class="je-tag" style="margin:4px 0 0;display:inline-block;background:#e6f7ec;color:#00753a;">UK Standby</span></div>' : ''}
         </td>
         <td style="padding:6px 10px;font-size:12px;text-align:center;white-space:nowrap;vertical-align:top;">
           ${locked
@@ -4611,9 +4651,9 @@ async function exportOvertimeRateReport() {
   const sheet = workbook.addWorksheet('Overtime');
   sheet.columns = [
     { width: 16 }, { width: 12 }, { width: 14 }, { width: 35 },
-    { width: 8 }, { width: 16 }, { width: 12 }, { width: 16 }, { width: 20 }, { width: 16 }, { width: 20 }
+    { width: 8 }, { width: 16 }, { width: 12 }, { width: 14 }, { width: 16 }, { width: 20 }, { width: 16 }, { width: 20 }
   ];
-  const headerRow = sheet.addRow(['Worker', 'Date', 'W/O', 'Description', 'Hours', 'Time Range', 'Rate', 'Request Approved (Y/N)', 'Request Approved By', 'Rate Approved (Y/N)', 'Rate Approved By']);
+  const headerRow = sheet.addRow(['Worker', 'Date', 'W/O', 'Description', 'Hours', 'Time Range', 'Rate', 'Pay Column', 'Request Approved (Y/N)', 'Request Approved By', 'Rate Approved (Y/N)', 'Rate Approved By']);
   headerRow.height = 20;
   headerRow.eachCell({ includeEmpty: true }, cell => {
     cell.font = HEADER_FONT;
@@ -4633,11 +4673,12 @@ async function exportOvertimeRateReport() {
 
     for (const seg of segments) {
       const hours = Math.round(otSegDuration(seg) * 100) / 100;
-      const rate = rateLabel(seg);
+      const standby = otSegIsStandby(o, seg);
+      const rate = rateLabel(seg) + (standby ? ' UK Standby' : '');
       const rateApproved = seg.approved === true || seg.approved === 'TRUE';
       const row = sheet.addRow([
         o.worker, normaliseDate(o.date), o.jobId, description,
-        hours, `${seg.start} – ${seg.end}`, rate,
+        hours, `${seg.start} – ${seg.end}`, rateLabel(seg), standby ? 'UK Standby' : 'Overtime',
         isApproved ? 'Y' : 'N', o.reviewedBy || '',
         rateApproved ? 'Y' : 'N', seg.approvedBy || ''
       ]);
@@ -4756,7 +4797,8 @@ function exportCSV() {
     return segments.map(seg => {
       const fields = [...baseFields];
       fields[5] = Math.round(otSegDuration(seg) * 100) / 100;
-      return toCsvRow([...fields, seg.start + ' - ' + seg.end, csvRateLabel_(seg), ...trailingFields]);
+      const standby = otSegIsStandby(otReq || { worker: e.worker, date: e.date, timeRange: (e.overtimeStart || '') + ' - ' + (e.overtimeEnd || '') }, seg);
+      return toCsvRow([...fields, seg.start + ' - ' + seg.end, csvRateLabel_(seg) + (standby ? ' UK Standby' : ''), ...trailingFields]);
     });
   });
 
