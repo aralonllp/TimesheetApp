@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-39 (WO Hours tab removed — covered by Jobs tab expand + filters) -->
+<!-- BUILD MARKER: NB-40 (Weekend Cover tab: yearly rota list, adds Sat/Sun to schedule, Friday reminder; weekends show on schedules when used) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -156,6 +156,18 @@ textarea { height: 60px; resize: none; }
 .job-dates-sep { margin: 0 10px; color: var(--color-border-secondary, #ccc); }
 .job-codes { margin-top: 2px; font-size: 12px; color: var(--color-text-secondary); line-height: 1.6; }
 .job-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.wc-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.wc-table th { text-align: left; font-size: 12px; font-weight: 600; color: var(--color-text-secondary); padding: 6px 8px; border-bottom: 0.5px solid var(--color-border-secondary); }
+.wc-table td { padding: 5px 8px; border-bottom: 0.5px solid var(--color-border-tertiary); vertical-align: middle; }
+.wc-table .wc-week { font-weight: 600; white-space: nowrap; width: 80px; }
+.wc-table .wc-dates { white-space: nowrap; width: 210px; }
+.wc-table .wc-actions { width: 130px; text-align: right; }
+.wc-table .wc-meta { font-size: 11px; color: var(--color-text-secondary); white-space: nowrap; }
+.wc-table select { min-width: 200px; max-width: 260px; font-size: 13px; padding: 4px 8px; }
+.wc-table select.wc-set { border-color: #00B050; box-shadow: inset 3px 0 0 #00B050; }
+.wc-table tr.wc-past td { opacity: 0.5; }
+.wc-table tr.wc-current td { background: var(--color-background-secondary); }
+#wc-list { max-height: 70vh; overflow-y: auto; }
 .job-filter-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 0.75rem; }
 .job-filter-bar select { font-size: 13px; }
 .job-filter-value { width: 260px; max-width: 100%; }
@@ -547,6 +559,7 @@ textarea { height: 60px; resize: none; }
         <button onclick="switchOfficeTab('wocreate')" id="otab-wocreate">WO Creation</button>       
         <button onclick="switchOfficeTab('jobs')" id="otab-jobs">Jobs</button>
         <button onclick="switchOfficeTab('schedule')" id="otab-schedule">Schedule Creation</button>
+        <button onclick="switchOfficeTab('weekendcover')" id="otab-weekendcover">Weekend Cover</button>
         <button onclick="switchOfficeTab('overtime')" id="otab-overtime">Overtime</button>
         <button onclick="switchOfficeTab('weekapprovals')" id="otab-weekapprovals">Weekly Approvals</button>
         <button onclick="switchOfficeTab('workers')" id="otab-workers">Workers</button>
@@ -697,6 +710,26 @@ textarea { height: 60px; resize: none; }
               <button class="btn btn-primary" id="sched-save-btn" onclick="saveSchedModal()">Save</button>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- Weekend Cover tab -->
+      <div id="office-tab-weekendcover" style="display:none;">
+        <div class="card">
+          <div class="row-between card-header"><p class="section-heading">This weekend</p></div>
+          <div id="wc-current"></div>
+        </div>
+        <div class="card" style="margin-top:1rem;">
+          <div class="row-between card-header" style="flex-wrap:wrap;gap:8px;">
+            <p class="section-heading">Weekend cover rota</p>
+            <div class="sched-head">
+              <button class="btn btn-sm" onclick="wcShiftYear(-1)">◀</button>
+              <div class="sched-week-title" id="wc-year" style="min-width:60px;text-align:center;"></div>
+              <button class="btn btn-sm" onclick="wcShiftYear(1)">▶</button>
+            </div>
+          </div>
+          <p class="text-muted" id="wc-pool-note" style="font-size:12px;margin-bottom:0.5rem;"></p>
+          <div id="wc-list"></div>
         </div>
       </div>
 
@@ -2451,6 +2484,7 @@ async function refreshOffice() {
   }
   renderOfficeDashboard();
   runPrevDayHoursReminder();
+  runWeekendCoverReminder();
   flushNtfyQueue();
 }
 
@@ -4201,7 +4235,7 @@ async function officeReviewOvertime(id, status) {
 }
 
 function switchOfficeTab(tab) {
-  const tabs = ['daily','wocreate','jobs','schedule','schedview','entries','absences','workers','locations','recurring','overtime','weekapprovals'];
+  const tabs = ['daily','wocreate','jobs','schedule','weekendcover','schedview','entries','absences','workers','locations','recurring','overtime','weekapprovals'];
   tabs.forEach(t => {
     const el = document.getElementById('office-tab-' + t);
     const btn = document.getElementById('otab-' + t);
@@ -4218,6 +4252,7 @@ function switchOfficeTab(tab) {
   if (tab === 'schedule') renderScheduleGrid();
   if (tab === 'schedview') renderScheduleView();
   if (tab === 'locations') renderLocationsList();
+  if (tab === 'weekendcover') renderWeekendCover();
 }
 
 // ── Workers management ───────────────────────────────────────────
@@ -4243,6 +4278,7 @@ function renderWorkersList() {
           style="width:80px;letter-spacing:3px;font-size:12px;padding:4px 8px;">
         <button class="btn btn-sm" onclick="resetPin('${w.name}')">Reset PIN</button>
         <button class="btn btn-sm" onclick="toggleWorkerOnSchedule('${w.name.replace(/'/g, "\\'")}')">${isOnSchedule(w) ? 'On schedule ✓' : 'Off schedule'}</button>
+        <button class="btn btn-sm" onclick="toggleWorkerWeekendCover('${w.name.replace(/'/g, "\\'")}')">${isWeekendCoverWorker(w) ? 'Weekend rota ✓' : 'Not on weekend rota'}</button>
         <button class="btn btn-sm" onclick="toggleWorker('${w.name}', ${active})">${active ? 'Deactivate' : 'Reactivate'}</button>
       </div>
     </div>`;
@@ -4965,8 +5001,15 @@ function notifyWorker(name, msg) {
   saveNtfyQueue();
 }
 
+let ntfyFlushPromise = null;
 async function flushNtfyQueue() {
+  if (ntfyFlushing && ntfyFlushPromise) { try { await ntfyFlushPromise; } catch (e) {} }
   if (ntfyFlushing || !ntfyQueue.length || !navigator.onLine) return { sent: 0, failed: ntfyQueue.length };
+  ntfyFlushPromise = flushNtfyQueueNow_();
+  return ntfyFlushPromise;
+}
+
+async function flushNtfyQueueNow_() {
   ntfyFlushing = true;
   let sent = 0;
   try {
@@ -5147,11 +5190,15 @@ async function runPrevDayHoursReminder(src) {
 async function reminderTick() {
   if (!currentOfficeUser || !navigator.onLine) return;
   const now = new Date();
-  if (now.getHours() < REMINDER_HOUR || prevDayReminderDate === localDateStr(now)) return;
+  const todayStr = localDateStr(now);
+  const hoursDue = prevDayReminderDate !== todayStr;
+  const weekendDue = now.getDay() === WEEKEND_REMINDER_DOW && weekendReminderDate !== todayStr;
+  if (now.getHours() < REMINDER_HOUR || (!hoursDue && !weekendDue)) return;
   try {
     const data = await api('getData');
     if (typeof data.ntfyTopicPrefix === 'string') ntfyTopicPrefix = data.ntfyTopicPrefix;
-    await runPrevDayHoursReminder({ workers: data.workers || [], entries: data.entries || [], schedule: data.schedule || [] });
+    if (hoursDue) await runPrevDayHoursReminder({ workers: data.workers || [], entries: data.entries || [], schedule: data.schedule || [] });
+    if (weekendDue) await runWeekendCoverReminder({ weekendCover: data.weekendCover || [] });
   } catch (e) { /* try again next tick */ }
 }
 
@@ -5188,6 +5235,201 @@ async function sendNtfyTestToMe() {
 //  SCHEDULE
 // ══════════════════════════════════════════════════════════════════
 
+// ══════════════════════════════════════════════════════════════════
+//  WEEKEND COVER
+// ══════════════════════════════════════════════════════════════════
+
+const WEEKEND_COVER_STATUS = 'Weekend Cover';
+const WEEKEND_REMINDER_DOW = 5;   // Friday
+let weekendCover = [];
+let wcYear = null;
+let weekendReminderDate = '';
+
+function setWeekendCoverFromData(data) {
+  if (Array.isArray(data.weekendCover)) weekendCover = data.weekendCover.map(x => ({ ...x, weekStart: normaliseDate(x.weekStart), worker: String(x.worker || '').trim() }));
+}
+
+function wcFor(weekStart) { return weekendCover.find(x => x.weekStart === weekStart) || null; }
+
+function wcShortDate(d) { return String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getFullYear()).slice(2); }
+
+function wcRangeText(mon) { return wcShortDate(addDaysLocal(mon, 5)) + '-' + wcShortDate(addDaysLocal(mon, 6)); }
+
+function isoWeekYear(mon) { return addDaysLocal(mon, 3).getFullYear(); }
+
+function wcWeeksForYear(y) {
+  const weeks = [];
+  let m = mondayOf(new Date(y, 0, 4));
+  while (isoWeekYear(m) === y) { weeks.push(m); m = addDaysLocal(m, 7); }
+  return weeks;
+}
+
+function isWeekendCoverWorker(w) { return w.weekendCover === true || String(w.weekendCover).toUpperCase() === 'TRUE'; }
+
+function wcPool(current) {
+  const active = workers.filter(w => w.active !== false && w.active !== 'FALSE');
+  let pool = active.filter(isWeekendCoverWorker);
+  if (!pool.length) pool = active.filter(isOnSchedule);
+  pool = pool.slice().sort((a, b) => a.name.localeCompare(b.name));
+  if (current && !pool.some(w => w.name === current)) pool.push({ name: current });
+  return pool;
+}
+
+function wcShiftYear(n) { wcYear = (wcYear || isoWeekYear(mondayOf(new Date()))) + n; renderWeekendCover(); }
+
+function wcRow(mon, opts) {
+  const ws = localDateStr(mon);
+  const rec = wcFor(ws);
+  const cur = rec ? rec.worker : '';
+  const today = localDateStr(new Date());
+  const past = localDateStr(addDaysLocal(mon, 6)) < today;
+  const options = '<option value="">— Not set —</option>' + wcPool(cur).map(w => {
+    const ini = workerInitials(w.name);
+    return `<option value="${escWO(w.name)}"${w.name === cur ? ' selected' : ''}>${escWO(w.name)}${ini && ini !== w.name ? ' (' + escWO(ini) + ')' : ''}</option>`;
+  }).join('');
+  const meta = rec && rec.updatedBy ? 'Set by ' + escWO(String(rec.updatedBy).replace(/_/g, ' ')) + (rec.updatedAt ? ' · ' + fmtUKDate(localDateStr(new Date(rec.updatedAt))) : '') : '';
+  return `<tr class="${past ? 'wc-past' : ''}${opts && opts.current ? ' wc-current' : ''}" data-week="${ws}">
+    <td class="wc-week">Week ${isoWeekNumber(mon)}</td>
+    <td class="wc-dates">Sat ${wcShortDate(addDaysLocal(mon, 5))} – Sun ${wcShortDate(addDaysLocal(mon, 6))}</td>
+    <td><select class="wc-select${cur ? ' wc-set' : ''}" onchange="setWeekendCoverUI('${ws}', this)">${options}</select></td>
+    <td class="wc-actions">${cur && !past ? `<button class="btn btn-sm" onclick="sendWeekendCoverReminder('${ws}', this)">Send reminder</button>` : ''}</td>
+    <td class="wc-meta">${meta}</td>
+  </tr>`;
+}
+
+function renderWeekendCover() {
+  const el = document.getElementById('wc-list');
+  if (!el) return;
+  const thisMon = mondayOf(new Date());
+  if (!wcYear) wcYear = isoWeekYear(thisMon);
+  document.getElementById('wc-year').textContent = wcYear;
+  const head = '<thead><tr><th>Week</th><th>Weekend</th><th>Covering</th><th></th><th></th></tr></thead>';
+  document.getElementById('wc-current').innerHTML = `<table class="wc-table">${head}<tbody>${wcRow(thisMon, { current: true })}</tbody></table>`;
+  const rows = wcWeeksForYear(wcYear).map(m => wcRow(m, { current: localDateStr(m) === localDateStr(thisMon) })).join('');
+  const keepScroll = el.dataset.year === String(wcYear) ? el.scrollTop : null;
+  el.innerHTML = `<table class="wc-table">${head}<tbody>${rows}</tbody></table>`;
+  el.dataset.year = String(wcYear);
+  if (keepScroll != null) el.scrollTop = keepScroll;
+  else {
+    const cur = el.querySelector('tr.wc-current');
+    el.scrollTop = cur ? Math.max(0, cur.offsetTop - 120) : 0;
+  }
+  const flagged = workers.some(w => w.active !== false && w.active !== 'FALSE' && isWeekendCoverWorker(w));
+  document.getElementById('wc-pool-note').textContent = flagged
+    ? 'Showing workers ticked for the weekend rota on the Workers tab.'
+    : 'No one is ticked for the weekend rota on the Workers tab yet, so all workers on the schedule are listed.';
+}
+
+function applyWeekendCoverResult(res) {
+  const i = weekendCover.findIndex(x => x.weekStart === res.weekStart);
+  const rec = { weekStart: res.weekStart, worker: res.worker || '', updatedBy: res.updatedBy || currentOfficeUser || '', updatedAt: res.updatedAt || new Date().toISOString() };
+  if (i > -1) weekendCover[i] = rec; else weekendCover.push(rec);
+  const removed = new Set(res.removedIds || []);
+  const mon = new Date(res.weekStart + 'T00:00:00');
+  const sat = localDateStr(addDaysLocal(mon, 5)), sun = localDateStr(addDaysLocal(mon, 6));
+  schedule = schedule.filter(x => !removed.has(x.id) && !((x.date === sat || x.date === sun) && x.type === 'status' && x.status === WEEKEND_COVER_STATUS));
+  (res.items || []).forEach(it => schedule.push({ ...it, sort: parseFloat(it.sort) || 0 }));
+  if (res.worker && !scheduleStatuses.some(s => s.name === WEEKEND_COVER_STATUS)) scheduleStatuses.push({ name: WEEKEND_COVER_STATUS, color: '#00B050' });
+}
+
+async function setWeekendCoverUI(weekStart, sel) {
+  const rec = wcFor(weekStart);
+  const prev = rec ? rec.worker : '';
+  const worker = sel.value;
+  if (worker === prev) return;
+  if (!navigator.onLine || !SCRIPT_URL) { sel.value = prev; alert('You need to be online to change weekend cover'); return; }
+  const selects = Array.from(document.querySelectorAll(`tr[data-week="${weekStart}"] select, tr[data-week="${weekStart}"] button`));
+  selects.forEach(x => { x.disabled = true; });
+  try {
+    const res = await api('setWeekendCover', { weekStart, worker, performedBy: currentOfficeUser });
+    if (!res || res.weekStart !== weekStart) throw new Error('The Apps Script is still running the previous version — publish a new deployment version and try again.');
+    applyWeekendCoverResult(res);
+    renderWeekendCover();
+    if (document.getElementById('office-tab-schedule').style.display === 'block') renderScheduleGrid();
+    if (document.getElementById('office-tab-schedview').style.display === 'block') renderScheduleView();
+    setSyncStatus('office', 'synced', 'Week ' + isoWeekNumber(new Date(weekStart + 'T00:00:00')) + ' weekend cover: ' + (worker || 'cleared'));
+  } catch (err) {
+    sel.value = prev;
+    selects.forEach(x => { x.disabled = false; });
+    alert('Could not save weekend cover: ' + (err.message || err));
+  }
+}
+
+function weekendCoverMessage(weekStart) {
+  const mon = new Date(weekStart + 'T00:00:00');
+  return {
+    title: 'Weekend Cover reminder',
+    message: 'Reminder for Weekend Cover on Week ' + isoWeekNumber(mon) + ', ' + wcRangeText(mon) + '.',
+    priority: 4,
+    tags: ['calendar']
+  };
+}
+
+async function sendWeekendCoverReminder(weekStart, btn) {
+  const rec = wcFor(weekStart);
+  if (!rec || !rec.worker) return;
+  if (!ntfyTopicPrefix) { alert('Notifications are not set up yet.'); return; }
+  if (!confirm('Send a weekend cover reminder to ' + rec.worker + '?')) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  notifyWorker(rec.worker, weekendCoverMessage(weekStart));
+  const r = await flushNtfyQueue();
+  if (btn) { btn.disabled = false; btn.textContent = 'Send reminder'; }
+  setSyncStatus('office', r && r.failed ? 'pending' : 'synced', r && r.failed ? 'Reminder queued — will retry' : 'Weekend cover reminder sent to ' + rec.worker);
+}
+
+async function runWeekendCoverReminder(src) {
+  if (!currentOfficeUser || !ntfyTopicPrefix || !SCRIPT_URL || !navigator.onLine) return;
+  const now = new Date();
+  const todayStr = localDateStr(now);
+  if (now.getDay() !== WEEKEND_REMINDER_DOW || now.getHours() < REMINDER_HOUR || weekendReminderDate === todayStr) return;
+  weekendReminderDate = todayStr;
+  const ws = localDateStr(mondayOf(now));
+  const list = (src && Array.isArray(src.weekendCover)) ? src.weekendCover.map(x => ({ ...x, weekStart: normaliseDate(x.weekStart) })) : weekendCover;
+  const rec = list.find(x => x.weekStart === ws);
+  if (!rec || !String(rec.worker || '').trim()) return;
+  try {
+    const claim = await api('claimDailyTask', { task: 'weekendCover', date: todayStr, performedBy: currentOfficeUser });
+    if (claim.busy) { weekendReminderDate = ''; return; }
+    if (!claim.claimed) return;
+  } catch (e) { weekendReminderDate = ''; return; }
+  notifyWorker(String(rec.worker).trim(), weekendCoverMessage(ws));
+  await flushNtfyQueue();
+  setSyncStatus('office', 'synced', 'Weekend cover reminder sent to ' + rec.worker);
+}
+
+async function toggleWorkerWeekendCover(name) {
+  const w = workers.find(x => x.name === name);
+  if (!w) return;
+  const next = !isWeekendCoverWorker(w);
+  if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to change this'); return; }
+  const prev = w.weekendCover;
+  w.weekendCover = next;
+  renderWorkersList();
+  try {
+    const res = await api('setWorkerWeekendCover', { name, weekendCover: next, performedBy: currentOfficeUser });
+    if (!res || !res.success) throw new Error('The Apps Script is still running the previous version — publish a new deployment version.');
+    localStorage.setItem('workers', JSON.stringify(workers));
+    if (document.getElementById('office-tab-weekendcover').style.display === 'block') renderWeekendCover();
+    setSyncStatus('office', 'synced', name + (next ? ' added to' : ' removed from') + ' weekend rota');
+  } catch (err) {
+    w.weekendCover = prev;
+    renderWorkersList();
+    alert('Could not update ' + name + ': ' + (err.message || err));
+  }
+}
+
+// Mon–Fri, plus Sat / Sun only when someone in `names` has something scheduled that day
+function schedDaysForWeek(start, names) {
+  const days = Array.from({ length: 5 }, (_, i) => addDaysLocal(start, i));
+  const set = new Set(names);
+  [5, 6].forEach(i => {
+    const d = addDaysLocal(start, i), ds = localDateStr(d);
+    if (schedule.some(x => x.date === ds && set.has(x.worker))) days.push(d);
+  });
+  return days;
+}
+function schedDayName(d) { return SCHED_DAY_NAMES[(d.getDay() + 6) % 7]; }
+
 let schedule = [];
 let scheduleStatuses = [];
 let schedWeekStart = null;
@@ -5211,6 +5453,9 @@ function setScheduleFromData(data) {
     schedule = server;
   }
   if (Array.isArray(data.scheduleStatuses)) scheduleStatuses = data.scheduleStatuses;
+  setWeekendCoverFromData(data);
+  const wcTab = document.getElementById('office-tab-weekendcover');
+  if (wcTab && wcTab.style.display === 'block') renderWeekendCover();
 }
 
 const DEFAULT_DAILY_HOURS = 8;
@@ -5299,10 +5544,11 @@ function renderScheduleView() {
 
 function renderScheduleInto(o) {
   const start = o.start;
-  const days = Array.from({ length: 5 }, (_, i) => addDaysLocal(start, i));
+  const days = schedDaysForWeek(start, scheduleOps().map(w => w.name));
+  const lastDay = days[days.length - 1];
   const today = localDateStr(new Date());
   document.getElementById(o.titleId).textContent = 'Week ' + isoWeekNumber(start);
-  document.getElementById(o.rangeId).textContent = shortDot(start) + ' to ' + shortDot(addDaysLocal(start, 4));
+  document.getElementById(o.rangeId).textContent = shortDot(start) + ' to ' + shortDot(lastDay);
   document.getElementById(o.legendId).innerHTML = scheduleStatuses.map(st =>
     `<span class="sched-pill" style="background:${escWO(st.color)};color:${textOn(st.color)};">${escWO(st.name)}</span>`).join('');
   const ops = scheduleOps();
@@ -5319,12 +5565,12 @@ function renderScheduleInto(o) {
   }
   const click = id => o.readOnly ? '' : ` onclick="openSchedModal('${escWO(id)}')"`;
 
-  let html = `<thead><tr><th class="sched-corner">Week ${isoWeekNumber(start)}<br><span style="font-weight:400;">(${shortDot(start)} to ${shortDot(addDaysLocal(start, 4))})</span></th>`;
+  let html = `<thead><tr><th class="sched-corner">Week ${isoWeekNumber(start)}<br><span style="font-weight:400;">(${shortDot(start)} to ${shortDot(lastDay)})</span></th>`;
   html += ops.map(w => `<th title="${escWO(w.name)}">${escWO(w.name)}</th>`).join('') + '</tr></thead><tbody>';
   days.forEach((d, di) => {
     const ds = localDateStr(d);
     const isToday = ds === today;
-    html += `<tr><th class="${isToday ? 'sched-today' : ''}">${SCHED_DAY_NAMES[di]} ${ordinal(d.getDate())}</th>`;
+    html += `<tr><th class="${isToday ? 'sched-today' : ''}">${schedDayName(d)} ${ordinal(d.getDate())}</th>`;
     ops.forEach(w => {
       const items = schedItemsFor(ds, w.name);
       const statusItem = items.find(x => x.type === 'status');
@@ -5532,9 +5778,8 @@ async function exportScheduleXlsx() {
   try { ExcelJS = await loadExcelJS(); } catch (e) { alert(e.message); return; }
   const start = schedWeekStart || mondayOf(new Date());
   const wk = isoWeekNumber(start);
-  const dayCount = 5;
-  const days = Array.from({ length: dayCount }, (_, i) => addDaysLocal(start, i));
   const ops = scheduleOps();
+  const days = schedDaysForWeek(start, ops.map(w => w.name));
   const argb = hex => 'FF' + String(hex || '#888888').replace('#', '').toUpperCase();
   const fill = hex => ({ type: 'pattern', pattern: 'solid', fgColor: { argb: argb(hex) } });
   const thin = { style: 'thin', color: { argb: 'FF000000' } };
@@ -5560,7 +5805,7 @@ async function exportScheduleXlsx() {
   ws.getRow(1).height = 19.5;
 
   const a2 = ws.getCell(2, 1);
-  a2.value = 'Week ' + wk + ' (' + shortDot(start) + ' to ' + shortDot(addDaysLocal(start, 4)) + ')';
+  a2.value = 'Week ' + wk + ' (' + shortDot(start) + ' to ' + shortDot(days[days.length - 1]) + ')';
   a2.font = { name: 'Calibri', size: 10, bold: true };
   a2.alignment = { horizontal: 'left' };
   [1, 2].forEach(c => { ws.getCell(2, c).fill = fill('#FFFF00'); ws.getCell(2, c).border = { top: med, bottom: med, left: c === 1 ? med : undefined }; });
@@ -5583,7 +5828,7 @@ async function exportScheduleXlsx() {
     const statusOf = perOp.map(list => list.find(x => x.type === 'status'));
     const rowsNeeded = Math.max(4, ...perOp.map((list, i) => statusOf[i] ? 1 : list.length));
     const dayCell = ws.getCell(r, 1);
-    dayCell.value = SCHED_DAY_NAMES[di] + ' ' + ordinal(d.getDate());
+    dayCell.value = schedDayName(d) + ' ' + ordinal(d.getDate());
     dayCell.font = { name: 'Calibri', size: 12, bold: true };
     dayCell.alignment = { vertical: 'middle' };
     for (let k = 0; k < rowsNeeded; k++) {
@@ -5672,16 +5917,17 @@ function renderWorkerWeek() {
   const start = wkWeekStart;
   const today = localDateStr(new Date());
   document.getElementById('wk-week-title').textContent = 'Week ' + isoWeekNumber(start);
-  document.getElementById('wk-week-range').textContent = shortDot(start) + ' to ' + shortDot(addDaysLocal(start, 4));
+  const wkDays = schedDaysForWeek(start, [currentWorker]);
+  document.getElementById('wk-week-range').textContent = shortDot(start) + ' to ' + shortDot(wkDays[wkDays.length - 1]);
   const COLS = 6;
   let rows = '';
-  for (let i = 0; i < 5; i++) {
-    const d = addDaysLocal(start, i), ds = localDateStr(d);
+  for (const d of wkDays) {
+    const ds = localDateStr(d);
     const items = schedItemsFor(ds, currentWorker);
     const span = Math.max(items.length, 1);
     const isToday = ds === today;
     const dayCell = `<td class="day-cell${isToday ? ' wk-is-today' : ''}" rowspan="${span}">
-        <div class="day-name">${SCHED_DAY_NAMES[i]}</div>
+        <div class="day-name">${schedDayName(d)}</div>
         <div class="day-date">${fmtUKDate(ds)}</div>
         ${isToday ? '<span class="wk-today" style="display:inline-block;margin-top:4px;">Today</span>' : ''}
       </td>`;
