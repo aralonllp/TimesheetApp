@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-40 (Weekend Cover tab: yearly rota list, adds Sat/Sun to schedule, Friday reminder; weekends show on schedules when used) -->
+<!-- BUILD MARKER: NB-41 (Schedule Creation: no + Add on Sat/Sun rows) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -5600,7 +5600,7 @@ function renderScheduleInto(o) {
         }
         return `<div class="sched-item${it._pending ? ' sched-pending' : ''}"${click(it.id)}>${escWO(it.note)}</div>`;
       }).join('');
-      if (!o.readOnly) {
+      if (!o.readOnly && d.getDay() !== 0 && d.getDay() !== 6) {
         const addStyle = bg ? ` style="color:${textOn(bg)};border-color:${textOn(bg) === '#fff' ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.4)'};"` : '';
         html += `<button class="sched-add"${addStyle} onclick="openSchedModal(null, '${ds}', '${escWO(w.name).replace(/'/g, "\\'")}')">+ Add</button>`;
       }
