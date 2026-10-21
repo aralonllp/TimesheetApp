@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-37 (Jobs tab: expand arrow shows every time entry logged against the WO) -->
+<!-- BUILD MARKER: NB-38 (Jobs tab: combinable filters — assigned, priority, location, cost code, trade, reported by, status) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -156,6 +156,15 @@ textarea { height: 60px; resize: none; }
 .job-dates-sep { margin: 0 10px; color: var(--color-border-secondary, #ccc); }
 .job-codes { margin-top: 2px; font-size: 12px; color: var(--color-text-secondary); line-height: 1.6; }
 .job-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.job-filter-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 0.75rem; }
+.job-filter-bar select { font-size: 13px; }
+.job-filter-value { width: 260px; max-width: 100%; }
+.job-filter-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; flex: 1; }
+.job-filter-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 4px 6px 4px 10px; border-radius: 20px; background: var(--color-text-primary); color: #fff; }
+.job-filter-chip span { font-weight: 400; opacity: 0.75; }
+.job-filter-chip button { border: none; background: rgba(255,255,255,0.2); color: #fff; width: 18px; height: 18px; border-radius: 50%; cursor: pointer; font-size: 12px; line-height: 18px; padding: 0; font-family: inherit; }
+.job-filter-clear { border: none; background: transparent; font-size: 12px; color: var(--color-text-secondary); text-decoration: underline; cursor: pointer; font-family: inherit; padding: 4px; }
+.job-filter-count { font-size: 12px; color: var(--color-text-secondary); margin-bottom: 6px; }
 .over-flag { font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 600; margin-left: 6px; background: #fde2e1; color: #a61b1b; }
 .job-codes strong.hrs-over { color: #a61b1b; font-weight: 600; }
 .job-expand { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; margin-right: 6px; border: 0.5px solid var(--color-border-secondary); border-radius: var(--border-radius-md); background: transparent; cursor: pointer; vertical-align: middle; padding: 0; color: var(--color-text-primary); }
@@ -710,6 +719,11 @@ textarea { height: 60px; resize: none; }
               <input type="text" id="jobs-search" placeholder="Search WO, location, description..." oninput="renderJobsList()" style="max-width:320px;">
               <button class="btn btn-sm" onclick="refreshOffice()">↻ Refresh</button>
             </div>
+          </div>
+          <div class="job-filter-bar">
+            <select id="jobs-filter-field" onchange="jobsFilterFieldChanged()" style="width:auto;min-width:150px;"></select>
+            <div class="job-filter-value"><select id="jobs-filter-value" onchange="addJobFilterFromUI()"></select></div>
+            <div id="jobs-filter-chips" class="job-filter-chips"></div>
           </div>
           <div id="job-list"><p class="text-muted">Loading...</p></div>
         </div>
@@ -2466,6 +2480,119 @@ async function refreshOffice() {
 }
 
 let jobsView = 'open';
+let jobFilters = [];
+
+const JOB_STATUS_FILTERS = [
+  { value: 'over', label: 'Over estimated hours' },
+  { value: 'noest', label: 'No estimated hours' },
+  { value: 'nohours', label: 'No hours logged' },
+  { value: 'hashours', label: 'Has hours logged' },
+  { value: 'pastend', label: 'Past end date' },
+  { value: 'nodates', label: 'No scheduled dates' },
+  { value: 'reopened', label: 'Reopened' }
+];
+
+const JOB_FILTER_FIELDS = {
+  assigned: { label: 'Assigned to', values: j => { const a = expandAssignedTo(j.assignedTo); return a.length ? a : ['__none']; },
+              display: v => v === '__none' ? 'Unassigned' : v + (workerInitials(v) && workerInitials(v) !== v ? ' (' + workerInitials(v) + ')' : '') },
+  priority: { label: 'Priority', values: j => [j.priority || '__none'], display: v => v === '__none' ? 'No priority' : v },
+  property: { label: 'Location', values: j => [j.property || '__none'], display: v => v === '__none' ? 'No location' : v, sort: compareLocationNames },
+  costCode: { label: 'Cost code', values: j => [j.costCode || '__none'], display: v => v === '__none' ? 'No cost code' : v + (codeDesc(woCostCodes, v) ? ' – ' + codeDesc(woCostCodes, v) : '') },
+  trade:    { label: 'Trade', values: j => [j.trade || '__none'], display: v => v === '__none' ? 'No trade' : v + (codeDesc(woTrades, v) ? ' – ' + codeDesc(woTrades, v) : '') },
+  reportedBy: { label: 'Reported by', values: j => [j.reportedBy || '__none'], display: v => v === '__none' ? 'Not recorded' : v },
+  status:   { label: 'Hours / dates', values: null, display: v => (JOB_STATUS_FILTERS.find(s => s.value === v) || {}).label || v }
+};
+
+function jobStatusFlags(j, hoursByJob) {
+  const est = parseFloat(j.estHours);
+  const act = hoursByJob[String(j.id)] || 0;
+  const today = localDateStr(new Date());
+  const flags = [];
+  if (!isNaN(est) && act > est) flags.push('over');
+  if (isNaN(est)) flags.push('noest');
+  flags.push(act > 0 ? 'hashours' : 'nohours');
+  if (j.open && j.schedEnd && normaliseDate(j.schedEnd) < today) flags.push('pastend');
+  if (!j.schedStart && !j.schedEnd) flags.push('nodates');
+  if (j.reopenedDate || j.reopenedBy) flags.push('reopened');
+  return flags;
+}
+
+function jobMatchesFilters(j, hoursByJob) {
+  if (!jobFilters.length) return true;
+  const byField = {};
+  jobFilters.forEach(f => (byField[f.field] = byField[f.field] || []).push(f.value));
+  return Object.keys(byField).every(field => {
+    const vals = field === 'status' ? jobStatusFlags(j, hoursByJob) : JOB_FILTER_FIELDS[field].values(j).map(String);
+    return field === 'status' ? byField[field].every(v => vals.includes(v)) : byField[field].some(v => vals.includes(v));
+  });
+}
+
+function initJobFilterUI() {
+  const fieldSel = document.getElementById('jobs-filter-field');
+  if (!fieldSel) return;
+  if (!fieldSel.options.length) {
+    fieldSel.innerHTML = '<option value="">Filter by...</option>' + Object.keys(JOB_FILTER_FIELDS).map(k => `<option value="${k}">${JOB_FILTER_FIELDS[k].label}</option>`).join('');
+  }
+  fillJobFilterValues();
+  renderJobFilterChips();
+}
+
+function fillJobFilterValues() {
+  const field = document.getElementById('jobs-filter-field').value;
+  const sel = document.getElementById('jobs-filter-value');
+  const def = JOB_FILTER_FIELDS[field];
+  let opts = [];
+  if (def) {
+    const used = new Set(jobFilters.filter(f => f.field === field).map(f => f.value));
+    const vals = field === 'status' ? JOB_STATUS_FILTERS.map(s => s.value) : Array.from(new Set(jobs.flatMap(j => def.values(j).map(String))));
+    const real = vals.filter(v => v !== '__none' && !used.has(v));
+    if (field !== 'status') real.sort(def.sort || ((a, b) => def.display(a).localeCompare(def.display(b), 'en-GB', { numeric: true })));
+    if (vals.includes('__none') && !used.has('__none')) real.push('__none');
+    opts = real.map(v => `<option value="${escWO(v)}">${escWO(def.display(v))}</option>`);
+  }
+  sel.innerHTML = '<option value="">' + (def ? 'Choose ' + def.label.toLowerCase() + '...' : 'Pick a filter first') + '</option>' + opts.join('');
+  sel.value = '';
+  if (!sel._ssAttached) ssAttach('jobs-filter-value', 'Choose a value...'); else ssRefresh('jobs-filter-value');
+  const ssi = document.getElementById('jobs-filter-value_ssi');
+  if (ssi) { ssi.disabled = !def; ssi.placeholder = def ? 'Search ' + def.label.toLowerCase() + '...' : 'Pick a filter first'; }
+}
+
+function jobsFilterFieldChanged() {
+  fillJobFilterValues();
+  const ssi = document.getElementById('jobs-filter-value_ssi');
+  if (ssi && !ssi.disabled) ssi.focus();
+}
+
+function addJobFilterFromUI() {
+  const field = document.getElementById('jobs-filter-field').value;
+  const value = document.getElementById('jobs-filter-value').value;
+  if (!field || !value) return;
+  if (!jobFilters.some(f => f.field === field && f.value === value)) {
+    jobFilters.push({ field, value });
+    const order = Object.keys(JOB_FILTER_FIELDS);
+    jobFilters.sort((x, y) => order.indexOf(x.field) - order.indexOf(y.field));
+  }
+  renderJobsList();
+}
+
+function removeJobFilter(i) {
+  jobFilters.splice(i, 1);
+  renderJobsList();
+}
+
+function clearJobFilters() {
+  jobFilters = [];
+  renderJobsList();
+}
+
+function renderJobFilterChips() {
+  const el = document.getElementById('jobs-filter-chips');
+  if (!el) return;
+  el.innerHTML = jobFilters.map((f, i) => {
+    const def = JOB_FILTER_FIELDS[f.field];
+    return `<span class="job-filter-chip"><span>${escWO(def.label)}:</span> ${escWO(def.display(f.value))}<button title="Remove filter" onclick="removeJobFilter(${i})">×</button></span>`;
+  }).join('') + (jobFilters.length > 1 ? '<button class="job-filter-clear" onclick="clearJobFilters()">Clear all</button>' : '');
+}
 let isTogglingJob = false;
 
 function setJobsView(view) {
@@ -2478,22 +2605,26 @@ function setJobsView(view) {
 function renderJobsList() {
   const el = document.getElementById('job-list');
   if (!el) return;
-  const openJobs = jobs.filter(j => j.open);
-  const closedJobs = jobs.filter(j => !j.open);
-  document.getElementById('jobs-view-open').textContent = 'Open (' + openJobs.length + ')';
-  document.getElementById('jobs-view-closed').textContent = 'Closed (' + closedJobs.length + ')';
   const q = (document.getElementById('jobs-search').value || '').trim().toLowerCase();
   const woNum = id => { const m = /(\d+)/.exec(String(id)); return m ? parseInt(m[1], 10) : 0; };
-  let list = (jobsView === 'open' ? openJobs : closedJobs).slice().sort((a, b) => woNum(b.id) - woNum(a.id));
   const hoursByJob = {};
   entries.forEach(e => { const k = String(e.jobId); hoursByJob[k] = (hoursByJob[k] || 0) + (parseFloat(e.hours) || 0); });
-  if (q) {
-    list = list.filter(j => [j.id, j.property, j.description, j.costCentre, j.costCode, j.trade, j.priority, expandAssignedTo(j.assignedTo).map(workerInitials).join(' ')]
-      .some(v => String(v || '').toLowerCase().includes(q)));
-  }
+  initJobFilterUI();
+  const matches = j => (!q || [j.id, j.property, j.description, j.costCentre, j.costCode, j.trade, j.priority, expandAssignedTo(j.assignedTo).map(workerInitials).join(' ')]
+      .some(v => String(v || '').toLowerCase().includes(q))) && jobMatchesFilters(j, hoursByJob);
+  const filtered = jobs.filter(matches);
+  const openJobs = filtered.filter(j => j.open);
+  const closedJobs = filtered.filter(j => !j.open);
+  const narrowed = !!q || jobFilters.length > 0;
+  const totOpen = jobs.filter(j => j.open).length, totClosed = jobs.length - totOpen;
+  document.getElementById('jobs-view-open').textContent = 'Open (' + (narrowed ? openJobs.length + ' of ' + totOpen : totOpen) + ')';
+  document.getElementById('jobs-view-closed').textContent = 'Closed (' + (narrowed ? closedJobs.length + ' of ' + totClosed : totClosed) + ')';
+  const list = (jobsView === 'open' ? openJobs : closedJobs).slice().sort((a, b) => woNum(b.id) - woNum(a.id));
+  const listEst = list.reduce((t, j) => t + (parseFloat(j.estHours) || 0), 0);
+  const listAct = list.reduce((t, j) => t + (hoursByJob[String(j.id)] || 0), 0);
   el.innerHTML = list.length
-    ? list.map(j => renderJobRow(j, hoursByJob)).join('')
-    : '<p class="text-muted">' + (q ? 'No jobs match that search.' : (jobsView === 'open' ? 'No open jobs.' : 'No closed jobs.')) + '</p>';
+    ? (narrowed ? `<p class="job-filter-count">${list.length} job${list.length === 1 ? '' : 's'} · Est. ${fmtHrs(listEst)}h · Actual ${fmtHrs(listAct)}h</p>` : '') + list.map(j => renderJobRow(j, hoursByJob)).join('')
+    : '<p class="text-muted">' + (narrowed ? 'No jobs match the search / filters.' : (jobsView === 'open' ? 'No open jobs.' : 'No closed jobs.')) + '</p>';
 }
 
 async function toggleJobOpen(id, open) {
