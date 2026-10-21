@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-42 (LLP overtime rates: Mon 07:00–Sat 18:00 1.5x, Sat 18:00–Mon 07:00 2.0x, bank holidays 2.0x, office closure 0.5x; weekend cover hours flagged UK Standby) -->
+<!-- BUILD MARKER: NB-43 (Locations add form at top; schedule note placeholder; Recurring Jobs tab after Weekly Approvals) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -562,10 +562,10 @@ textarea { height: 60px; resize: none; }
         <button onclick="switchOfficeTab('weekendcover')" id="otab-weekendcover">Weekend Cover</button>
         <button onclick="switchOfficeTab('overtime')" id="otab-overtime">Overtime</button>
         <button onclick="switchOfficeTab('weekapprovals')" id="otab-weekapprovals">Weekly Approvals</button>
+        <button onclick="switchOfficeTab('recurring')" id="otab-recurring">Recurring Jobs</button>
         <button onclick="switchOfficeTab('workers')" id="otab-workers">Workers</button>
         <button onclick="switchOfficeTab('locations')" id="otab-locations">Locations</button>
         <button onclick="switchOfficeTab('absences')" id="otab-absences">Absence Types</button>
-        <button onclick="switchOfficeTab('recurring')" id="otab-recurring">Recurring Jobs</button>
       </div>
 
       <!-- WO Creation tab -->
@@ -698,7 +698,7 @@ textarea { height: 60px; resize: none; }
           <select id="sched-item"></select>
           <p class="wo-hint" id="sched-item-hint"></p>
           <label id="sched-note-label">Note (optional)</label>
-          <textarea id="sched-note" placeholder="e.g. meet electrician 1pm, access via Soad"></textarea>
+          <textarea id="sched-note" placeholder="e.g. meet electrician 1pm, use side entrance"></textarea>
           <div id="sched-multi">
             <label>Days</label>
             <div class="wo-chips" id="sched-days"></div>
@@ -1033,14 +1033,7 @@ textarea { height: 60px; resize: none; }
             <p class="section-heading">Locations</p>
             <span class="text-muted" style="font-size:13px;" id="loc-count"></span>
           </div>
-          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
-            <input type="text" id="loc-search" placeholder="Search locations or cost centres..." oninput="renderLocationsList()" style="flex:1;min-width:200px;">
-            <label style="margin:0;display:flex;align-items:center;gap:6px;font-size:13px;font-weight:400;white-space:nowrap;cursor:pointer;">
-              <input type="checkbox" id="loc-show-inactive" onchange="renderLocationsList()" style="width:auto;margin:0;"> Show inactive
-            </label>
-          </div>
-          <div id="locations-list"><p class="text-muted">Loading...</p></div>
-          <div style="margin-top:1rem;padding-top:1rem;border-top:0.5px solid var(--color-border-tertiary);">
+          <div style="margin-bottom:1rem;padding-bottom:1rem;border-bottom:0.5px solid var(--color-border-tertiary);">
             <p style="font-size:13px;font-weight:500;margin-bottom:0.75rem;" id="loc-form-title">Add new location</p>
             <div class="loc-form-grid">
               <div>
@@ -1057,6 +1050,13 @@ textarea { height: 60px; resize: none; }
               <button class="btn btn-primary" id="loc-save-btn" onclick="saveLocation()">Add location</button>
             </div>
           </div>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
+            <input type="text" id="loc-search" placeholder="Search locations or cost centres..." oninput="renderLocationsList()" style="flex:1;min-width:200px;">
+            <label style="margin:0;display:flex;align-items:center;gap:6px;font-size:13px;font-weight:400;white-space:nowrap;cursor:pointer;">
+              <input type="checkbox" id="loc-show-inactive" onchange="renderLocationsList()" style="width:auto;margin:0;"> Show inactive
+            </label>
+          </div>
+          <div id="locations-list"><p class="text-muted">Loading...</p></div>
         </div>
       </div><!-- end locations tab -->
     </div>
