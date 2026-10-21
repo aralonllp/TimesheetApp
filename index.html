@@ -5359,7 +5359,7 @@ function weekendCoverMessage(weekStart) {
   const mon = new Date(weekStart + 'T00:00:00');
   return {
     title: 'Weekend Cover reminder',
-    message: 'Reminder for Weekend Cover on Week ' + isoWeekNumber(mon) + ', ' + wcRangeText(mon) + '.',
+    message: 'Reminder - you are scheduled for weekend cover on Week ' + isoWeekNumber(mon) + ', ' + wcRangeText(mon) + '.',
     priority: 4,
     tags: ['calendar']
   };
