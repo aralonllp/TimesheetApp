@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-46 (Tablet: wider worker view, day column fits Wednesday/Thursday) -->
+<!-- BUILD MARKER: NB-47 (WO Creation redesign: grouped sections, priority pills, even field sizes) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -136,6 +136,38 @@ textarea { height: 60px; resize: none; }
 .badge-amended { background: var(--color-background-warning); color: var(--color-text-warning); font-size: 10px; padding: 1px 6px; margin-left: 6px; }
 .badge-pending { background: #fff3cd; color: #856404; font-size: 10px; padding: 1px 6px; margin-left: 6px; }
 .wo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+.wo-card { max-width: 980px; margin: 0 auto; padding: 0 !important; overflow: visible; }
+.wo-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 1.25rem 1.5rem 1rem; border-bottom: 0.5px solid var(--color-border-tertiary); }
+.wo-title { font-size: 17px; font-weight: 600; }
+.wo-meta { font-size: 12px; color: var(--color-text-secondary); margin-top: 3px; }
+.wo-id-pill { font-size: 13px; font-weight: 700; letter-spacing: 0.3px; padding: 6px 12px; border-radius: 20px; background: var(--color-background-secondary); border: 0.5px solid var(--color-border-secondary); white-space: nowrap; }
+.wo-section { padding: 1.1rem 1.5rem 1.25rem; border-bottom: 0.5px solid var(--color-border-tertiary); }
+.wo-section-title { font-size: 11px; font-weight: 700; letter-spacing: 0.8px; text-transform: uppercase; color: var(--color-text-secondary); margin-bottom: 10px; }
+.wo-section label { margin-top: 12px; font-weight: 500; color: var(--color-text-primary); }
+.wo-section > label:first-of-type, .wo-section-title + label { margin-top: 0; }
+.wo-req { color: var(--color-text-error); }
+.wo-row { display: grid; gap: 14px; }
+.wo-row-2 { grid-template-columns: 1fr 1fr; }
+.wo-row-3 { grid-template-columns: 1fr 1fr 1fr; }
+.wo-row-loc { grid-template-columns: 1fr 160px; }
+.wo-card input, .wo-card select, .wo-card .ss-input { height: 40px; min-height: 40px; font-size: 14px; }
+.wo-card textarea.wo-desc { height: 84px; resize: vertical; font-size: 14px; }
+.wo-prio-pills { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+.wo-prio-pill { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 8px 10px; border: 1px solid var(--color-border-secondary); border-radius: var(--border-radius-md); background: var(--color-background-primary); cursor: pointer; font-family: inherit; text-align: left; min-height: 58px; transition: border-color 0.1s, box-shadow 0.1s; }
+.wo-prio-pill:hover { border-color: var(--color-text-secondary); }
+.wo-prio-pill .prio { margin-left: 0; }
+.wo-prio-pill .wo-prio-txt { font-size: 11px; line-height: 1.3; color: var(--color-text-secondary); }
+.wo-prio-pill.on { border-color: var(--color-text-primary); box-shadow: inset 0 0 0 1px var(--color-text-primary); }
+.wo-prio-pill.on .wo-prio-txt { color: var(--color-text-primary); font-weight: 500; }
+.wo-footer { display: flex; gap: 8px; justify-content: flex-end; align-items: center; padding: 1rem 1.5rem; }
+@media (max-width: 900px) {
+  .wo-prio-pills { grid-template-columns: repeat(3, 1fr); }
+  .wo-row-3 { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 600px) {
+  .wo-row-2, .wo-row-3, .wo-row-loc { grid-template-columns: 1fr; }
+  .wo-prio-pills { grid-template-columns: repeat(2, 1fr); }
+}
 .wo-grid .wo-full { grid-column: 1 / -1; }
 .wo-loc-row { display: grid; grid-template-columns: 1fr 160px; gap: 10px; }
 #office-tab-wocreate .wo-loc-row .ss-input { height: 100%; font-size: 14px; }
@@ -576,61 +608,69 @@ textarea { height: 60px; resize: none; }
       <!-- WO Creation tab -->
       <div id="office-tab-wocreate" style="display:none;">
         <div id="toast-wo-created" class="toast"></div>
-        <div class="card">
-          <div class="row-between card-header">
-            <p class="section-heading" id="wo-form-title">New work order</p>
-            <span class="text-muted" style="font-size:13px;">WO number: <strong id="wo-next-id">—</strong></span>
-          </div>
-          <div class="wo-grid">
-            <div class="wo-full">
-              <label>Description of works <span style="color:var(--color-text-error)">*</span></label>
-              <textarea id="wo-description" style="height:90px;" placeholder="What needs doing..."></textarea>
+        <div class="card wo-card">
+          <div class="wo-head">
+            <div>
+              <p class="wo-title" id="wo-form-title">New work order</p>
+              <p class="wo-meta" id="wo-meta"></p>
             </div>
-            <div class="wo-full">
-              <label>Location <span style="color:var(--color-text-error)">*</span></label>
-              <div class="wo-loc-row">
+            <span class="wo-id-pill" id="wo-next-id">—</span>
+          </div>
+
+          <div class="wo-section">
+            <p class="wo-section-title">Job details</p>
+            <label for="wo-description">Description of works <span class="wo-req">*</span></label>
+            <textarea id="wo-description" class="wo-desc" placeholder="What needs doing..."></textarea>
+            <div class="wo-row wo-row-loc">
+              <div>
+                <label>Location <span class="wo-req">*</span></label>
                 <select id="wo-location" onchange="woLocationChanged()"></select>
-                <input type="text" id="wo-costcentre" class="wo-readonly" readonly tabindex="-1" placeholder="Cost centre" title="Cost centre">
+              </div>
+              <div>
+                <label>Cost centre</label>
+                <input type="text" id="wo-costcentre" class="wo-readonly" readonly tabindex="-1" placeholder="—">
               </div>
             </div>
-            <div>
-              <label>Cost code <span style="color:var(--color-text-error)">*</span></label>
-              <select id="wo-costcode"></select>
-            </div>
-            <div>
-              <label>Trade <span style="color:var(--color-text-error)">*</span></label>
-              <select id="wo-trade"></select>
-            </div>
-            <div>
-              <label>Priority <span style="color:var(--color-text-error)">*</span></label>
-              <select id="wo-priority" onchange="woPriorityChanged()"></select>
-            </div>
-            <div>
-              <label>Date reported</label>
-              <div class="wo-loc-row" style="grid-template-columns:1fr 90px;">
-                <input type="date" id="wo-reported-date" class="wo-readonly" readonly tabindex="-1">
-                <input type="text" id="wo-reported-by" class="wo-readonly" readonly tabindex="-1" title="Reported by">
+            <div class="wo-row wo-row-2">
+              <div>
+                <label>Cost code <span class="wo-req">*</span></label>
+                <select id="wo-costcode"></select>
               </div>
-            </div>
-            <div>
-              <label>Sched. start date</label>
-              <input type="date" id="wo-sched-start" onchange="woStartChanged()">
-            </div>
-            <div>
-              <label>Sched. end date</label>
-              <input type="date" id="wo-sched-end">
-            </div>
-            <div>
-              <label>Estimated hours <span style="color:var(--color-text-error)" id="wo-est-req">*</span></label>
-              <input type="number" id="wo-est-hours" min="0.5" step="0.5" placeholder="e.g. 4">
-            </div>
-            <div class="wo-full">
-              <label>Assigned to</label>
-              <div class="wo-chips" id="wo-assign-chips"></div>
-              <p class="wo-hint" id="wo-assign-summary">Nobody selected</p>
+              <div>
+                <label>Trade <span class="wo-req">*</span></label>
+                <select id="wo-trade"></select>
+              </div>
             </div>
           </div>
-          <div class="form-footer" style="display:flex;gap:8px;justify-content:flex-end;margin-top:1.25rem;">
+
+          <div class="wo-section">
+            <p class="wo-section-title">Priority &amp; schedule</p>
+            <label>Priority <span class="wo-req">*</span></label>
+            <select id="wo-priority" onchange="woPriorityChanged()" style="display:none;"></select>
+            <div class="wo-prio-pills" id="wo-prio-pills"></div>
+            <div class="wo-row wo-row-3">
+              <div>
+                <label>Scheduled start</label>
+                <input type="date" id="wo-sched-start" onchange="woStartChanged()">
+              </div>
+              <div>
+                <label>Scheduled end</label>
+                <input type="date" id="wo-sched-end">
+              </div>
+              <div>
+                <label>Estimated hours <span class="wo-req" id="wo-est-req">*</span></label>
+                <input type="number" id="wo-est-hours" min="0.5" step="0.5" placeholder="e.g. 4">
+              </div>
+            </div>
+          </div>
+
+          <div class="wo-section">
+            <p class="wo-section-title">Assign workers</p>
+            <div class="wo-chips" id="wo-assign-chips"></div>
+            <p class="wo-hint" id="wo-assign-summary">Nobody selected</p>
+          </div>
+
+          <div class="wo-footer">
             <button class="btn" id="wo-clear-btn" onclick="woClearOrCancel()">Clear</button>
             <button class="btn btn-primary" id="wo-create-btn" onclick="createWorkOrder()">Create work order</button>
           </div>
@@ -6470,8 +6510,9 @@ function initWOForm() {
   document.getElementById('wo-clear-btn').textContent = editing ? 'Cancel' : 'Clear';
   document.getElementById('otab-wocreate').textContent = editing ? 'Edit ' + editing.id : 'WO Creation';
   document.getElementById('wo-next-id').textContent = editing ? editing.id : nextWOId();
-  document.getElementById('wo-reported-date').value = editing ? (editing.reportedDate || '') : localDateStr(new Date());
-  document.getElementById('wo-reported-by').value = editing ? (editing.reportedBy || '') : officeUserInitials();
+  const repDate = editing ? (editing.reportedDate || '') : localDateStr(new Date());
+  const repBy = editing ? (editing.reportedBy || '') : officeUserInitials();
+  document.getElementById('wo-meta').textContent = (editing ? 'Reported ' : 'Reporting ') + (repDate ? fmtUKDate(repDate) : '—') + (repBy ? ' by ' + repBy : '');
   const startEl = document.getElementById('wo-sched-start');
   if (!startEl.value && document.getElementById('wo-priority').value !== 'P5') startEl.value = localDateStr(new Date());
 
@@ -6492,6 +6533,7 @@ function initWOForm() {
       WO_PRIORITIES.map(p => `<option value="${p.code}">${p.label}</option>`).join('');
   }
 
+  renderWOPriorityPills();
   const activeNames = new Set(workers.filter(w => w.active !== false && w.active !== 'FALSE').map(w => w.name));
   woSelectedWorkers.forEach(n => { if (!activeNames.has(n)) woSelectedWorkers.delete(n); });
   renderWOAssignChips();
@@ -6522,7 +6564,23 @@ function woLocationChanged() {
   document.getElementById('wo-costcentre').value = loc ? loc.costCentre : '';
 }
 
+function renderWOPriorityPills() {
+  const el = document.getElementById('wo-prio-pills');
+  if (!el) return;
+  const cur = document.getElementById('wo-priority').value;
+  el.innerHTML = WO_PRIORITIES.map(p => `<button type="button" class="wo-prio-pill${p.code === cur ? ' on' : ''}" onclick="pickWOPriority('${p.code}')">
+      <span class="prio prio-${p.code}">${p.code}</span>
+      <span class="wo-prio-txt">${escWO(p.label.replace(/^P\d\s*[–-]\s*/, ''))}</span>
+    </button>`).join('');
+}
+
+function pickWOPriority(code) {
+  document.getElementById('wo-priority').value = code;
+  woPriorityChanged();
+}
+
 function woPriorityChanged() {
+  renderWOPriorityPills();
   const code = document.getElementById('wo-priority').value;
   const startEl = document.getElementById('wo-sched-start');
   const endEl = document.getElementById('wo-sched-end');
@@ -6576,6 +6634,7 @@ function editJob(id) {
   ssRefresh('wo-trade');
 
   document.getElementById('wo-priority').value = job.priority || '';
+  renderWOPriorityPills();
   document.getElementById('wo-sched-start').value = job.schedStart || '';
   document.getElementById('wo-sched-end').value = job.schedEnd || '';
   document.getElementById('wo-est-hours').value = job.estHours === '' || job.estHours == null ? '' : job.estHours;
