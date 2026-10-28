@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-45 (Entries crossing daily hours split into normal + overtime; office user full names in logs) -->
+<!-- BUILD MARKER: NB-46 (Tablet: wider worker view, day column fits Wednesday/Thursday) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -294,6 +294,7 @@ textarea { height: 60px; resize: none; }
 @media (min-width: 600px) and (max-width: 1400px) and (pointer: coarse) {
 
   .app { padding: 0 1.5rem 3rem; max-width: 1200px; }
+  .app.worker-wide { max-width: none; padding: 0 1rem 3rem; }
 
   select, input[type="date"], input[type="number"], input[type="password"], textarea {
     font-size: 16px;
@@ -329,7 +330,12 @@ textarea { height: 60px; resize: none; }
 
   .week-table th { font-size: 12px; padding: 10px 12px; }
   .week-table td { font-size: 13px; }
-  .day-cell { padding: 12px 10px !important; }
+  .day-cell { padding: 12px 12px !important; width: 128px; min-width: 128px; }
+  #timesheet-screen .week-table th:first-child { width: 128px !important; }
+  #timesheet-screen .week-table:not(.wk-table) th:nth-child(4) { width: auto !important; }
+  #timesheet-screen .week-table:not(.wk-table) th:last-child { width: 190px !important; }
+  #timesheet-screen .wk-table th:last-child { width: 140px !important; }
+  #timesheet-screen .wk-table .btn { white-space: nowrap; }
   .day-name { font-size: 14px; font-weight: 600; }
   .day-date { font-size: 12px; }
 
