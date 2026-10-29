@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-49 (Fix: Time Entries stuck on Loading when a sheet cell holds a number, e.g. a numeric description) -->
+<!-- BUILD MARKER: NB-50 (WO Creation: ATP tick box + ATP number; ATP tag on jobs, filter and worker view) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -146,6 +146,11 @@ textarea { height: 60px; resize: none; }
 .wo-section label { margin-top: 12px; font-weight: 500; color: var(--color-text-primary); }
 .wo-section > label:first-of-type, .wo-section-title + label { margin-top: 0; }
 .wo-req { color: var(--color-text-error); }
+.wo-atp { margin-top: 12px; }
+.wo-section label.wo-atp-check { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; font-weight: 500; color: var(--color-text-primary); cursor: pointer; }
+.wo-card .wo-atp-check input { width: 16px; height: 16px; min-height: 0; margin: 0; cursor: pointer; }
+.wo-atp-num { max-width: 280px; margin-top: 2px; }
+.atp-tag { font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 700; margin-left: 6px; background: #e8e3fb; color: #4b2aa8; white-space: nowrap; }
 .wo-row { display: grid; gap: 14px; }
 .wo-row-2 { grid-template-columns: 1fr 1fr; }
 .wo-row-3 { grid-template-columns: 1fr 1fr 1fr; }
@@ -639,6 +644,13 @@ textarea { height: 60px; resize: none; }
               <div>
                 <label>Issue highlighted by</label>
                 <input type="text" id="wo-highlighted" maxlength="120" placeholder="e.g. Housekeeper, Chef, etc.">
+              </div>
+            </div>
+            <div class="wo-atp">
+              <label class="wo-atp-check"><input type="checkbox" id="wo-atp" onchange="woAtpChanged()"> Is there an ATP against this work order?</label>
+              <div class="wo-atp-num" id="wo-atp-box" style="display:none;">
+                <label for="wo-atp-number">ATP number <span class="wo-req">*</span></label>
+                <input type="text" id="wo-atp-number" maxlength="60" placeholder="e.g. ATP-1234">
               </div>
             </div>
           </div>
@@ -2599,6 +2611,7 @@ const JOB_FILTER_FIELDS = {
   priority: { label: 'Priority', values: j => [j.priority || '__none'], display: v => v === '__none' ? 'No priority' : v },
   property: { label: 'Location', values: j => [j.property || '__none'], display: v => v === '__none' ? 'No location' : v, sort: compareLocationNames },
   costCode: { label: 'Cost code', values: j => [j.costCode || '__none'], display: v => v === '__none' ? 'No cost code' : v + (codeDesc(woCostCodes, v) ? ' – ' + codeDesc(woCostCodes, v) : '') },
+  atp:      { label: 'ATP', values: j => [jobHasAtp(j) ? 'yes' : 'no'], display: v => v === 'yes' ? 'Has an ATP' : 'No ATP' },
   issueHighlightedBy: { label: 'Highlighted by', values: j => [String(j.issueHighlightedBy || '').trim() || '__none'], display: v => v === '__none' ? 'Not recorded' : v },
   reportedBy: { label: 'Reported by', values: j => [j.reportedBy || '__none'], display: v => v === '__none' ? 'Not recorded' : v },
   status:   { label: 'Hours / dates', values: null, display: v => (JOB_STATUS_FILTERS.find(s => s.value === v) || {}).label || v }
@@ -2711,7 +2724,7 @@ function renderJobsList() {
   const hoursByJob = {};
   entries.forEach(e => { const k = String(e.jobId); hoursByJob[k] = (hoursByJob[k] || 0) + (parseFloat(e.hours) || 0); });
   initJobFilterUI();
-  const matches = j => (!q || [j.id, j.property, j.description, j.costCentre, j.costCode, j.issueHighlightedBy, j.priority, expandAssignedTo(j.assignedTo).map(workerInitials).join(' ')]
+  const matches = j => (!q || [j.id, j.property, j.description, j.costCentre, j.costCode, j.issueHighlightedBy, j.atpNumber, jobHasAtp(j) ? 'ATP' : '', j.priority, expandAssignedTo(j.assignedTo).map(workerInitials).join(' ')]
       .some(v => String(v || '').toLowerCase().includes(q))) && jobMatchesFilters(j, hoursByJob);
   const filtered = jobs.filter(matches);
   const openJobs = filtered.filter(j => j.open);
@@ -2778,6 +2791,7 @@ function renderJobRow(j, hoursByJob) {
           <button class="job-expand${expandedJobs.has(String(j.id)) ? ' open' : ''}" title="Show time entries" aria-expanded="${expandedJobs.has(String(j.id))}" onclick="toggleJobEntries('${escWO(j.id)}', this)"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M4 2l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
           <span style="font-size:14px;font-weight:700;">${j.id}</span>
           ${j.priority ? `<span class="prio prio-${escWO(j.priority)}">${escWO(j.priority)}</span>` : ''}
+          ${jobHasAtp(j) ? `<span class="atp-tag" title="ATP ${escWO(j.atpNumber || '')}">ATP${j.atpNumber ? ' ' + escWO(j.atpNumber) : ''}</span>` : ''}
           ${over ? `<span class="over-flag" title="Estimated ${fmtHrs(est)}h, actual ${fmtHrs(actual)}h">Over by ${fmtHrs(actual - est)}h</span>` : ''}
           <span class="job-codes" style="margin-left:10px;"><span>Location:</span> <strong>${escWO(propLabel(j.property, 50))}</strong>${j.costCentre ? `<span class="job-dates-sep">|</span><strong class="job-cc">${escWO(j.costCentre)}</strong>` : ''}</span>
         </div>
@@ -6223,6 +6237,7 @@ function renderWorkerJobRow(j, total, mine) {
         <div>
           <span style="font-size:14px;font-weight:700;">${escWO(j.id)}</span>
           ${j.priority ? `<span class="prio prio-${escWO(j.priority)}">${escWO(j.priority)}</span>` : ''}
+          ${jobHasAtp(j) ? '<span class="atp-tag">ATP</span>' : ''}
           <span class="job-codes" style="margin-left:10px;"><span>Location:</span> <strong>${escWO(propLabel(j.property, 50))}</strong></span>
         </div>
         <div class="job-actions">
@@ -6572,6 +6587,14 @@ function woLocationChanged() {
   document.getElementById('wo-costcentre').value = loc ? loc.costCentre : '';
 }
 
+function woAtpChanged() {
+  const on = document.getElementById('wo-atp').checked;
+  document.getElementById('wo-atp-box').style.display = on ? '' : 'none';
+  if (on) document.getElementById('wo-atp-number').focus();
+}
+
+function jobHasAtp(j) { return j && (j.atp === true || String(j.atp).toUpperCase() === 'TRUE'); }
+
 function renderWOPriorityPills() {
   const el = document.getElementById('wo-prio-pills');
   if (!el) return;
@@ -6638,6 +6661,9 @@ function editJob(id) {
   document.getElementById('wo-costcode').value = job.costCode || '';
   ssRefresh('wo-costcode');
   document.getElementById('wo-highlighted').value = job.issueHighlightedBy || '';
+  document.getElementById('wo-atp').checked = jobHasAtp(job);
+  document.getElementById('wo-atp-number').value = job.atpNumber || '';
+  document.getElementById('wo-atp-box').style.display = jobHasAtp(job) ? '' : 'none';
 
   document.getElementById('wo-priority').value = job.priority || '';
   renderWOPriorityPills();
@@ -6668,6 +6694,9 @@ function resetWOForm() {
   document.getElementById('wo-costcentre').value = '';
   document.getElementById('wo-costcode').value = '';
   document.getElementById('wo-highlighted').value = '';
+  document.getElementById('wo-atp').checked = false;
+  document.getElementById('wo-atp-number').value = '';
+  document.getElementById('wo-atp-box').style.display = 'none';
   document.getElementById('wo-est-hours').value = '';
   document.getElementById('wo-est-req').style.visibility = 'visible';
   document.getElementById('wo-priority').value = '';
@@ -6683,6 +6712,8 @@ async function createWorkOrder() {
   const location = document.getElementById('wo-location').value;
   const costCode = document.getElementById('wo-costcode').value;
   const issueHighlightedBy = document.getElementById('wo-highlighted').value.trim().replace(/\s+/g, ' ');
+  const atp = document.getElementById('wo-atp').checked;
+  const atpNumber = atp ? document.getElementById('wo-atp-number').value.trim() : '';
   const estRaw = document.getElementById('wo-est-hours').value.trim();
   const estHours = estRaw === '' ? '' : parseFloat(estRaw);
   const priority = document.getElementById('wo-priority').value;
@@ -6693,6 +6724,7 @@ async function createWorkOrder() {
   if (!description) { alert('Please enter a description of the works'); return; }
   if (!location) { alert('Please select a location'); return; }
   if (!costCode) { alert('Please select a cost code'); return; }
+  if (atp && !atpNumber) { alert('Please enter the ATP number'); return; }
   if (!p) { alert('Please select a priority'); return; }
   if (estRaw !== '' && (isNaN(estHours) || estHours <= 0)) { alert('Estimated hours must be a number above 0'); return; }
   if (!p.none && estRaw === '') { alert('Please enter the estimated hours'); return; }
@@ -6708,6 +6740,8 @@ async function createWorkOrder() {
     costCentre: loc ? loc.costCentre : (editingJob ? editingJob.costCentre || '' : ''),
     costCode,
     issueHighlightedBy,
+    atp,
+    atpNumber,
     estHours,
     description,
     priority,
@@ -6731,7 +6765,7 @@ async function createWorkOrder() {
       const prevAssigned = new Set(expandAssignedTo(editingJob.assignedTo));
       const newlyAdded = expandAssignedTo(upd.assignedTo).filter(n => !prevAssigned.has(n));
       Object.assign(editingJob, {
-        property: upd.property, costCentre: upd.costCentre, costCode: upd.costCode, issueHighlightedBy: upd.issueHighlightedBy,
+        property: upd.property, costCentre: upd.costCentre, costCode: upd.costCode, issueHighlightedBy: upd.issueHighlightedBy, atp: upd.atp, atpNumber: upd.atpNumber,
         estHours: upd.estHours, description: upd.description, priority: upd.priority,
         assignedTo: upd.assignedTo, schedStart: upd.schedStart, schedEnd: upd.schedEnd
       });
