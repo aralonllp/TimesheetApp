@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-52 (ATP number placeholder e.g. PC-L-0001) -->
+<!-- BUILD MARKER: NB-53 (Jobs tab: office comments / running commentary per WO) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -217,6 +217,15 @@ textarea { height: 60px; resize: none; }
 .job-quick-btn { font-size: 12px; font-weight: 500; padding: 6px 12px; min-height: 34px; border-radius: 20px; border: 1px dashed var(--color-border-secondary); background: transparent; color: var(--color-text-primary); cursor: pointer; font-family: inherit; white-space: nowrap; }
 .job-quick-btn:hover { border-style: solid; border-color: var(--color-text-secondary); }
 .job-quick-btn.on { border-style: solid; border-color: var(--color-text-primary); background: var(--color-background-secondary); cursor: default; }
+.job-comments { margin-top: 10px; border-top: 0.5px solid var(--color-border-tertiary); padding-top: 10px; }
+.jc-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+.jc-item { background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 8px 12px; border-left: 3px solid var(--color-text-secondary); }
+.jc-meta { font-size: 11px; color: var(--color-text-secondary); margin-bottom: 2px; }
+.jc-meta strong { color: var(--color-text-primary); font-weight: 600; }
+.jc-text { font-size: 13px; white-space: pre-wrap; word-break: break-word; }
+.jc-add { display: flex; gap: 8px; align-items: flex-end; }
+.jc-add textarea { flex: 1; height: 56px; resize: vertical; font-size: 13px; }
+.btn.jc-btn-on { background: var(--color-background-secondary); border-color: var(--color-text-primary); }
 .closed-tag { font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 600; margin-left: 6px; background: var(--color-background-secondary); color: var(--color-text-secondary); border: 0.5px solid var(--color-border-secondary); }
 .job-filter-count { font-size: 12px; color: var(--color-text-secondary); margin-bottom: 6px; }
 .over-flag { font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 600; margin-left: 6px; background: #fde2e1; color: #a61b1b; }
@@ -2739,7 +2748,7 @@ function renderJobsList() {
   const hoursByJob = {};
   entries.forEach(e => { const k = String(e.jobId); hoursByJob[k] = (hoursByJob[k] || 0) + (parseFloat(e.hours) || 0); });
   initJobFilterUI();
-  const matches = j => (!q || [j.id, j.property, j.description, j.costCentre, j.costCode, j.issueHighlightedBy, j.atpNumber, jobHasAtp(j) ? 'ATP' : '', j.priority, expandAssignedTo(j.assignedTo).map(workerInitials).join(' ')]
+  const matches = j => (!q || [j.id, j.property, j.description, j.costCentre, j.costCode, j.issueHighlightedBy, j.atpNumber, jobComments.filter(c => c.jobId === String(j.id)).map(c => c.text).join(' '), jobHasAtp(j) ? 'ATP' : '', j.priority, expandAssignedTo(j.assignedTo).map(workerInitials).join(' ')]
       .some(v => String(v || '').toLowerCase().includes(q))) && jobMatchesFilters(j, hoursByJob);
   const filtered = jobs.filter(matches);
   const openJobs = filtered.filter(j => j.open);
@@ -2822,6 +2831,7 @@ function renderJobRow(j, hoursByJob) {
         </div>
         <div class="job-actions">
           ${sched}
+          <button class="btn btn-sm${openCommentJobs.has(String(j.id)) ? ' jc-btn-on' : ''}" id="jc-btn-${escWO(j.id)}" onclick="toggleJobComments('${escWO(j.id)}')">Comments${jobCommentCount(j.id) ? ' (' + jobCommentCount(j.id) + ')' : ''}</button>
           <button class="btn btn-sm" onclick="editJob('${escWO(j.id)}')">Edit</button>
           ${j.open
             ? `<button class="btn btn-sm" onclick="toggleJobOpen('${escWO(j.id)}', false)">Close</button>`
@@ -2831,11 +2841,74 @@ function renderJobRow(j, hoursByJob) {
       ${j.description ? `<p class="job-codes" style="margin-top:4px;"><span>Description:</span> <strong>${escWO(j.description)}</strong></p>` : ''}
       ${codesLine}
       <p style="margin-top:2px;font-size:11px;color:var(--color-text-secondary);">${assignedTxt ? 'Assigned: ' + escWO(assignedTxt) : 'Unassigned'}${j.reportedBy ? ' · Reported by ' + escWO(j.reportedBy) : ''}${j.reportedDate ? ' · ' + fmtUKDate(j.reportedDate) : ''}${j.updatedAt ? ' · Edited By: ' + (j.updatedBy ? escWO(j.updatedBy) : '—') + ' : ' + fmtUKDate(localDateStr(new Date(j.updatedAt))) : ''}${j.reopenedDate || j.reopenedBy ? ' · Reopened By: ' + (j.reopenedBy ? escWO(j.reopenedBy) : '—') + (j.reopenedDate ? ' : ' + fmtUKDate(j.reopenedDate) : '') : ''}${!j.open && (j.closedDate || j.closedBy) ? ' · Closed By: ' + (j.closedBy ? escWO(j.closedBy) : '—') + (j.closedDate ? ' : ' + fmtUKDate(j.closedDate) : '') : ''}</p>
+      <div class="job-comments" id="job-comments-${escWO(j.id)}"${openCommentJobs.has(String(j.id)) ? '' : ' style="display:none;"'}>${openCommentJobs.has(String(j.id)) ? renderJobCommentsPanel(j.id) : ''}</div>
       <div class="job-entries" id="job-entries-${escWO(j.id)}"${expandedJobs.has(String(j.id)) ? '' : ' style="display:none;"'}>${expandedJobs.has(String(j.id)) ? renderJobEntriesTable(j.id) : ''}</div>
     </div>`;
 }
 
 const expandedJobs = new Set();
+let jobComments = [];
+const openCommentJobs = new Set();
+const jobCommentDrafts = {};
+
+function jobCommentCount(id) { const k = String(id); return jobComments.filter(c => c.jobId === k).length; }
+
+function fmtCommentTime(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  return fmtUKDate(localDateStr(d)) + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+
+function renderJobCommentsPanel(id) {
+  const key = String(id);
+  const list = jobComments.filter(c => c.jobId === key).sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  const items = list.length
+    ? list.map(c => `<div class="jc-item"><div class="jc-meta"><strong>${escWO(c.by || 'Office')}</strong> · ${fmtCommentTime(c.at)}</div><div class="jc-text">${escWO(c.text)}</div></div>`).join('')
+    : '<p class="text-muted" style="font-size:12px;margin-bottom:8px;">No comments yet.</p>';
+  return `<div class="jc-list">${items}</div>
+    <div class="jc-add">
+      <textarea id="jc-input-${escWO(key)}" placeholder="Add a comment, e.g. found further damage behind the units, extra 2 days needed..." oninput="jobCommentDrafts['${escWO(key)}']=this.value" onkeydown="if(event.key==='Enter'&&(event.ctrlKey||event.metaKey)){event.preventDefault();addJobCommentUI('${escWO(key)}');}">${escWO(jobCommentDrafts[key] || '')}</textarea>
+      <button class="btn btn-primary btn-sm" id="jc-save-${escWO(key)}" onclick="addJobCommentUI('${escWO(key)}')">Add comment</button>
+    </div>`;
+}
+
+function toggleJobComments(id) {
+  const key = String(id);
+  const panel = document.getElementById('job-comments-' + key);
+  const btn = document.getElementById('jc-btn-' + key);
+  if (!panel) return;
+  const open = !openCommentJobs.has(key);
+  if (open) { openCommentJobs.add(key); panel.innerHTML = renderJobCommentsPanel(key); panel.style.display = ''; const ta = document.getElementById('jc-input-' + key); if (ta) ta.focus(); }
+  else { openCommentJobs.delete(key); panel.style.display = 'none'; panel.innerHTML = ''; }
+  if (btn) btn.classList.toggle('jc-btn-on', open);
+}
+
+async function addJobCommentUI(id) {
+  const key = String(id);
+  const ta = document.getElementById('jc-input-' + key);
+  const btn = document.getElementById('jc-save-' + key);
+  const text = ta ? ta.value.trim() : '';
+  if (!text) { if (ta) ta.focus(); return; }
+  if (btn && btn.disabled) return;
+  if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to add a comment'); return; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  if (ta) ta.disabled = true;
+  try {
+    const res = await api('addJobComment', { jobId: key, text, performedBy: officeUserName() || 'Office' });
+    if (!res || !res.comment) throw new Error('The Apps Script is still running the previous version — publish a new deployment version and try again.');
+    jobComments.push(res.comment);
+    delete jobCommentDrafts[key];
+    const panel = document.getElementById('job-comments-' + key);
+    if (panel) panel.innerHTML = renderJobCommentsPanel(key);
+    const cbtn = document.getElementById('jc-btn-' + key);
+    if (cbtn) cbtn.textContent = 'Comments (' + jobCommentCount(key) + ')';
+    setSyncStatus('office', 'synced', 'Comment added to ' + key);
+  } catch (err) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Add comment'; }
+    if (ta) ta.disabled = false;
+    alert('Could not add the comment: ' + (err.message || err));
+  }
+}
 
 function toggleJobEntries(id, btn) {
   const key = String(id);
@@ -6320,6 +6393,7 @@ let isCreatingWO = false;
 var woCostCodes = [];
 
 function setCodeListsFromData(data) {
+  if (Array.isArray(data.jobComments)) jobComments = data.jobComments.map(c => ({ ...c, jobId: String(c.jobId || ''), text: String(c.text == null ? '' : c.text) }));
   if (typeof data.ntfyTopicPrefix === 'string') {
     ntfyTopicPrefix = data.ntfyTopicPrefix;
     try { localStorage.setItem('ntfyTopicPrefix', ntfyTopicPrefix); } catch (e) {}
