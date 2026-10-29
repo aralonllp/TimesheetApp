@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-47 (WO Creation redesign: grouped sections, priority pills, even field sizes) -->
+<!-- BUILD MARKER: NB-48 (Trade removed everywhere; WO field "Issue highlighted by") -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -637,8 +637,8 @@ textarea { height: 60px; resize: none; }
                 <select id="wo-costcode"></select>
               </div>
               <div>
-                <label>Trade <span class="wo-req">*</span></label>
-                <select id="wo-trade"></select>
+                <label>Issue highlighted by</label>
+                <input type="text" id="wo-highlighted" maxlength="120" placeholder="e.g. Tenant, Flat 3 – Mrs Smith">
               </div>
             </div>
           </div>
@@ -990,15 +990,9 @@ textarea { height: 60px; resize: none; }
               <label style="margin-top:0;">Description <span style="color:var(--color-text-error)">*</span></label>
               <input type="text" id="rj-description" placeholder="e.g. Property Check">
             </div>
-            <div class="grid2" style="margin-top:12px;">
-              <div>
-                <label style="margin-top:0;">Cost code <span style="color:var(--color-text-error)">*</span></label>
-                <select id="rj-costcode"></select>
-              </div>
-              <div>
-                <label style="margin-top:0;">Trade <span style="color:var(--color-text-error)">*</span></label>
-                <select id="rj-trade"></select>
-              </div>
+            <div style="margin-top:12px;">
+              <label style="margin-top:0;">Cost code <span style="color:var(--color-text-error)">*</span></label>
+              <select id="rj-costcode"></select>
             </div>
             <div class="form-footer">
               <button class="btn" id="rj-cancel-btn" style="display:none;" onclick="cancelEditRecurring()">Cancel</button>
@@ -2589,7 +2583,7 @@ const JOB_FILTER_FIELDS = {
   priority: { label: 'Priority', values: j => [j.priority || '__none'], display: v => v === '__none' ? 'No priority' : v },
   property: { label: 'Location', values: j => [j.property || '__none'], display: v => v === '__none' ? 'No location' : v, sort: compareLocationNames },
   costCode: { label: 'Cost code', values: j => [j.costCode || '__none'], display: v => v === '__none' ? 'No cost code' : v + (codeDesc(woCostCodes, v) ? ' – ' + codeDesc(woCostCodes, v) : '') },
-  trade:    { label: 'Trade', values: j => [j.trade || '__none'], display: v => v === '__none' ? 'No trade' : v + (codeDesc(woTrades, v) ? ' – ' + codeDesc(woTrades, v) : '') },
+  issueHighlightedBy: { label: 'Highlighted by', values: j => [String(j.issueHighlightedBy || '').trim() || '__none'], display: v => v === '__none' ? 'Not recorded' : v },
   reportedBy: { label: 'Reported by', values: j => [j.reportedBy || '__none'], display: v => v === '__none' ? 'Not recorded' : v },
   status:   { label: 'Hours / dates', values: null, display: v => (JOB_STATUS_FILTERS.find(s => s.value === v) || {}).label || v }
 };
@@ -2701,7 +2695,7 @@ function renderJobsList() {
   const hoursByJob = {};
   entries.forEach(e => { const k = String(e.jobId); hoursByJob[k] = (hoursByJob[k] || 0) + (parseFloat(e.hours) || 0); });
   initJobFilterUI();
-  const matches = j => (!q || [j.id, j.property, j.description, j.costCentre, j.costCode, j.trade, j.priority, expandAssignedTo(j.assignedTo).map(workerInitials).join(' ')]
+  const matches = j => (!q || [j.id, j.property, j.description, j.costCentre, j.costCode, j.issueHighlightedBy, j.priority, expandAssignedTo(j.assignedTo).map(workerInitials).join(' ')]
       .some(v => String(v || '').toLowerCase().includes(q))) && jobMatchesFilters(j, hoursByJob);
   const filtered = jobs.filter(matches);
   const openJobs = filtered.filter(j => j.open);
@@ -2754,7 +2748,7 @@ function renderJobRow(j, hoursByJob) {
   const codeLabel = (list, code) => { const d = codeDesc(list, code); return escWO(code) + (d ? ' – ' + escWO(d) : ''); };
   const codeParts = [];
   if (j.costCode)   codeParts.push(`<span>Cost Code:</span> <strong>${codeLabel(woCostCodes, j.costCode)}</strong>`);
-  if (j.trade)      codeParts.push(`<span>Trade:</span> <strong>${codeLabel(woTrades, j.trade)}</strong>`);
+  if (j.issueHighlightedBy) codeParts.push(`<span>Highlighted by:</span> <strong>${escWO(j.issueHighlightedBy)}</strong>`);
   codeParts.push(`<span>Est. Hours:</span> <strong>${est != null && !isNaN(est) ? fmtHrs(est) + 'h' : '—'}</strong>`);
   codeParts.push(`<span>Actual Hours:</span> <strong${over ? ' class="hrs-over"' : ''}>${fmtHrs(actual)}h</strong>`);
   const codesLine = codeParts.length ? `<p class="job-codes">${codeParts.join('<span class="job-dates-sep">|</span>')}</p>` : '';
@@ -3212,7 +3206,6 @@ function nextRecurringId() {
 
 function initRecurringForm() {
   fillCodeSelect('rj-costcode', woCostCodes, 'Select cost code...', 'No cost codes — add them to the CostCodes sheet');
-  fillCodeSelect('rj-trade', woTrades, 'Select trade...', 'No trades — add them to the Trades sheet');
   if (!editingRecurringId) document.getElementById('rj-next-id').textContent = nextRecurringId();
 }
 
@@ -3232,7 +3225,6 @@ function renderRecurringJobsList() {
     const idArg = escWO(JSON.stringify(j.id));
     const codes = [];
     if (j.costCode) codes.push(`<span>Cost Code:</span> <strong>${escWO(j.costCode + (codeDesc(woCostCodes, j.costCode) ? ' – ' + codeDesc(woCostCodes, j.costCode) : ''))}</strong>`);
-    if (j.trade) codes.push(`<span>Trade:</span> <strong>${escWO(j.trade + (codeDesc(woTrades, j.trade) ? ' – ' + codeDesc(woTrades, j.trade) : ''))}</strong>`);
     return `
     <div class="entry-row" id="rj-row-${escWO(j.id)}"${active ? '' : ' style="opacity:0.6;"'}>
       <div class="row-between">
@@ -3321,9 +3313,6 @@ function editRecurring(id) {
   ensureSelectOption('rj-costcode', j.costCode, j.costCode);
   document.getElementById('rj-costcode').value = j.costCode || '';
   ssRefresh('rj-costcode');
-  ensureSelectOption('rj-trade', j.trade, j.trade);
-  document.getElementById('rj-trade').value = j.trade || '';
-  ssRefresh('rj-trade');
   document.getElementById('rj-form-title').textContent = 'Edit recurring job';
   document.getElementById('rj-next-id').textContent = j.id;
   document.getElementById('rj-save-btn').textContent = 'Save changes';
@@ -3337,8 +3326,6 @@ function cancelEditRecurring() {
   document.getElementById('rj-description').value = '';
   document.getElementById('rj-costcode').value = '';
   ssRefresh('rj-costcode');
-  document.getElementById('rj-trade').value = '';
-  ssRefresh('rj-trade');
   document.getElementById('rj-form-title').textContent = 'New recurring job';
   document.getElementById('rj-save-btn').textContent = 'Add recurring job';
   document.getElementById('rj-cancel-btn').style.display = 'none';
@@ -3355,10 +3342,8 @@ async function toggleRecurringJob(id, currentlyActive, btn) {
 async function addRecurringJob() {
   const description = document.getElementById('rj-description').value.trim().replace(/\s+/g, ' ');
   const costCode = document.getElementById('rj-costcode').value;
-  const trade = document.getElementById('rj-trade').value;
   if (!description) { alert('Please enter a description'); return; }
   if (!costCode) { alert('Please select a cost code'); return; }
-  if (!trade) { alert('Please select a trade'); return; }
   const dupe = recurringJobs.find(j => j.id !== editingRecurringId && String(j.description || '').trim().toLowerCase() === description.toLowerCase());
   if (dupe && !confirm(dupe.id + ' is already called "' + dupe.description + '"' + (dupe.active === false || dupe.active === 'FALSE' ? ' (inactive)' : '') + '. Save anyway?')) return;
 
@@ -3368,7 +3353,7 @@ async function addRecurringJob() {
     const id = editingRecurringId;
     const cancelBtn = document.getElementById('rj-cancel-btn');
     cancelBtn.disabled = true;
-    const ok = await sendRecurringUpdate(id, { description, costCode, trade }, id + ' updated', btn, 'Saving…');
+    const ok = await sendRecurringUpdate(id, { description, costCode }, id + ' updated', btn, 'Saving…');
     cancelBtn.disabled = false;
     if (ok) cancelEditRecurring();
     return;
@@ -3378,9 +3363,9 @@ async function addRecurringJob() {
   btn.disabled = true;
   btn.textContent = 'Creating…';
   try {
-    const res = await api('saveRecurringJob', { job: { description, costCode, trade, assignedTo: '' }, performedBy: officeUserName() });
+    const res = await api('saveRecurringJob', { job: { description, costCode, assignedTo: '' }, performedBy: officeUserName() });
     if (!res || !/^RWO\d+$/i.test(String(res.id || ''))) throw new Error(RJ_OLD_SCRIPT_MSG);
-    recurringJobs.push({ id: res.id, property: '', description, costCode, trade, active: true, assignedTo: '' });
+    recurringJobs.push({ id: res.id, property: '', description, costCode, active: true, assignedTo: '' });
     cancelEditRecurring();
     localStorage.setItem('recurringJobs', JSON.stringify(recurringJobs));
     renderRecurringJobsList();
@@ -6183,7 +6168,7 @@ function renderWorkerJobs() {
   const q = (document.getElementById('wjobs-search').value || '').trim().toLowerCase();
   const woNum = id => { const m = /(\d+)/.exec(String(id)); return m ? parseInt(m[1], 10) : 0; };
   let list = (workerJobsView === 'open' ? openJobs : closedJobs).slice().sort((a, b) => woNum(b.id) - woNum(a.id));
-  if (q) list = list.filter(j => [j.id, j.property, j.description, j.trade, j.priority].some(v => String(v || '').toLowerCase().includes(q)));
+  if (q) list = list.filter(j => [j.id, j.property, j.description, j.issueHighlightedBy, j.priority].some(v => String(v || '').toLowerCase().includes(q)));
   const totals = {}, mineHrs = {};
   entries.forEach(e => {
     const k = String(e.jobId), h = parseFloat(e.hours) || 0;
@@ -6199,7 +6184,7 @@ function renderWorkerJobRow(j, total, mine) {
   const est = j.estHours === '' || j.estHours == null ? null : parseFloat(j.estHours);
   const over = est != null && !isNaN(est) && total > est;
   const parts = [];
-  if (j.trade) parts.push(`<span>Trade:</span> <strong>${escWO(j.trade)}${codeDesc(woTrades, j.trade) ? ' – ' + escWO(codeDesc(woTrades, j.trade)) : ''}</strong>`);
+  if (j.issueHighlightedBy) parts.push(`<span>Highlighted by:</span> <strong>${escWO(j.issueHighlightedBy)}</strong>`);
   if (est != null && !isNaN(est)) parts.push(`<span>Est. Hours:</span> <strong>${fmtHrs(est)}h</strong>`);
   parts.push(`<span>Logged:</span> <strong${over ? ' class="hrs-over"' : ''}>${fmtHrs(total)}h</strong>${mine && mine !== total ? ` <strong>(you ${fmtHrs(mine)}h)</strong>` : ''}`);
   const dates = (j.schedStart || j.schedEnd)
@@ -6267,7 +6252,6 @@ let woSelectedWorkers = new Set();
 let isCreatingWO = false;
 
 var woCostCodes = [];
-var woTrades = [];
 
 function setCodeListsFromData(data) {
   if (typeof data.ntfyTopicPrefix === 'string') {
@@ -6276,7 +6260,6 @@ function setCodeListsFromData(data) {
   }
   const norm = list => (list || []).map(c => ({ code: String(c.code || '').trim(), description: String(c.description || '').trim() })).filter(c => c.code);
   if (data.costCodes) woCostCodes = norm(data.costCodes);
-  if (data.trades) woTrades = norm(data.trades);
 }
 
 function codeDesc(list, code) {
@@ -6525,7 +6508,6 @@ function initWOForm() {
   woLocationChanged();
 
   fillCodeSelect('wo-costcode', woCostCodes, 'Select cost code...', 'No cost codes — add them to the CostCodes sheet');
-  fillCodeSelect('wo-trade', woTrades, 'Select trade...', 'No trades — add them to the Trades sheet');
 
   const prSel = document.getElementById('wo-priority');
   if (!prSel.options.length) {
@@ -6629,9 +6611,7 @@ function editJob(id) {
   ensureSelectOption('wo-costcode', job.costCode, job.costCode);
   document.getElementById('wo-costcode').value = job.costCode || '';
   ssRefresh('wo-costcode');
-  ensureSelectOption('wo-trade', job.trade, job.trade);
-  document.getElementById('wo-trade').value = job.trade || '';
-  ssRefresh('wo-trade');
+  document.getElementById('wo-highlighted').value = job.issueHighlightedBy || '';
 
   document.getElementById('wo-priority').value = job.priority || '';
   renderWOPriorityPills();
@@ -6661,7 +6641,7 @@ function resetWOForm() {
   document.getElementById('wo-location').value = '';
   document.getElementById('wo-costcentre').value = '';
   document.getElementById('wo-costcode').value = '';
-  document.getElementById('wo-trade').value = '';
+  document.getElementById('wo-highlighted').value = '';
   document.getElementById('wo-est-hours').value = '';
   document.getElementById('wo-est-req').style.visibility = 'visible';
   document.getElementById('wo-priority').value = '';
@@ -6676,7 +6656,7 @@ async function createWorkOrder() {
   const description = document.getElementById('wo-description').value.trim();
   const location = document.getElementById('wo-location').value;
   const costCode = document.getElementById('wo-costcode').value;
-  const trade = document.getElementById('wo-trade').value;
+  const issueHighlightedBy = document.getElementById('wo-highlighted').value.trim().replace(/\s+/g, ' ');
   const estRaw = document.getElementById('wo-est-hours').value.trim();
   const estHours = estRaw === '' ? '' : parseFloat(estRaw);
   const priority = document.getElementById('wo-priority').value;
@@ -6687,7 +6667,6 @@ async function createWorkOrder() {
   if (!description) { alert('Please enter a description of the works'); return; }
   if (!location) { alert('Please select a location'); return; }
   if (!costCode) { alert('Please select a cost code'); return; }
-  if (!trade) { alert('Please select a trade'); return; }
   if (!p) { alert('Please select a priority'); return; }
   if (estRaw !== '' && (isNaN(estHours) || estHours <= 0)) { alert('Estimated hours must be a number above 0'); return; }
   if (!p.none && estRaw === '') { alert('Please enter the estimated hours'); return; }
@@ -6702,7 +6681,7 @@ async function createWorkOrder() {
     property: location,
     costCentre: loc ? loc.costCentre : (editingJob ? editingJob.costCentre || '' : ''),
     costCode,
-    trade,
+    issueHighlightedBy,
     estHours,
     description,
     priority,
@@ -6726,7 +6705,7 @@ async function createWorkOrder() {
       const prevAssigned = new Set(expandAssignedTo(editingJob.assignedTo));
       const newlyAdded = expandAssignedTo(upd.assignedTo).filter(n => !prevAssigned.has(n));
       Object.assign(editingJob, {
-        property: upd.property, costCentre: upd.costCentre, costCode: upd.costCode, trade: upd.trade,
+        property: upd.property, costCentre: upd.costCentre, costCode: upd.costCode, issueHighlightedBy: upd.issueHighlightedBy,
         estHours: upd.estHours, description: upd.description, priority: upd.priority,
         assignedTo: upd.assignedTo, schedStart: upd.schedStart, schedEnd: upd.schedEnd
       });
