@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-50 (WO Creation: ATP tick box + ATP number; ATP tag on jobs, filter and worker view) -->
+<!-- BUILD MARKER: NB-52 (ATP number placeholder e.g. PC-L-0001) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -213,6 +213,11 @@ textarea { height: 60px; resize: none; }
 .job-filter-chip span { font-weight: 400; opacity: 0.75; }
 .job-filter-chip button { border: none; background: rgba(255,255,255,0.2); color: #fff; width: 18px; height: 18px; border-radius: 50%; cursor: pointer; font-size: 12px; line-height: 18px; padding: 0; font-family: inherit; }
 .job-filter-clear { border: none; background: transparent; font-size: 12px; color: var(--color-text-secondary); text-decoration: underline; cursor: pointer; font-family: inherit; padding: 4px; }
+.job-quick { display: flex; gap: 6px; flex-wrap: wrap; }
+.job-quick-btn { font-size: 12px; font-weight: 500; padding: 6px 12px; min-height: 34px; border-radius: 20px; border: 1px dashed var(--color-border-secondary); background: transparent; color: var(--color-text-primary); cursor: pointer; font-family: inherit; white-space: nowrap; }
+.job-quick-btn:hover { border-style: solid; border-color: var(--color-text-secondary); }
+.job-quick-btn.on { border-style: solid; border-color: var(--color-text-primary); background: var(--color-background-secondary); cursor: default; }
+.closed-tag { font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 600; margin-left: 6px; background: var(--color-background-secondary); color: var(--color-text-secondary); border: 0.5px solid var(--color-border-secondary); }
 .job-filter-count { font-size: 12px; color: var(--color-text-secondary); margin-bottom: 6px; }
 .over-flag { font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 600; margin-left: 6px; background: #fde2e1; color: #a61b1b; }
 .job-codes strong.hrs-over { color: #a61b1b; font-weight: 600; }
@@ -801,7 +806,8 @@ textarea { height: 60px; resize: none; }
         <div class="card">
           <div class="row-between card-header" style="flex-wrap:wrap;gap:8px;">
             <div class="jobs-toggle">
-              <button id="jobs-view-open" class="active" onclick="setJobsView('open')">Open</button>
+              <button id="jobs-view-all" class="active" onclick="setJobsView('all')">All</button>
+              <button id="jobs-view-open" onclick="setJobsView('open')">Open</button>
               <button id="jobs-view-closed" onclick="setJobsView('closed')">Closed</button>
             </div>
             <div style="display:flex;gap:8px;align-items:center;flex:1;justify-content:flex-end;min-width:220px;">
@@ -812,6 +818,10 @@ textarea { height: 60px; resize: none; }
           <div class="job-filter-bar">
             <select id="jobs-filter-field" onchange="jobsFilterFieldChanged()" style="width:auto;min-width:150px;"></select>
             <div class="job-filter-value"><select id="jobs-filter-value" onchange="addJobFilterFromUI()"></select></div>
+            <div class="job-quick">
+              <button type="button" class="job-quick-btn" id="jq-over" onclick="addQuickJobFilter('status', 'over')">Over estimated hours</button>
+              <button type="button" class="job-quick-btn" id="jq-atp" onclick="addQuickJobFilter('atp', 'yes')">Has ATP</button>
+            </div>
             <div id="jobs-filter-chips" class="job-filter-chips"></div>
           </div>
           <div id="job-list"><p class="text-muted">Loading...</p></div>
@@ -2592,7 +2602,7 @@ async function refreshOffice() {
   flushNtfyQueue();
 }
 
-let jobsView = 'open';
+let jobsView = 'all';
 let jobFilters = [];
 
 const JOB_STATUS_FILTERS = [
@@ -2702,6 +2712,10 @@ function clearJobFilters() {
 function renderJobFilterChips() {
   const el = document.getElementById('jobs-filter-chips');
   if (!el) return;
+  const qOn = (f, v) => jobFilters.some(x => x.field === f && x.value === v);
+  const qo = document.getElementById('jq-over'), qa = document.getElementById('jq-atp');
+  if (qo) qo.classList.toggle('on', qOn('status', 'over'));
+  if (qa) qa.classList.toggle('on', qOn('atp', 'yes'));
   el.innerHTML = jobFilters.map((f, i) => {
     const def = JOB_FILTER_FIELDS[f.field];
     return `<span class="job-filter-chip"><span>${escWO(def.label)}:</span> ${escWO(def.display(f.value))}<button title="Remove filter" onclick="removeJobFilter(${i})">×</button></span>`;
@@ -2711,6 +2725,7 @@ let isTogglingJob = false;
 
 function setJobsView(view) {
   jobsView = view;
+  document.getElementById('jobs-view-all').classList.toggle('active', view === 'all');
   document.getElementById('jobs-view-open').classList.toggle('active', view === 'open');
   document.getElementById('jobs-view-closed').classList.toggle('active', view === 'closed');
   renderJobsList();
@@ -2733,12 +2748,21 @@ function renderJobsList() {
   const totOpen = jobs.filter(j => j.open).length, totClosed = jobs.length - totOpen;
   document.getElementById('jobs-view-open').textContent = 'Open (' + (narrowed ? openJobs.length + ' of ' + totOpen : totOpen) + ')';
   document.getElementById('jobs-view-closed').textContent = 'Closed (' + (narrowed ? closedJobs.length + ' of ' + totClosed : totClosed) + ')';
-  const list = (jobsView === 'open' ? openJobs : closedJobs).slice().sort((a, b) => woNum(b.id) - woNum(a.id));
+  document.getElementById('jobs-view-all').textContent = 'All (' + (narrowed ? filtered.length + ' of ' + jobs.length : jobs.length) + ')';
+  const list = (jobsView === 'all' ? filtered : jobsView === 'open' ? openJobs : closedJobs).slice().sort((a, b) => woNum(b.id) - woNum(a.id));
   const listEst = list.reduce((t, j) => t + (parseFloat(j.estHours) || 0), 0);
   const listAct = list.reduce((t, j) => t + (hoursByJob[String(j.id)] || 0), 0);
   el.innerHTML = list.length
     ? (narrowed ? `<p class="job-filter-count">${list.length} job${list.length === 1 ? '' : 's'} · Est. ${fmtHrs(listEst)}h · Actual ${fmtHrs(listAct)}h</p>` : '') + list.map(j => renderJobRow(j, hoursByJob)).join('')
-    : '<p class="text-muted">' + (narrowed ? 'No jobs match the search / filters.' : (jobsView === 'open' ? 'No open jobs.' : 'No closed jobs.')) + '</p>';
+    : '<p class="text-muted">' + (narrowed ? 'No jobs match the search / filters.' : (jobsView === 'all' ? 'No jobs yet.' : jobsView === 'open' ? 'No open jobs.' : 'No closed jobs.')) + '</p>';
+}
+
+function addQuickJobFilter(field, value) {
+  if (jobFilters.some(f => f.field === field && f.value === value)) return;
+  jobFilters.push({ field, value });
+  const order = Object.keys(JOB_FILTER_FIELDS);
+  jobFilters.sort((x, y) => order.indexOf(x.field) - order.indexOf(y.field));
+  renderJobsList();
 }
 
 async function toggleJobOpen(id, open) {
@@ -2791,7 +2815,8 @@ function renderJobRow(j, hoursByJob) {
           <button class="job-expand${expandedJobs.has(String(j.id)) ? ' open' : ''}" title="Show time entries" aria-expanded="${expandedJobs.has(String(j.id))}" onclick="toggleJobEntries('${escWO(j.id)}', this)"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M4 2l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
           <span style="font-size:14px;font-weight:700;">${j.id}</span>
           ${j.priority ? `<span class="prio prio-${escWO(j.priority)}">${escWO(j.priority)}</span>` : ''}
-          ${jobHasAtp(j) ? `<span class="atp-tag" title="ATP ${escWO(j.atpNumber || '')}">ATP${j.atpNumber ? ' ' + escWO(j.atpNumber) : ''}</span>` : ''}
+          ${!j.open ? '<span class="closed-tag">Closed</span>' : ''}
+          ${jobHasAtp(j) ? `<span class="atp-tag" title="ATP ${escWO(j.atpNumber || '')}">${j.atpNumber ? (/^ATP/i.test(j.atpNumber) ? escWO(j.atpNumber) : 'ATP ' + escWO(j.atpNumber)) : 'ATP'}</span>` : ''}
           ${over ? `<span class="over-flag" title="Estimated ${fmtHrs(est)}h, actual ${fmtHrs(actual)}h">Over by ${fmtHrs(actual - est)}h</span>` : ''}
           <span class="job-codes" style="margin-left:10px;"><span>Location:</span> <strong>${escWO(propLabel(j.property, 50))}</strong>${j.costCentre ? `<span class="job-dates-sep">|</span><strong class="job-cc">${escWO(j.costCentre)}</strong>` : ''}</span>
         </div>
