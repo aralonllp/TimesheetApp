@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-48 (Trade removed everywhere; WO field "Issue highlighted by") -->
+<!-- BUILD MARKER: NB-49 (Fix: Time Entries stuck on Loading when a sheet cell holds a number, e.g. a numeric description) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -638,7 +638,7 @@ textarea { height: 60px; resize: none; }
               </div>
               <div>
                 <label>Issue highlighted by</label>
-                <input type="text" id="wo-highlighted" maxlength="120" placeholder="e.g. Housekeeper, Chef etc">
+                <input type="text" id="wo-highlighted" maxlength="120" placeholder="e.g. Tenant, Flat 3 – Mrs Smith">
               </div>
             </div>
           </div>
@@ -1247,6 +1247,18 @@ function api(action, payload = {}, _attempt = 0) {
   });
 }
 
+// Sheets hands back numbers/dates for cells that look like them (e.g. a
+// description of "1234"); make sure text fields are always strings.
+function sanitiseLoadedData() {
+  const str = v => v == null ? '' : String(v);
+  const fix = (list, keys) => (list || []).forEach(o => { if (o) keys.forEach(k => { if (k in o && typeof o[k] !== 'string') o[k] = str(o[k]); }); });
+  fix(jobs, ['id', 'property', 'description', 'assignedTo', 'costCentre', 'costCode', 'issueHighlightedBy', 'priority', 'reportedBy']);
+  fix(recurringJobs, ['id', 'property', 'description', 'assignedTo', 'costCode']);
+  fix(entries, ['id', 'worker', 'jobId', 'comments', 'property', 'description']);
+  fix(overtimeRequests, ['id', 'worker', 'jobId', 'property', 'description', 'timeRange', 'workerComment', 'reviewComment', 'status']);
+  fix(absenceTypes, ['id', 'name']);
+}
+
 function loadInitialData() {
   setSyncStatus('login', 'pending', 'Connecting...');
   api('getData').then(function(data) {
@@ -1287,6 +1299,7 @@ function loadInitialData() {
         reviewComment: String(o.reviewComment || '')
       };
     });
+    sanitiseLoadedData();
     localStorage.setItem('overtimeRequests', JSON.stringify(overtimeRequests));
     localStorage.setItem('jobs', JSON.stringify(jobs));
     localStorage.setItem('entries', JSON.stringify(entries));
@@ -1328,6 +1341,7 @@ function loadInitialData() {
     recurringJobs = JSON.parse(localStorage.getItem('recurringJobs') || '[]').map(j => ({ ...j, assignedTo: String(j.assignedTo || '') }));
     absenceTypes = JSON.parse(localStorage.getItem('absenceTypes') || '[]');
     overtimeRequests = JSON.parse(localStorage.getItem('overtimeRequests') || '[]');
+    sanitiseLoadedData();
     populateWorkerDropdown();
   });
 }
@@ -1491,6 +1505,7 @@ async function pollJobs() {
         reviewComment: String(o.reviewComment || '')
       };
     });
+    sanitiseLoadedData();
     localStorage.setItem('overtimeRequests', JSON.stringify(overtimeRequests));
     localStorage.setItem('jobs', JSON.stringify(jobs));
     localStorage.setItem('recurringJobs', JSON.stringify(recurringJobs));
@@ -2539,6 +2554,7 @@ async function refreshOffice() {
         reviewComment: String(o.reviewComment || '')
       };
     });
+      sanitiseLoadedData();
       localStorage.setItem('overtimeRequests', JSON.stringify(overtimeRequests));
       localStorage.setItem('jobs', JSON.stringify(jobs));
       localStorage.setItem('recurringJobs', JSON.stringify(recurringJobs));
@@ -2845,6 +2861,7 @@ function renderJobEntriesTable(id) {
 }
 
 function renderOfficeDashboard() {
+  sanitiseLoadedData();
   document.getElementById('stat-open').textContent = jobs.filter(j => j.open).length;
 
   renderJobsList();
@@ -2886,6 +2903,15 @@ function renderOfficeDashboard() {
 
 
 function renderOfficeEntries() {
+  try { renderOfficeEntries_(); }
+  catch (err) {
+    console.error('renderOfficeEntries failed:', err);
+    const el = document.getElementById('office-entries-list');
+    if (el) el.innerHTML = '<p style="color:var(--color-text-error);font-size:13px;">Could not show the entries: ' + escWO(err.message || err) + '. Please screenshot this and send it over.</p>';
+  }
+}
+
+function renderOfficeEntries_() {
   const el = document.getElementById('office-entries-list');
   if (!el) return;
 
