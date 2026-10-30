@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-55 (Reopen notifies assigned workers; app refreshes as soon as it is reopened / brought back on screen) -->
+<!-- BUILD MARKER: NB-56 (Schedule Creation: Weekend Cover slots locked, managed only from the Weekend Cover tab) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -260,6 +260,7 @@ textarea { height: 60px; resize: none; }
 .sched-grid tbody th { width: 120px; padding: 8px; font-size: 13px; font-weight: 700; text-align: left; background: var(--color-background-primary); }
 .sched-grid tbody th.sched-today, .sched-grid td.sched-today { box-shadow: inset 0 3px 0 var(--color-text-primary); }
 .sched-cell { padding: 6px; min-height: 64px; position: relative; }
+.sched-item.sched-locked { cursor: not-allowed; }
 .sched-item { font-size: 12px; line-height: 1.35; padding: 5px 7px; margin-bottom: 4px; border-radius: 6px; background: var(--color-background-secondary, #f3f3f3); cursor: pointer; }
 .sched-item:hover { outline: 1px solid var(--color-border-primary); }
 .sched-item .sched-wo { font-weight: 700; }
@@ -5934,7 +5935,8 @@ function renderScheduleInto(o) {
       html += items.map(it => {
         if (it.type === 'status') {
           const c = statusColor(it.status);
-          return `<div class="sched-item sched-status${it._pending ? ' sched-pending' : ''}" style="background:${escWO(c)};color:${textOn(c)};"${click(it.id)}>${escWO(it.status)}${it.note ? `<div style="font-weight:400;font-style:italic;">${escWO(it.note)}</div>` : ''}</div>`;
+          const locked = it.status === WEEKEND_COVER_STATUS;
+          return `<div class="sched-item sched-status${it._pending ? ' sched-pending' : ''}${locked && !o.readOnly ? ' sched-locked' : ''}" style="background:${escWO(c)};color:${textOn(c)};"${locked ? (o.readOnly ? '' : ' title="Change this on the Weekend Cover tab"') : click(it.id)}>${escWO(it.status)}${it.note ? `<div style="font-weight:400;font-style:italic;">${escWO(it.note)}</div>` : ''}</div>`;
         }
         if (it.type === 'job') {
           const j = jobs.find(x => String(x.id) === String(it.jobId));
@@ -5972,7 +5974,8 @@ function fillSchedItemSelect(worker) {
   const openJobs = jobs.filter(j => j.open && expandAssignedTo(j.assignedTo).includes(worker)).slice().sort((a, b) => (parseInt(String(b.id).replace(/\D/g, ''), 10) || 0) - (parseInt(String(a.id).replace(/\D/g, ''), 10) || 0));
   let html = '<option value="">Select...</option>';
   if (openJobs.length) html += `<optgroup label="Open work orders assigned to ${escWO(worker)}">` + openJobs.map(j => `<option value="job:${escWO(j.id)}">${escWO(j.id)} · ${escWO(propLabel(j.property, 40))}${j.description ? ' · ' + escWO(j.description.length > 50 ? j.description.slice(0, 50) + '…' : j.description) : ''}</option>`).join('') + '</optgroup>';
-  if (scheduleStatuses.length) html += '<optgroup label="Statuses">' + scheduleStatuses.map(st => `<option value="status:${escWO(st.name)}">${escWO(st.name)}</option>`).join('') + '</optgroup>';
+  const pickable = scheduleStatuses.filter(st => st.name !== WEEKEND_COVER_STATUS);
+  if (pickable.length) html += '<optgroup label="Statuses">' + pickable.map(st => `<option value="status:${escWO(st.name)}">${escWO(st.name)}</option>`).join('') + '</optgroup>';
   html += '<optgroup label="Other"><option value="note:">Free text (no WO)</option></optgroup>';
   sel.innerHTML = html;
   document.getElementById('sched-item-hint').textContent = openJobs.length
@@ -5987,6 +5990,8 @@ function renderSchedChips(elId, options, selected) {
 }
 
 function openSchedModal(itemId, date, worker) {
+  const lockedItem = itemId && schedule.find(x => x.id === itemId && x.type === 'status' && x.status === WEEKEND_COVER_STATUS);
+  if (lockedItem) { alert('Weekend Cover is managed on the Weekend Cover tab.'); return; }
   const forWorker = itemId ? ((schedule.find(x => x.id === itemId) || {}).worker || '') : worker;
   fillSchedItemSelect(forWorker);
   const sel = document.getElementById('sched-item');
