@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-53 (Jobs tab: office comments / running commentary per WO) -->
+<!-- BUILD MARKER: NB-54 (Worker-closed jobs await office sign-off: Awaiting sign-off view, Confirm closed / Send back) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -226,6 +226,9 @@ textarea { height: 60px; resize: none; }
 .jc-add { display: flex; gap: 8px; align-items: flex-end; }
 .jc-add textarea { flex: 1; height: 56px; resize: vertical; font-size: 13px; }
 .btn.jc-btn-on { background: var(--color-background-secondary); border-color: var(--color-text-primary); }
+.pending-tag { font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 700; margin-left: 6px; background: #fff3cd; color: #856404; white-space: nowrap; }
+.jobs-toggle button.jobs-view-alert:not(.active) { color: #856404; }
+.office-subnav button .tab-badge { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px; border-radius: 9px; background: #f0ad00; color: #111; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
 .closed-tag { font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 600; margin-left: 6px; background: var(--color-background-secondary); color: var(--color-text-secondary); border: 0.5px solid var(--color-border-secondary); }
 .job-filter-count { font-size: 12px; color: var(--color-text-secondary); margin-bottom: 6px; }
 .over-flag { font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 600; margin-left: 6px; background: #fde2e1; color: #a61b1b; }
@@ -817,6 +820,7 @@ textarea { height: 60px; resize: none; }
             <div class="jobs-toggle">
               <button id="jobs-view-all" class="active" onclick="setJobsView('all')">All</button>
               <button id="jobs-view-open" onclick="setJobsView('open')">Open</button>
+              <button id="jobs-view-pending" onclick="setJobsView('pending')">Awaiting sign-off</button>
               <button id="jobs-view-closed" onclick="setJobsView('closed')">Closed</button>
             </div>
             <div style="display:flex;gap:8px;align-items:center;flex:1;justify-content:flex-end;min-width:220px;">
@@ -1601,7 +1605,7 @@ function populateJobDropdown() {
   const recentlyClosed = jobs.filter(j => !j.open && isJobLoggable(j) && expandAssignedTo(j.assignedTo).includes(currentWorker));
   if (recentlyClosed.length) {
     html += `<optgroup label="Recently closed — hours still allowed">`;
-    html += recentlyClosed.map(j => `<option value="${j.id}">${j.id} · ${propLabel(j.property) ? propLabel(j.property) + ' · ' : ''}${j.description && j.description.length > 50 ? j.description.slice(0, 50) + '…' : (j.description || '')} · until ${fmtUKDate(closedGraceEnd(j))}</option>`).join('');
+    html += recentlyClosed.map(j => `<option value="${j.id}">${j.id} · ${propLabel(j.property) ? propLabel(j.property) + ' · ' : ''}${j.description && j.description.length > 50 ? j.description.slice(0, 50) + '…' : (j.description || '')} · ${jobPending(j) && localDateStr(new Date()) > closedGraceEnd(j) ? 'until office sign-off' : 'until ' + fmtUKDate(closedGraceEnd(j))}</option>`).join('');
     html += `</optgroup>`;
   }
 
@@ -2736,6 +2740,7 @@ function setJobsView(view) {
   jobsView = view;
   document.getElementById('jobs-view-all').classList.toggle('active', view === 'all');
   document.getElementById('jobs-view-open').classList.toggle('active', view === 'open');
+  document.getElementById('jobs-view-pending').classList.toggle('active', view === 'pending');
   document.getElementById('jobs-view-closed').classList.toggle('active', view === 'closed');
   renderJobsList();
 }
@@ -2752,18 +2757,22 @@ function renderJobsList() {
       .some(v => String(v || '').toLowerCase().includes(q))) && jobMatchesFilters(j, hoursByJob);
   const filtered = jobs.filter(matches);
   const openJobs = filtered.filter(j => j.open);
-  const closedJobs = filtered.filter(j => !j.open);
+  const pendingJobs = filtered.filter(jobPending);
+  const closedJobs = filtered.filter(j => !j.open && !jobPending(j));
   const narrowed = !!q || jobFilters.length > 0;
-  const totOpen = jobs.filter(j => j.open).length, totClosed = jobs.length - totOpen;
+  const totOpen = jobs.filter(j => j.open).length, totPending = jobs.filter(jobPending).length, totClosed = jobs.length - totOpen - totPending;
+  document.getElementById('jobs-view-pending').textContent = 'Awaiting sign-off (' + (narrowed ? pendingJobs.length + ' of ' + totPending : totPending) + ')';
+  document.getElementById('jobs-view-pending').classList.toggle('jobs-view-alert', totPending > 0);
+  updateJobsTabBadge();
   document.getElementById('jobs-view-open').textContent = 'Open (' + (narrowed ? openJobs.length + ' of ' + totOpen : totOpen) + ')';
   document.getElementById('jobs-view-closed').textContent = 'Closed (' + (narrowed ? closedJobs.length + ' of ' + totClosed : totClosed) + ')';
   document.getElementById('jobs-view-all').textContent = 'All (' + (narrowed ? filtered.length + ' of ' + jobs.length : jobs.length) + ')';
-  const list = (jobsView === 'all' ? filtered : jobsView === 'open' ? openJobs : closedJobs).slice().sort((a, b) => woNum(b.id) - woNum(a.id));
+  const list = (jobsView === 'all' ? filtered : jobsView === 'open' ? openJobs : jobsView === 'pending' ? pendingJobs : closedJobs).slice().sort((a, b) => woNum(b.id) - woNum(a.id));
   const listEst = list.reduce((t, j) => t + (parseFloat(j.estHours) || 0), 0);
   const listAct = list.reduce((t, j) => t + (hoursByJob[String(j.id)] || 0), 0);
   el.innerHTML = list.length
     ? (narrowed ? `<p class="job-filter-count">${list.length} job${list.length === 1 ? '' : 's'} · Est. ${fmtHrs(listEst)}h · Actual ${fmtHrs(listAct)}h</p>` : '') + list.map(j => renderJobRow(j, hoursByJob)).join('')
-    : '<p class="text-muted">' + (narrowed ? 'No jobs match the search / filters.' : (jobsView === 'all' ? 'No jobs yet.' : jobsView === 'open' ? 'No open jobs.' : 'No closed jobs.')) + '</p>';
+    : '<p class="text-muted">' + (narrowed ? 'No jobs match the search / filters.' : (jobsView === 'all' ? 'No jobs yet.' : jobsView === 'open' ? 'No open jobs.' : jobsView === 'pending' ? 'Nothing awaiting sign-off.' : 'No closed jobs.')) + '</p>';
 }
 
 function addQuickJobFilter(field, value) {
@@ -2787,6 +2796,9 @@ async function toggleJobOpen(id, open) {
     job.open = open;
     job.closedDate = result.closedDate || '';
     job.closedBy = result.closedBy || '';
+    job.pendingClose = false;
+    job.confirmedDate = open ? '' : (result.confirmedDate || job.closedDate);
+    job.confirmedBy = open ? '' : (result.confirmedBy || job.closedBy);
     if (open) { job.reopenedDate = result.reopenedDate || ''; job.reopenedBy = result.reopenedBy || ''; }
     localStorage.setItem('jobs', JSON.stringify(jobs));
     renderOfficeDashboard();
@@ -2796,6 +2808,78 @@ async function toggleJobOpen(id, open) {
     alert('Could not ' + (open ? 'reopen ' : 'close ') + id + ': ' + (err.message || err));
   } finally {
     isTogglingJob = false;
+  }
+}
+
+function jobPending(j) { return !!j && !j.open && (j.pendingClose === true || String(j.pendingClose).toUpperCase() === 'TRUE'); }
+
+function updateJobsTabBadge() {
+  const btn = document.getElementById('otab-jobs');
+  if (!btn) return;
+  const n = jobs.filter(jobPending).length;
+  btn.innerHTML = 'Jobs' + (n ? '<span class="tab-badge" title="' + n + ' awaiting sign-off">' + n + '</span>' : '');
+}
+
+let isSigningOffJob = false;
+async function confirmJobClose(id) {
+  if (isSigningOffJob) return;
+  const job = jobs.find(j => j.id === id);
+  if (!job || !jobPending(job)) return;
+  if (!confirm('Confirm ' + id + ' has been completed and close it?')) return;
+  if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to sign off a job'); return; }
+  isSigningOffJob = true;
+  ['jcc-', 'jsb-'].forEach(p => { const b = document.getElementById(p + id); if (b) b.disabled = true; });
+  const b = document.getElementById('jcc-' + id); if (b) b.textContent = 'Confirming…';
+  try {
+    const res = await api('confirmJobClose', { id, performedBy: officeUserName(), confirmedBy: officeUserInitials() });
+    if (!res || !res.success) throw new Error('The Apps Script is still running the previous version — publish a new deployment version and try again.');
+    job.pendingClose = false;
+    job.confirmedDate = res.confirmedDate || localDateStr(new Date());
+    job.confirmedBy = res.confirmedBy || officeUserInitials();
+    localStorage.setItem('jobs', JSON.stringify(jobs));
+    renderOfficeDashboard();
+    setSyncStatus('office', 'synced', id + ' signed off and closed');
+  } catch (err) {
+    renderJobsList();
+    alert('Could not sign off ' + id + ': ' + (err.message || err));
+  } finally {
+    isSigningOffJob = false;
+  }
+}
+
+async function sendBackJob(id) {
+  if (isSigningOffJob) return;
+  const job = jobs.find(j => j.id === id);
+  if (!job || !jobPending(job)) return;
+  const reason = (prompt('Send ' + id + ' back to the workers?\n\nWhat still needs doing? (this is added to the WO comments and sent to the assigned workers)') || '').trim();
+  if (!reason) return;
+  if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to send a job back'); return; }
+  isSigningOffJob = true;
+  ['jcc-', 'jsb-'].forEach(p => { const b = document.getElementById(p + id); if (b) b.disabled = true; });
+  const b = document.getElementById('jsb-' + id); if (b) b.textContent = 'Sending back…';
+  try {
+    const result = await api('reopenJob', { id, performedBy: officeUserName(), closedBy: officeUserInitials() });
+    Object.assign(job, { open: true, pendingClose: false, closedDate: '', closedBy: '', confirmedDate: '', confirmedBy: '', reopenedDate: result.reopenedDate || localDateStr(new Date()), reopenedBy: result.reopenedBy || officeUserInitials() });
+    localStorage.setItem('jobs', JSON.stringify(jobs));
+    try {
+      const c = await api('addJobComment', { jobId: id, text: 'Sent back: ' + reason, performedBy: officeUserName() || 'Office' });
+      if (c && c.comment) jobComments.push(c.comment);
+    } catch (e) { /* comment is a nice-to-have; the reopen already succeeded */ }
+    const names = expandAssignedTo(job.assignedTo);
+    names.forEach(n => notifyWorker(n, {
+      title: id + ' sent back',
+      message: (job.property ? job.property + '\n' : '') + 'Please revisit: ' + reason,
+      priority: 4,
+      tags: ['leftwards_arrow_with_hook']
+    }));
+    if (names.length) flushNtfyQueue();
+    renderOfficeDashboard();
+    setSyncStatus('office', 'synced', id + ' sent back' + (names.length ? ' — ' + names.length + ' worker(s) notified' : ''));
+  } catch (err) {
+    renderJobsList();
+    alert('Could not send ' + id + ' back: ' + (err.message || err));
+  } finally {
+    isSigningOffJob = false;
   }
 }
 
@@ -2824,7 +2908,7 @@ function renderJobRow(j, hoursByJob) {
           <button class="job-expand${expandedJobs.has(String(j.id)) ? ' open' : ''}" title="Show time entries" aria-expanded="${expandedJobs.has(String(j.id))}" onclick="toggleJobEntries('${escWO(j.id)}', this)"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M4 2l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
           <span style="font-size:14px;font-weight:700;">${j.id}</span>
           ${j.priority ? `<span class="prio prio-${escWO(j.priority)}">${escWO(j.priority)}</span>` : ''}
-          ${!j.open ? '<span class="closed-tag">Closed</span>' : ''}
+          ${jobPending(j) ? '<span class="pending-tag">Awaiting sign-off</span>' : !j.open ? '<span class="closed-tag">Closed</span>' : ''}
           ${jobHasAtp(j) ? `<span class="atp-tag" title="ATP ${escWO(j.atpNumber || '')}">${j.atpNumber ? (/^ATP/i.test(j.atpNumber) ? escWO(j.atpNumber) : 'ATP ' + escWO(j.atpNumber)) : 'ATP'}</span>` : ''}
           ${over ? `<span class="over-flag" title="Estimated ${fmtHrs(est)}h, actual ${fmtHrs(actual)}h">Over by ${fmtHrs(actual - est)}h</span>` : ''}
           <span class="job-codes" style="margin-left:10px;"><span>Location:</span> <strong>${escWO(propLabel(j.property, 50))}</strong>${j.costCentre ? `<span class="job-dates-sep">|</span><strong class="job-cc">${escWO(j.costCentre)}</strong>` : ''}</span>
@@ -2835,12 +2919,14 @@ function renderJobRow(j, hoursByJob) {
           <button class="btn btn-sm" onclick="editJob('${escWO(j.id)}')">Edit</button>
           ${j.open
             ? `<button class="btn btn-sm" onclick="toggleJobOpen('${escWO(j.id)}', false)">Close</button>`
-            : `<button class="btn btn-sm" onclick="toggleJobOpen('${escWO(j.id)}', true)">Reopen</button>`}
+            : jobPending(j)
+              ? `<button class="btn btn-sm" id="jsb-${escWO(j.id)}" onclick="sendBackJob('${escWO(j.id)}')">Send back</button><button class="btn btn-sm btn-primary" id="jcc-${escWO(j.id)}" onclick="confirmJobClose('${escWO(j.id)}')">Confirm closed</button>`
+              : `<button class="btn btn-sm" onclick="toggleJobOpen('${escWO(j.id)}', true)">Reopen</button>`}
         </div>
       </div>
       ${j.description ? `<p class="job-codes" style="margin-top:4px;"><span>Description:</span> <strong>${escWO(j.description)}</strong></p>` : ''}
       ${codesLine}
-      <p style="margin-top:2px;font-size:11px;color:var(--color-text-secondary);">${assignedTxt ? 'Assigned: ' + escWO(assignedTxt) : 'Unassigned'}${j.reportedBy ? ' · Reported by ' + escWO(j.reportedBy) : ''}${j.reportedDate ? ' · ' + fmtUKDate(j.reportedDate) : ''}${j.updatedAt ? ' · Edited By: ' + (j.updatedBy ? escWO(j.updatedBy) : '—') + ' : ' + fmtUKDate(localDateStr(new Date(j.updatedAt))) : ''}${j.reopenedDate || j.reopenedBy ? ' · Reopened By: ' + (j.reopenedBy ? escWO(j.reopenedBy) : '—') + (j.reopenedDate ? ' : ' + fmtUKDate(j.reopenedDate) : '') : ''}${!j.open && (j.closedDate || j.closedBy) ? ' · Closed By: ' + (j.closedBy ? escWO(j.closedBy) : '—') + (j.closedDate ? ' : ' + fmtUKDate(j.closedDate) : '') : ''}</p>
+      <p style="margin-top:2px;font-size:11px;color:var(--color-text-secondary);">${assignedTxt ? 'Assigned: ' + escWO(assignedTxt) : 'Unassigned'}${j.reportedBy ? ' · Reported by ' + escWO(j.reportedBy) : ''}${j.reportedDate ? ' · ' + fmtUKDate(j.reportedDate) : ''}${j.updatedAt ? ' · Edited By: ' + (j.updatedBy ? escWO(j.updatedBy) : '—') + ' : ' + fmtUKDate(localDateStr(new Date(j.updatedAt))) : ''}${j.reopenedDate || j.reopenedBy ? ' · Reopened By: ' + (j.reopenedBy ? escWO(j.reopenedBy) : '—') + (j.reopenedDate ? ' : ' + fmtUKDate(j.reopenedDate) : '') : ''}${!j.open && (j.closedDate || j.closedBy) ? (jobPending(j) ? ' · Completed By: ' : ' · Closed By: ') + (j.closedBy ? escWO(j.closedBy) : '—') + (j.closedDate ? ' : ' + fmtUKDate(j.closedDate) : '') : ''}${!j.open && !jobPending(j) && j.confirmedBy && j.confirmedBy !== j.closedBy ? ' · Confirmed By: ' + escWO(j.confirmedBy) + (j.confirmedDate ? ' : ' + fmtUKDate(j.confirmedDate) : '') : ''}</p>
       <div class="job-comments" id="job-comments-${escWO(j.id)}"${openCommentJobs.has(String(j.id)) ? '' : ' style="display:none;"'}>${openCommentJobs.has(String(j.id)) ? renderJobCommentsPanel(j.id) : ''}</div>
       <div class="job-entries" id="job-entries-${escWO(j.id)}"${expandedJobs.has(String(j.id)) ? '' : ' style="display:none;"'}>${expandedJobs.has(String(j.id)) ? renderJobEntriesTable(j.id) : ''}</div>
     </div>`;
@@ -6241,7 +6327,7 @@ function closedGraceEnd(j) {
 }
 
 function isJobLoggable(j) {
-  if (j.open) return true;
+  if (j.open || jobPending(j)) return true;
   const end = closedGraceEnd(j);
   return !!end && localDateStr(new Date()) <= end;
 }
@@ -6256,8 +6342,9 @@ async function workerCloseJob(id) {
   isWorkerClosingJob = true;
   setSyncStatus('worker', 'pending', 'Closing ' + id + '...');
   try {
-    const result = await api('closeJob', { id, performedBy: currentWorker, closedBy: workerInitials(currentWorker) });
+    const result = await api('closeJob', { id, performedBy: currentWorker, closedBy: workerInitials(currentWorker), pending: true });
     job.open = false;
+    job.pendingClose = true;
     job.closedDate = result.closedDate || localDateStr(new Date());
     job.closedBy = result.closedBy || workerInitials(currentWorker);
     localStorage.setItem('jobs', JSON.stringify(jobs));
@@ -6346,7 +6433,7 @@ function renderWorkerJobRow(j, total, mine) {
       </div>
       ${j.description ? `<p class="job-codes" style="margin-top:4px;"><span>Description:</span> <strong>${escWO(j.description)}</strong></p>` : ''}
       <p class="job-codes">${parts.join('<span class="job-dates-sep">|</span>')}</p>
-      <p style="margin-top:2px;font-size:11px;color:var(--color-text-secondary);">${others.length ? 'Also assigned: ' + escWO(others.map(workerInitials).join(', ')) + ' · ' : ''}Reported ${j.reportedDate ? fmtUKDate(j.reportedDate) : ''}${!j.open && j.closedDate ? ' · Closed ' + fmtUKDate(j.closedDate) + (j.closedBy ? ' by ' + escWO(j.closedBy) : '') : ''}${!j.open && isJobLoggable(j) ? ` · <span style="color:var(--color-text-warning, #9a4a00);font-weight:600;">Hours can be added until ${fmtUKDate(closedGraceEnd(j))}</span>` : ''}</p>
+      <p style="margin-top:2px;font-size:11px;color:var(--color-text-secondary);">${others.length ? 'Also assigned: ' + escWO(others.map(workerInitials).join(', ')) + ' · ' : ''}Reported ${j.reportedDate ? fmtUKDate(j.reportedDate) : ''}${!j.open && j.closedDate ? ' · Closed ' + fmtUKDate(j.closedDate) + (j.closedBy ? ' by ' + escWO(j.closedBy) : '') : ''}${!j.open && isJobLoggable(j) ? ` · <span style="color:var(--color-text-warning, #9a4a00);font-weight:600;">Hours can be added until ${jobPending(j) && localDateStr(new Date()) > closedGraceEnd(j) ? 'the office signs it off' : fmtUKDate(closedGraceEnd(j))}</span>` : ''}</p>
     </div>`;
 }
 
