@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-54 (Worker-closed jobs await office sign-off: Awaiting sign-off view, Confirm closed / Send back) -->
+<!-- BUILD MARKER: NB-55 (Reopen notifies assigned workers; app refreshes as soon as it is reopened / brought back on screen) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -2801,6 +2801,7 @@ async function toggleJobOpen(id, open) {
     job.confirmedBy = open ? '' : (result.confirmedBy || job.closedBy);
     if (open) { job.reopenedDate = result.reopenedDate || ''; job.reopenedBy = result.reopenedBy || ''; }
     localStorage.setItem('jobs', JSON.stringify(jobs));
+    if (open) notifyJobReopened(job);
     renderOfficeDashboard();
     setSyncStatus('office', 'synced', id + (open ? ' reopened' : ' closed'));
   } catch (err) {
@@ -2809,6 +2810,18 @@ async function toggleJobOpen(id, open) {
   } finally {
     isTogglingJob = false;
   }
+}
+
+function notifyJobReopened(job, reason) {
+  const names = expandAssignedTo(job.assignedTo);
+  names.forEach(n => notifyWorker(n, {
+    title: job.id + ' reopened' + (job.priority ? ' (' + job.priority + ')' : ''),
+    message: [job.property, job.description, reason ? 'Please revisit: ' + reason : 'This job has been reopened and is back on your open jobs.'].filter(Boolean).join('\n'),
+    priority: 4,
+    tags: ['leftwards_arrow_with_hook']
+  }));
+  if (names.length) flushNtfyQueue();
+  return names.length;
 }
 
 function jobPending(j) { return !!j && !j.open && (j.pendingClose === true || String(j.pendingClose).toUpperCase() === 'TRUE'); }
@@ -2865,16 +2878,9 @@ async function sendBackJob(id) {
       const c = await api('addJobComment', { jobId: id, text: 'Sent back: ' + reason, performedBy: officeUserName() || 'Office' });
       if (c && c.comment) jobComments.push(c.comment);
     } catch (e) { /* comment is a nice-to-have; the reopen already succeeded */ }
-    const names = expandAssignedTo(job.assignedTo);
-    names.forEach(n => notifyWorker(n, {
-      title: id + ' sent back',
-      message: (job.property ? job.property + '\n' : '') + 'Please revisit: ' + reason,
-      priority: 4,
-      tags: ['leftwards_arrow_with_hook']
-    }));
-    if (names.length) flushNtfyQueue();
+    const notified = notifyJobReopened(job, reason);
     renderOfficeDashboard();
-    setSyncStatus('office', 'synced', id + ' sent back' + (names.length ? ' — ' + names.length + ' worker(s) notified' : ''));
+    setSyncStatus('office', 'synced', id + ' sent back' + (notified ? ' — ' + notified + ' worker(s) notified' : ''));
   } catch (err) {
     renderJobsList();
     alert('Could not send ' + id + ' back: ' + (err.message || err));
@@ -5107,6 +5113,19 @@ function exportCSV() {
   a.download = 'Timesheets' + workerPart + '_' + fromPart + '_to_' + toPart + '.csv';
   a.click();
 }
+
+// Tablets sleep and browsers pause timers in the background, so refresh as
+// soon as the app is back on screen (e.g. after tapping a notification).
+let hiddenSince = 0;
+function refreshOnResume() {
+  if (document.visibilityState === 'hidden') { hiddenSince = Date.now(); return; }
+  if (!hiddenSince || Date.now() - hiddenSince < 60000 || !navigator.onLine) return;
+  hiddenSince = 0;
+  if (currentWorker && document.getElementById('timesheet-screen').style.display !== 'none') pollJobs();
+  else if (currentOfficeUser) refreshOffice();
+}
+document.addEventListener('visibilitychange', refreshOnResume);
+window.addEventListener('pageshow', e => { if (e.persisted) { hiddenSince = hiddenSince || 1; refreshOnResume(); } });
 
 // ── Service Worker registration ───────────────────────────────────
 if ('serviceWorker' in navigator) {
