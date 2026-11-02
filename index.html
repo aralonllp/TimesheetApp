@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-56 (Schedule Creation: Weekend Cover slots locked, managed only from the Weekend Cover tab) -->
+<!-- BUILD MARKER: NB-57 (Overtime tab: declined requests show dashes for rate, approved rate and adjust) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -4393,7 +4393,9 @@ function renderOvertimeTab() {
     const isRJ = recurringJobs.some(j => j.id === o.jobId);
     const property = isRJ ? (o.property || (job ? job.property : '')) : ((job ? job.property : '') || o.property || '');
     const desc     = (job ? (job.description || '') : '') || o.description || '';
-    const segments = getOTSegments(o);
+    const isDeclined = o.status === 'declined';
+    const trParts = String(o.timeRange || '').split(/\s*[–-]\s*/);
+    const segments = isDeclined ? [{ start: (trParts[0] || '').trim(), end: (trParts[1] || '').trim(), rate: '', approved: false }] : getOTSegments(o);
     const splittingIdx = otSplitUIState[o.id];
     const rowspan = segments.length;
 
@@ -4423,7 +4425,7 @@ function renderOvertimeTab() {
     const segRows = segments.map((seg, segIdx) => {
       const isFirst = segIdx === 0;
       const isLast = segIdx === segments.length - 1;
-      const dur = otSegDuration(seg);
+      const dur = isDeclined && !(seg.start && seg.end) ? (parseFloat(o.hours) || 0) : otSegDuration(seg);
       const durLabel = (Math.round(dur * 100) / 100).toString();
       const locked = seg.approved === true || seg.approved === 'TRUE';
       const isSplitting = splittingIdx === segIdx;
@@ -4434,7 +4436,11 @@ function renderOvertimeTab() {
       const optHtml = selVal => splitOpts.map(m => { const t = otMinutesToTime(m); return `<option value="${t}" ${t === selVal ? 'selected' : ''}>${t}</option>`; }).join('');
 
 
-      const rateCells = `
+      const dash = '<span style="color:var(--color-text-secondary);">—</span>';
+      const rateCells = isDeclined ? `
+        <td style="padding:6px 10px;font-size:12px;vertical-align:top;">${dash}</td>
+        <td style="padding:6px 10px;font-size:12px;text-align:center;vertical-align:top;">${dash}</td>
+        <td style="padding:6px 10px;font-size:12px;vertical-align:top;">${dash}</td>` : `
         <td style="padding:6px 10px;font-size:12px;vertical-align:top;">
           <select id="ot-rate-${o.id}-${segIdx}" ${locked ? 'disabled' : ''} onchange="updateOTSegmentRate('${o.id}', ${segIdx}, this.value)" style="font-size:12px;padding:2px 4px;width:64px;">
                 <option value="0.5" ${seg.rate === '0.5' ? 'selected' : ''}>0.5x</option>
@@ -4467,7 +4473,7 @@ function renderOvertimeTab() {
 
       return `<tr style="${!isFirst ? 'border-top:0.5px dashed var(--color-border-tertiary);' : ''}${isLast ? 'border-bottom:1px solid var(--color-border-secondary);' : ''}">
         ${isFirst ? sharedCells : ''}
-        <td style="padding:6px 10px;font-size:12px;font-style:italic;vertical-align:top;">${seg.start} – ${seg.end} <span style="color:var(--color-text-secondary);font-style:normal;">(${durLabel}h)</span></td>
+        <td style="padding:6px 10px;font-size:12px;font-style:italic;vertical-align:top;">${seg.start && seg.end ? seg.start + ' – ' + seg.end : '—'} <span style="color:var(--color-text-secondary);font-style:normal;">(${durLabel}h)</span></td>
         ${rateCells}
         ${isFirst ? submittedCell : ''}
         ${isFirst ? actionCell : ''}
@@ -4969,10 +4975,15 @@ async function exportOvertimeRateReport() {
   for (const o of all) {
     const job = jobs.find(j => j.id === o.jobId) || recurringJobs.find(j => j.id === o.jobId);
     const description = (job ? (job.description || '') : '') || o.description || '';
-    const segments = getOTSegments(o);
     const isApproved = o.status === 'approved';
+    const segments = isApproved ? getOTSegments(o) : [{ start: '', end: '', declined: true }];
 
     for (const seg of segments) {
+      if (seg.declined) {
+        const row = sheet.addRow([o.worker, normaliseDate(o.date), o.jobId, description, parseFloat(o.hours) || 0, o.timeRange || '', '—', '—', 'N', o.reviewedBy || '', '—', '—']);
+        row.eachCell({ includeEmpty: true }, cell => { cell.border = THIN_BORDER; });
+        continue;
+      }
       const hours = Math.round(otSegDuration(seg) * 100) / 100;
       const standby = otSegIsStandby(o, seg);
       const rate = rateLabel(seg) + (standby ? ' UK Standby' : '');
