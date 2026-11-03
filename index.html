@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-57 (Overtime tab: declined requests show dashes for rate, approved rate and adjust) -->
+<!-- BUILD MARKER: NB-58 (Jobs quick filters toggle on/off when clicked) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -216,7 +216,7 @@ textarea { height: 60px; resize: none; }
 .job-quick { display: flex; gap: 6px; flex-wrap: wrap; }
 .job-quick-btn { font-size: 12px; font-weight: 500; padding: 6px 12px; min-height: 34px; border-radius: 20px; border: 1px dashed var(--color-border-secondary); background: transparent; color: var(--color-text-primary); cursor: pointer; font-family: inherit; white-space: nowrap; }
 .job-quick-btn:hover { border-style: solid; border-color: var(--color-text-secondary); }
-.job-quick-btn.on { border-style: solid; border-color: var(--color-text-primary); background: var(--color-background-secondary); cursor: default; }
+.job-quick-btn.on { border-style: solid; border-color: var(--color-text-primary); background: var(--color-text-primary); color: #fff; }
 .job-comments { margin-top: 10px; border-top: 0.5px solid var(--color-border-tertiary); padding-top: 10px; }
 .jc-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
 .jc-item { background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 8px 12px; border-left: 3px solid var(--color-text-secondary); }
@@ -2777,7 +2777,8 @@ function renderJobsList() {
 }
 
 function addQuickJobFilter(field, value) {
-  if (jobFilters.some(f => f.field === field && f.value === value)) return;
+  const i = jobFilters.findIndex(f => f.field === field && f.value === value);
+  if (i > -1) { jobFilters.splice(i, 1); renderJobsList(); return; }
   jobFilters.push({ field, value });
   const order = Object.keys(JOB_FILTER_FIELDS);
   jobFilters.sort((x, y) => order.indexOf(x.field) - order.indexOf(y.field));
