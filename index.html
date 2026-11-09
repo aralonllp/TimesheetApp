@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-58 (Jobs quick filters toggle on/off when clicked) -->
+<!-- BUILD MARKER: NB-59 (Schedule: saved/deleted slots can no longer vanish or reappear when a refresh overlaps the save) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -5697,6 +5697,8 @@ function applyWeekendCoverResult(res) {
   const sat = localDateStr(addDaysLocal(mon, 5)), sun = localDateStr(addDaysLocal(mon, 6));
   schedule = schedule.filter(x => !removed.has(x.id) && !((x.date === sat || x.date === sun) && x.type === 'status' && x.status === WEEKEND_COVER_STATUS));
   (res.items || []).forEach(it => schedule.push({ ...it, sort: parseFloat(it.sort) || 0 }));
+  noteSchedSaved(res.items || []);
+  (res.removedIds || []).forEach(id => { schedRecentDeletes.set(id, Date.now()); schedRecentSaves = schedRecentSaves.filter(r => r.item.id !== id); });
   if (res.worker && !scheduleStatuses.some(s => s.name === WEEKEND_COVER_STATUS)) scheduleStatuses.push({ name: WEEKEND_COVER_STATUS, color: '#00B050' });
 }
 
@@ -5810,9 +5812,33 @@ let schedPendingDeletes = new Set();
 let schedSyncChain = Promise.resolve();
 let schedPendingCount = 0;
 
+// A refresh that was already on its way when a slot was saved (or deleted)
+// can come back with the sheet as it was a moment before. Remember recent
+// saves / deletes for a short while so that older read can't undo them.
+const SCHED_RECENT_MS = 3 * 60 * 1000;
+let schedRecentSaves = [];          // { item, at }
+let schedRecentDeletes = new Map(); // id -> at
+
+function noteSchedSaved(items) {
+  const now = Date.now();
+  items.forEach(it => {
+    schedRecentSaves = schedRecentSaves.filter(r => r.item.id !== it.id);
+    schedRecentSaves.push({ item: { ...it, _pending: false }, at: now });
+  });
+}
+
 function setScheduleFromData(data) {
   if (Array.isArray(data.schedule)) {
-    const server = data.schedule.map(x => ({ ...x, sort: parseFloat(x.sort) || 0 })).filter(x => !schedPendingDeletes.has(x.id));
+    const now = Date.now();
+    schedRecentSaves = schedRecentSaves.filter(r => now - r.at < SCHED_RECENT_MS);
+    schedRecentDeletes.forEach((at, id) => { if (now - at >= SCHED_RECENT_MS) schedRecentDeletes.delete(id); });
+    const server = data.schedule.map(x => ({ ...x, sort: parseFloat(x.sort) || 0 }))
+      .filter(x => !schedPendingDeletes.has(x.id) && !schedRecentDeletes.has(x.id));
+    schedRecentSaves.forEach(r => {
+      if (schedRecentDeletes.has(r.item.id) || schedPendingDeletes.has(r.item.id)) return;
+      const i = server.findIndex(x => x.id === r.item.id);
+      if (i > -1) server[i] = { ...server[i], ...r.item }; else server.push(r.item);
+    });
     const pendingLocal = schedule.filter(x => x._pending);
     pendingLocal.forEach(p => {
       const i = server.findIndex(x => x.id === p.id);
@@ -6081,6 +6107,7 @@ function saveSchedModal() {
   const ids = items.map(x => x.id);
   schedEnqueue(async () => {
     const result = await api('saveScheduleItems', { items, performedBy: officeUserName() });
+    noteSchedSaved((result.items && result.items.length) ? result.items.map(it => ({ ...(items.find(x => x.id === it.id) || {}), ...it })) : items);
     (result.items || []).forEach(it => {
       const i = schedule.findIndex(x => x.id === it.id);
       if (i > -1) schedule[i] = { ...schedule[i], ...it, _pending: false };
@@ -6111,6 +6138,8 @@ function deleteSchedItem() {
   schedEnqueue(async () => {
     try {
       await api('deleteScheduleItem', { id, performedBy: officeUserName() });
+      schedRecentDeletes.set(id, Date.now());
+      schedRecentSaves = schedRecentSaves.filter(r => r.item.id !== id);
     } catch (err) {
       if (!/not found/i.test(err.message || '')) throw err;
     } finally {
