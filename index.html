@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-75 (Schedule: worker-raised hours shown on My Week and office schedules) -->
+<!-- BUILD MARKER: NB-76 (Weekend Cover: split days between two workers) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -201,6 +201,12 @@ textarea { height: 60px; resize: none; }
 .wc-table .wc-actions { width: 130px; text-align: right; }
 .wc-table .wc-meta { font-size: 11px; color: var(--color-text-secondary); white-space: nowrap; }
 .wc-table select { min-width: 200px; max-width: 260px; font-size: 13px; padding: 4px 8px; }
+.wc-split-line { display: flex; align-items: center; gap: 8px; }
+.wc-is-split .wc-split-line + .wc-split-line { margin-top: 4px; }
+.wc-day-lbl { width: 28px; font-size: 12px; font-weight: 600; color: var(--color-text-secondary); }
+.wc-is-split .wc-select { min-width: 172px; }
+.wc-is-split .wc-split-btn { margin-top: 4px; margin-left: 36px; }
+.wc-split-btn { white-space: nowrap; }
 .wc-table select.wc-set { border-color: #00B050; box-shadow: inset 3px 0 0 #00B050; }
 .wc-table tr.wc-past td { opacity: 0.5; }
 .wc-table tr.wc-current td { background: var(--color-background-secondary); }
@@ -4270,14 +4276,20 @@ function otIsStandby(worker, dateStr, minute) {
   const dow = d.getDay();
   const fri = otDateShift(dateStr, dow >= 5 ? 5 - dow : -(dow + 2));
   const mon = otDateShift(fri, -4);
-  const rec = weekendCover.find(x => x.weekStart === mon);
-  if (!rec || String(rec.worker || '').trim() !== String(worker).trim()) return false;
+  const raw = weekendCover.find(x => normaliseDate(x.weekStart) === mon);
+  if (!raw) return false;
+  const rec = wcNormalise(raw);
+  const who = String(worker).trim();
+  if (rec.satWorker !== who && rec.sunWorker !== who) return false;
   let endDay = otDateShift(fri, 3);
   while (BANK_HOLIDAYS.includes(endDay)) endDay = otDateShift(endDay, 1);
   const startKey = fri + ' ' + otMinutesToTime(STANDBY_START_MIN);
   const endKey = endDay + ' ' + otMinutesToTime(STANDBY_END_MIN);
   const key = dateStr + ' ' + otMinutesToTime(minute);
-  return key >= startKey && key < endKey;
+  if (key < startKey || key >= endKey) return false;
+  // Split weekend: Friday evening and Saturday go with Saturday's cover, Sunday onwards with Sunday's
+  const sunStart = otDateShift(fri, 2) + ' 00:00';
+  return key < sunStart ? rec.satWorker === who : rec.sunWorker === who;
 }
 
 function otSegIsStandby(o, seg) {
@@ -5855,8 +5867,28 @@ let wcYear = null;
 let weekendReminderDate = '';
 
 function setWeekendCoverFromData(data) {
-  if (Array.isArray(data.weekendCover)) weekendCover = data.weekendCover.map(x => ({ ...x, weekStart: normaliseDate(x.weekStart), worker: String(x.worker || '').trim() }));
+  if (Array.isArray(data.weekendCover)) weekendCover = data.weekendCover.map(wcNormalise);
 }
+
+function wcNormalise(x) {
+  const worker = String(x.worker || '').trim();
+  const split = x.split === true || String(x.split).toUpperCase() === 'TRUE';
+  return { ...x, weekStart: normaliseDate(x.weekStart), worker, split,
+    satWorker: split ? String(x.satWorker || '').trim() : worker,
+    sunWorker: split ? String(x.sunWorker || '').trim() : worker };
+}
+// Who is covering each day: [{ day: 'sat'|'sun', name }], blanks left out
+function wcDayWorkers(rec) {
+  if (!rec) return [];
+  return [['sat', rec.satWorker], ['sun', rec.sunWorker]].filter(p => p[1]).map(p => ({ day: p[0], name: p[1] }));
+}
+// Each distinct worker with the days they cover
+function wcPeople(rec) {
+  const m = new Map();
+  wcDayWorkers(rec).forEach(x => { if (!m.has(x.name)) m.set(x.name, []); m.get(x.name).push(x.day); });
+  return Array.from(m, ([name, days]) => ({ name, days }));
+}
+const wcSplitOpen = new Set();
 
 function wcFor(weekStart) { return weekendCover.find(x => x.weekStart === weekStart) || null; }
 
@@ -5892,16 +5924,24 @@ function wcRow(mon, opts) {
   const cur = rec ? rec.worker : '';
   const today = localDateStr(new Date());
   const past = localDateStr(addDaysLocal(mon, 6)) < today;
-  const options = '<option value="">— Not set —</option>' + wcPool(cur).map(w => {
+  const split = !!(rec && rec.split) || wcSplitOpen.has(ws);
+  const optionsFor = val => '<option value="">— Not set —</option>' + wcPool(val).map(w => {
     const ini = workerInitials(w.name);
-    return `<option value="${escWO(w.name)}"${w.name === cur ? ' selected' : ''}>${escWO(w.name)}${ini && ini !== w.name ? ' (' + escWO(ini) + ')' : ''}</option>`;
+    return `<option value="${escWO(w.name)}"${w.name === val ? ' selected' : ''}>${escWO(w.name)}${ini && ini !== w.name ? ' (' + escWO(ini) + ')' : ''}</option>`;
   }).join('');
+  const anyone = wcDayWorkers(rec).length > 0;
+  const covering = split
+    ? ['sat', 'sun'].map(day => {
+        const val = rec ? (day === 'sat' ? rec.satWorker : rec.sunWorker) : '';
+        return `<div class="wc-split-line"><span class="wc-day-lbl">${day === 'sat' ? 'Sat' : 'Sun'}</span><select class="wc-select${val ? ' wc-set' : ''}" onchange="setWeekendCoverUI('${ws}', this, '${day}')">${optionsFor(val)}</select></div>`;
+      }).join('') + `<button class="btn btn-sm wc-split-btn" onclick="wcJoinDays('${ws}')" title="Use one worker for the whole weekend">Same person</button>`
+    : `<div class="wc-split-line"><select class="wc-select${cur ? ' wc-set' : ''}" onchange="setWeekendCoverUI('${ws}', this)">${optionsFor(cur)}</select><button class="btn btn-sm wc-split-btn" onclick="wcSplitDays('${ws}')" title="Cover Saturday and Sunday with different workers">Split days</button></div>`;
   const meta = rec && rec.updatedBy ? 'Set by ' + escWO(String(rec.updatedBy).replace(/_/g, ' ')) + (rec.updatedAt ? ' · ' + fmtUKDate(localDateStr(new Date(rec.updatedAt))) : '') : '';
   return `<tr class="${past ? 'wc-past' : ''}${opts && opts.current ? ' wc-current' : ''}" data-week="${ws}">
     <td class="wc-week">Week ${isoWeekNumber(mon)}</td>
     <td class="wc-dates">Sat ${wcShortDate(addDaysLocal(mon, 5))} – Sun ${wcShortDate(addDaysLocal(mon, 6))}</td>
-    <td><select class="wc-select${cur ? ' wc-set' : ''}" onchange="setWeekendCoverUI('${ws}', this)">${options}</select></td>
-    <td class="wc-actions">${cur && !past ? `<button class="btn btn-sm" onclick="sendWeekendCoverReminder('${ws}', this)">Send reminder</button>` : ''}</td>
+    <td class="wc-cover${split ? ' wc-is-split' : ''}">${covering}</td>
+    <td class="wc-actions">${anyone && !past ? `<button class="btn btn-sm" onclick="sendWeekendCoverReminder('${ws}', this)">Send reminder</button>` : ''}</td>
     <td class="wc-meta">${meta}</td>
   </tr>`;
 }
@@ -5931,7 +5971,7 @@ function renderWeekendCover() {
 
 function applyWeekendCoverResult(res) {
   const i = weekendCover.findIndex(x => x.weekStart === res.weekStart);
-  const rec = { weekStart: res.weekStart, worker: res.worker || '', updatedBy: res.updatedBy || officeUserName(), updatedAt: res.updatedAt || new Date().toISOString() };
+  const rec = wcNormalise({ weekStart: res.weekStart, worker: res.worker || '', split: !!res.split, satWorker: res.satWorker || '', sunWorker: res.sunWorker || '', updatedBy: res.updatedBy || officeUserName(), updatedAt: res.updatedAt || new Date().toISOString() });
   if (i > -1) weekendCover[i] = rec; else weekendCover.push(rec);
   const removed = new Set(res.removedIds || []);
   const mon = new Date(res.weekStart + 'T00:00:00');
@@ -5940,52 +5980,78 @@ function applyWeekendCoverResult(res) {
   (res.items || []).forEach(it => schedule.push({ ...it, sort: parseFloat(it.sort) || 0 }));
   noteSchedSaved(res.items || []);
   (res.removedIds || []).forEach(id => { schedRecentDeletes.set(id, Date.now()); schedRecentSaves = schedRecentSaves.filter(r => r.item.id !== id); });
-  if (res.worker && !scheduleStatuses.some(s => s.name === WEEKEND_COVER_STATUS)) scheduleStatuses.push({ name: WEEKEND_COVER_STATUS, color: '#00B050' });
+  if ((res.worker || res.satWorker || res.sunWorker) && !scheduleStatuses.some(s => s.name === WEEKEND_COVER_STATUS)) scheduleStatuses.push({ name: WEEKEND_COVER_STATUS, color: '#00B050' });
 }
 
-async function setWeekendCoverUI(weekStart, sel) {
+function wcSplitDays(weekStart) { wcSplitOpen.add(weekStart); renderWeekendCover(); }
+
+function wcJoinDays(weekStart) {
   const rec = wcFor(weekStart);
-  const prev = rec ? rec.worker : '';
-  const worker = sel.value;
-  if (worker === prev) return;
-  if (!navigator.onLine || !SCRIPT_URL) { sel.value = prev; alert('You need to be online to change weekend cover'); return; }
+  if (!rec || !rec.split) { wcSplitOpen.delete(weekStart); renderWeekendCover(); return; }
+  const who = rec.satWorker || rec.sunWorker;
+  if (rec.satWorker && rec.sunWorker && rec.satWorker !== rec.sunWorker && !confirm('Use ' + who + ' for the whole weekend?\n\n' + rec.sunWorker + ' will be taken off Sunday.')) return;
+  saveWeekendCover(weekStart, { worker: who, split: false }, null);
+}
+
+function setWeekendCoverUI(weekStart, sel, day) {
+  const rec = wcFor(weekStart);
+  if (!day) {
+    if (sel.value === (rec ? rec.worker : '') && !(rec && rec.split)) return;
+    return saveWeekendCover(weekStart, { worker: sel.value, split: false }, sel);
+  }
+  const satWorker = day === 'sat' ? sel.value : (rec ? rec.satWorker : '');
+  const sunWorker = day === 'sun' ? sel.value : (rec ? rec.sunWorker : '');
+  if (rec && rec.split && satWorker === rec.satWorker && sunWorker === rec.sunWorker) return;
+  return saveWeekendCover(weekStart, { worker: '', split: true, satWorker, sunWorker }, sel);
+}
+
+async function saveWeekendCover(weekStart, fields, sel) {
+  const rec = wcFor(weekStart);
+  const restore = () => { if (sel) renderWeekendCover(); };
+  if (!navigator.onLine || !SCRIPT_URL) { restore(); alert('You need to be online to change weekend cover'); return; }
   const selects = Array.from(document.querySelectorAll(`tr[data-week="${weekStart}"] select, tr[data-week="${weekStart}"] button`));
   selects.forEach(x => { x.disabled = true; });
   try {
-    const res = await api('setWeekendCover', { weekStart, worker, performedBy: officeUserName() });
+    const res = await api('setWeekendCover', { weekStart, ...fields, performedBy: officeUserName() });
     if (!res || res.weekStart !== weekStart) throw new Error('The Apps Script is still running the previous version — publish a new deployment version and try again.');
+    if (fields.split && !res.split) throw new Error('The Apps Script is still running the previous version — publish a new deployment version and try again.');
+    if (!fields.split) wcSplitOpen.delete(weekStart);
     applyWeekendCoverResult(res);
     renderWeekendCover();
     if (document.getElementById('office-tab-schedule').style.display === 'block') renderScheduleGrid();
     if (document.getElementById('office-tab-schedview').style.display === 'block') renderScheduleView();
-    setSyncStatus('office', 'synced', 'Week ' + isoWeekNumber(new Date(weekStart + 'T00:00:00')) + ' weekend cover: ' + (worker || 'cleared'));
+    const now = wcFor(weekStart);
+    const txt = now && now.split ? 'Sat ' + (now.satWorker || '—') + ', Sun ' + (now.sunWorker || '—') : (now && now.worker) || 'cleared';
+    setSyncStatus('office', 'synced', 'Week ' + isoWeekNumber(new Date(weekStart + 'T00:00:00')) + ' weekend cover: ' + txt);
   } catch (err) {
-    sel.value = prev;
-    selects.forEach(x => { x.disabled = false; });
+    renderWeekendCover();
     alert('Could not save weekend cover: ' + (err.message || err));
   }
 }
 
-function weekendCoverMessage(weekStart) {
+function weekendCoverMessage(weekStart, days) {
   const mon = new Date(weekStart + 'T00:00:00');
+  const one = days && days.length === 1 ? days[0] : '';
+  const when = one ? (one === 'sat' ? 'Saturday ' + wcShortDate(addDaysLocal(mon, 5)) : 'Sunday ' + wcShortDate(addDaysLocal(mon, 6))) : wcRangeText(mon);
   return {
     title: 'Weekend Cover reminder',
-    message: 'Reminder - you are scheduled for weekend cover on Week ' + isoWeekNumber(mon) + ', ' + wcRangeText(mon) + '.',
+    message: 'Reminder - you are scheduled for weekend cover on Week ' + isoWeekNumber(mon) + ', ' + when + '.',
     priority: 4,
     tags: ['calendar']
   };
 }
 
 async function sendWeekendCoverReminder(weekStart, btn) {
-  const rec = wcFor(weekStart);
-  if (!rec || !rec.worker) return;
+  const people = wcPeople(wcFor(weekStart));
+  if (!people.length) return;
   if (!ntfyTopicPrefix) { alert('Notifications are not set up yet.'); return; }
-  if (!confirm('Send a weekend cover reminder to ' + rec.worker + '?')) return;
+  const names = people.map(p => p.name).join(' and ');
+  if (!confirm('Send a weekend cover reminder to ' + names + '?')) return;
   if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
-  notifyWorker(rec.worker, weekendCoverMessage(weekStart));
+  people.forEach(p => notifyWorker(p.name, weekendCoverMessage(weekStart, p.days)));
   const r = await flushNtfyQueue();
   if (btn) { btn.disabled = false; btn.textContent = 'Send reminder'; }
-  setSyncStatus('office', r && r.failed ? 'pending' : 'synced', r && r.failed ? 'Reminder queued — will retry' : 'Weekend cover reminder sent to ' + rec.worker);
+  setSyncStatus('office', r && r.failed ? 'pending' : 'synced', r && r.failed ? 'Reminder queued — will retry' : 'Weekend cover reminder sent to ' + names);
 }
 
 async function runWeekendCoverReminder(src) {
@@ -5995,17 +6061,17 @@ async function runWeekendCoverReminder(src) {
   if (now.getDay() !== WEEKEND_REMINDER_DOW || now.getHours() < REMINDER_HOUR || weekendReminderDate === todayStr) return;
   weekendReminderDate = todayStr;
   const ws = localDateStr(mondayOf(now));
-  const list = (src && Array.isArray(src.weekendCover)) ? src.weekendCover.map(x => ({ ...x, weekStart: normaliseDate(x.weekStart) })) : weekendCover;
-  const rec = list.find(x => x.weekStart === ws);
-  if (!rec || !String(rec.worker || '').trim()) return;
+  const list = (src && Array.isArray(src.weekendCover)) ? src.weekendCover.map(wcNormalise) : weekendCover;
+  const people = wcPeople(list.find(x => x.weekStart === ws));
+  if (!people.length) return;
   try {
     const claim = await api('claimDailyTask', { task: 'weekendCover', date: todayStr, performedBy: officeUserName() });
     if (claim.busy) { weekendReminderDate = ''; return; }
     if (!claim.claimed) return;
   } catch (e) { weekendReminderDate = ''; return; }
-  notifyWorker(String(rec.worker).trim(), weekendCoverMessage(ws));
+  people.forEach(p => notifyWorker(p.name, weekendCoverMessage(ws, p.days)));
   await flushNtfyQueue();
-  setSyncStatus('office', 'synced', 'Weekend cover reminder sent to ' + rec.worker);
+  setSyncStatus('office', 'synced', 'Weekend cover reminder sent to ' + people.map(p => p.name).join(' and '));
 }
 
 async function toggleWorkerWeekendCover(name) {
