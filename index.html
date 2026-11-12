@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-74 (My Week: clearer layout, property-first job cell, daily totals) -->
+<!-- BUILD MARKER: NB-75 (Schedule: worker-raised hours shown on My Week and office schedules) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -369,6 +369,13 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
   .wk-table th.wk-c-note { width: 120px !important; }
   .wk-table th.wk-c-log { width: 84px !important; }
 }
+.raised-tag { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 20px; background: #efe7fb; color: #5b3a8e; white-space: nowrap; }
+.sched-item.sched-raised { background: #f7f2fd; border: 1px dashed #b9a2dc; }
+.sched-item.sched-raised .raised-tag { margin-bottom: 3px; }
+.sched-item.sched-raised-static { cursor: default; }
+.sched-item.sched-raised-static:hover { outline: none; }
+.wk-table tr.wk-raised > td:not(.day-cell) { background: #faf7fe; }
+.wk-table tr.wk-raised > td:nth-child(1):not(.day-cell), .wk-table tr.wk-raised > td.day-cell + td { box-shadow: inset 3px 0 0 #b9a2dc; }
 .wk-today { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 20px; background: var(--color-text-primary); color: #fff; }
 .wk-status { padding: 10px 12px; border-radius: var(--border-radius-md); font-weight: 700; font-size: 14px; margin-bottom: 6px; }
 .prio-P0 { background: #fde2e1; color: #a61b1b; }
@@ -6028,7 +6035,7 @@ function schedDaysForWeek(start, names) {
   const set = new Set(names);
   [5, 6].forEach(i => {
     const d = addDaysLocal(start, i), ds = localDateStr(d);
-    if (schedule.some(x => x.date === ds && set.has(x.worker))) days.push(d);
+    if (schedule.some(x => x.date === ds && set.has(x.worker)) || entries.some(e => set.has(String(e.worker || '').trim()) && normaliseDate(e.date) === ds)) days.push(d);
   });
   return days;
 }
@@ -6148,6 +6155,40 @@ function schedItemsFor(date, worker) {
   return schedule.filter(x => x.date === date && x.worker === worker).sort((a, b) => (a.sort - b.sort) || String(a.id).localeCompare(String(b.id)));
 }
 
+// Hours a worker logged that day against jobs that weren't on their schedule (derived from entries, never saved)
+function schedRaisedFor(date, worker) {
+  const planned = new Set(schedule.filter(x => x.date === date && x.worker === worker && x.type === 'job').map(x => String(x.jobId)));
+  const map = new Map();
+  entries.forEach(e => {
+    if (String(e.worker || '').trim() !== worker || normaliseDate(e.date) !== date) return;
+    const jid = String(e.jobId);
+    if (planned.has(jid)) return;
+    const r = map.get(jid) || { jobId: jid, property: '', hours: 0 };
+    r.hours += parseFloat(e.hours) || 0;
+    if (!r.property && e.property) r.property = e.property;
+    map.set(jid, r);
+  });
+  return Array.from(map.values()).map(r => {
+    const abs = absenceTypes.find(a => String(a.id) === r.jobId);
+    if (abs) return { ...r, absence: abs.name || abs.description || abs.id };
+    const sj = schedSlotJob({ jobId: r.jobId, property: r.property });
+    return { ...r, sj, property: sj && !sj.recurring ? sj.property : r.property };
+  });
+}
+
+function schedRaisedText(r) {
+  if (r.absence) return `<span class="sched-wo">${escWO(r.absence)}</span>`;
+  const sj = r.sj;
+  return `<span class="sched-wo">${escWO(r.jobId)}</span>${sj && sj.recurring ? ' <span class="rj-tag">Recurring</span>' : ''} · ${escWO(propLabel(r.property || '', 60))}${sj && sj.description ? ' – ' + escWO(sj.description) : ''}`;
+}
+
+function addRaisedToSchedule(date, worker, jobId, property) {
+  if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to change the schedule'); return; }
+  if (!confirm('Add ' + jobId + ' to ' + worker + "'s schedule for " + fmtUKDate(date) + '?')) return;
+  const item = { id: newSchedId(), type: 'job', jobId, status: '', note: '', property: isRecurringJobId(jobId) ? (property || '') : '', date, worker, withWorkers: '', linkId: '', sort: Date.now(), createdBy: officeUserInitials() };
+  schedCommit([item], [], []);
+}
+
 // Normalised view of a job slot, whether it points at a WO or a recurring job (RWO).
 // For recurring jobs the location comes from the slot itself.
 function schedSlotJob(it) {
@@ -6243,6 +6284,11 @@ function renderScheduleInto(o) {
           return `<div class="sched-item${it._pending ? ' sched-pending' : ''}${overCls}"${click(it.id)}>${schedJobText(it)}${schedMeetFlagHtml(it)}${it.note ? `<div class="sched-note">${escWO(it.note)}</div>` : ''}${hrsHtml}</div>`;
         }
         return `<div class="sched-item${it._pending ? ' sched-pending' : ''}"${click(it.id)}>${escWO(it.note)}</div>`;
+      }).join('');
+      html += schedRaisedFor(ds, w.name).map(r => {
+        const canAdd = !o.readOnly && !r.absence && r.sj;
+        const act = canAdd ? ` onclick="addRaisedToSchedule('${ds}', ${escWO(JSON.stringify(w.name))}, ${escWO(JSON.stringify(r.jobId))}, ${escWO(JSON.stringify(r.property || ''))})" title="Logged by the worker but not on the schedule. Click to add it to the schedule."` : ' title="Logged by the worker but not on the schedule"';
+        return `<div class="sched-item sched-raised${canAdd ? '' : ' sched-raised-static'}"${act}><div class="raised-tag">Worker raised · ${fmtHrs(r.hours)}h</div>${schedRaisedText(r)}</div>`;
       }).join('');
       if (!o.readOnly && d.getDay() !== 0 && d.getDay() !== 6) {
         const addStyle = bg ? ` style="color:${textOn(bg)};border-color:${textOn(bg) === '#fff' ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.4)'};"` : '';
@@ -6681,15 +6727,16 @@ function renderWorkerWeek() {
     const dayTotal = dayEntries.reduce((t, e) => t + (parseFloat(e.hours) || 0), 0);
     const offDay = items.some(x => x.type === 'status' && NON_WORKING_STATUSES.includes(x.status));
     const hasWork = items.some(x => x.type !== 'status' && x.type !== 'note');
-    const showTotal = hasWork || dayTotal > 0;
-    const span = Math.max(items.length, 1) + (showTotal ? 1 : 0);
+    const raised = schedRaisedFor(ds, currentWorker);
+    const showTotal = hasWork || raised.length > 0 || dayTotal > 0;
+    const span = Math.max(items.length + raised.length, 1) + (showTotal ? 1 : 0);
     const rowCls = (isToday ? ' wk-row-today' : '') + (ds < today ? ' wk-row-past' : '');
     const dayCell = `<td class="day-cell${isToday ? ' wk-is-today' : ''}" rowspan="${span}">
         <div class="day-name">${schedDayName(d)}</div>
         <div class="day-date">${fmtUKDate(ds)}</div>
         ${isToday ? '<span class="wk-today" style="display:inline-block;margin-top:4px;">Today</span>' : ''}
       </td>`;
-    if (!items.length) {
+    if (!items.length && !raised.length) {
       rows += `<tr class="day-row wk-day-start${rowCls}">${dayCell}<td class="wk-empty" colspan="${COLS}">Nothing scheduled</td></tr>`;
     }
     items.forEach((it, k) => {
@@ -6715,6 +6762,20 @@ function renderWorkerWeek() {
           <td style="text-align:right;">${canLog ? `<button class="btn btn-sm" onclick="logTimeForJob('${escWO(it.jobId)}', '${ds}', ${escWO(JSON.stringify(sj && sj.recurring ? sj.property : ''))})">Log time</button>` : ''}</td>`;
       }
       rows += `<tr class="day-row${k === 0 ? ' wk-day-start' : ''}${rowCls}">${k === 0 ? dayCell : ''}${cells}</tr>`;
+    });
+    raised.forEach((r, k) => {
+      const first = !items.length && k === 0;
+      const sj = r.sj;
+      const canLog = !r.absence && sj && (sj.recurring ? sj.open : isJobLoggable(sj.job)) && ds <= today;
+      const main = r.absence ? escWO(r.absence) : escWO(r.property || r.jobId);
+      const sub = r.absence ? '' : `${r.property ? `<span>${escWO(r.jobId)}</span>` : ''}${sj && sj.recurring ? '<span class="rj-tag">Recurring</span>' : ''}${sj && sj.priority ? `<span class="prio prio-${escWO(sj.priority)}">${escWO(sj.priority)}</span>` : ''}`;
+      rows += `<tr class="day-row wk-raised${first ? ' wk-day-start' : ''}${rowCls}">${first ? dayCell : ''}
+          <td><div class="wk-prop">${main}</div><div class="wk-sub">${sub}<span class="raised-tag">Worker raised</span></div></td>
+          <td class="wk-desc">${sj ? escWO(sj.description || '') : ''}</td>
+          <td class="wk-note"></td>
+          <td class="wk-logged"><span class="wk-logged-pill">${fmtHrs(r.hours)}h</span></td>
+          <td style="text-align:right;">${canLog ? `<button class="btn btn-sm" onclick="logTimeForJob('${escWO(r.jobId)}', '${ds}', ${escWO(JSON.stringify(sj.recurring ? r.property : ''))})">Log time</button>` : ''}</td>
+        </tr>`;
     });
     if (showTotal) {
       const weekday = d.getDay() >= 1 && d.getDay() <= 5;
