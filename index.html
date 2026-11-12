@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-63 (Notifications: drop-down panel under the bell, closes when tapping elsewhere) -->
+<!-- BUILD MARKER: NB-64 (All ntfy pushes sent as high priority; P0 stays urgent) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -5374,7 +5374,7 @@ function notifyWorker(name, msg) {
   queueNotificationLog(name, msg);
   const topic = workerNtfyTopic(name);
   if (!topic) return;
-  const body = { topic, title: msg.title || '', message: msg.message || '', priority: msg.priority || 3, tags: msg.tags || [] };
+  const body = { topic, title: msg.title || '', message: msg.message || '', priority: Math.max(4, msg.priority || 4), tags: msg.tags || [] };
   const click = ntfyAppUrl();
   if (click) body.click = click;
   ntfyQueue.push({ id: Date.now() + Math.random(), body, worker: name });
