@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-67 (Schedule Creation: "Other worker required?" — pick who to meet, shown clearly on every schedule view) -->
+<!-- BUILD MARKER: NB-68 (Other worker required: job is added to the other worker's schedule too, each flagged to meet the other; linked edit / delete) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -813,7 +813,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
             <label class="wo-atp-check sched-with-check"><input type="checkbox" id="sched-with-tick" onchange="schedWithToggled()"> Other worker required?</label>
             <div id="sched-with-box" style="display:none;">
               <div class="wo-chips" id="sched-with-chips"></div>
-              <p class="wo-hint">Shown on this slot so they know who to meet. Add the job to the other worker's own schedule as well if they need it there.</p>
+              <p class="wo-hint">The job is added to their schedule too, and each of them is flagged to meet the other.</p>
             </div>
           </div>
           <label id="sched-note-label">Note (optional)</label>
@@ -6291,47 +6291,26 @@ function closeSchedModal() {
   schedModalState = null;
 }
 
-function saveSchedModal() {
-  if (isSavingSched || !schedModalState) return;
-  const val = document.getElementById('sched-item').value;
-  const note = document.getElementById('sched-note').value.trim();
-  if (!val) { alert('Select a work order, status or free text'); return; }
-  const type = val.split(':')[0];
-  const ref = val.slice(type.length + 1);
-  if (type === 'note' && !note) { alert('Enter the text for this slot'); return; }
-  const isRecurring = type === 'job' && isRecurringJobId(ref);
-  const property = isRecurring ? rjPropGetValue('sched-rj-prop') : '';
-  if (isRecurring && !property) { alert('Please choose the property for this recurring job, so the worker knows where to go.'); return; }
-  const withOn = type === 'job' && document.getElementById('sched-with-tick').checked;
-  const withWorkers = withOn ? Array.from(document.querySelectorAll('#sched-with-chips .wo-chip.on')).map(b => b.getAttribute('data-v')).join(', ') : '';
-  if (withOn && !withWorkers) { alert('Pick which worker they need to meet, or untick "Other worker required?"'); return; }
-  if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to change the schedule'); return; }
-  isSavingSched = true;
-  setSchedModalBusy(true);
-  let items, previous = [];
-  if (schedModalState.id) {
-    const cur = schedule.find(x => x.id === schedModalState.id);
-    if (!cur) { isSavingSched = false; closeSchedModal(); return; }
-    previous = [{ ...cur }];
-    items = [{ id: cur.id, date: cur.date, worker: cur.worker, type, jobId: type === 'job' ? ref : '', status: type === 'status' ? ref : '', note, property, withWorkers, sort: cur.sort, updatedBy: officeUserInitials() }];
-  } else {
-    const days = Array.from(document.querySelectorAll('#sched-days .wo-chip.on')).map(b => b.getAttribute('data-v'));
-    if (!days.length) { alert('Pick at least one day'); isSavingSched = false; setSchedModalBusy(false); return; }
-    const base = Date.now();
-    items = days.map((d, i) => ({ id: newSchedId(), date: d, worker: schedModalState.worker, type, jobId: type === 'job' ? ref : '', status: type === 'status' ? ref : '', note, property, withWorkers, sort: base + i, createdBy: officeUserInitials() }));
-  }
+function newLinkId() { return 'lk' + Date.now() + Math.random().toString(36).slice(2, 7); }
+function schedOthersOf(members, me) { return members.filter(n => n !== me).join(', '); }
+function schedPlainItem(x) { const c = { ...x }; delete c._pending; return c; }
+
+// Optimistically shows the items, then saves them (and removes deleteIds) in the background.
+function schedCommit(items, previous, deleteIds) {
+  deleteIds = deleteIds || [];
+  const removedLocal = schedule.filter(x => deleteIds.includes(x.id));
   items.forEach(it => {
     const i = schedule.findIndex(x => x.id === it.id);
     const local = { ...it, _pending: true };
     if (i > -1) schedule[i] = { ...schedule[i], ...local }; else schedule.push(local);
   });
-  isSavingSched = false;
-  closeSchedModal();
+  if (deleteIds.length) { schedule = schedule.filter(x => !deleteIds.includes(x.id)); deleteIds.forEach(id => schedPendingDeletes.add(id)); }
   renderScheduleGrid();
   const ids = items.map(x => x.id);
-  schedEnqueue(async () => {
-    const result = await api('saveScheduleItems', { items, performedBy: officeUserName() });
-    noteSchedSaved((result.items && result.items.length) ? result.items.map(it => ({ ...(items.find(x => x.id === it.id) || {}), ...it })) : items);
+  if (items.length) schedEnqueue(async () => {
+    const payload = items.map(schedPlainItem);
+    const result = await api('saveScheduleItems', { items: payload, performedBy: officeUserName() });
+    noteSchedSaved((result.items && result.items.length) ? result.items.map(it => ({ ...(payload.find(x => x.id === it.id) || {}), ...it })) : payload);
     (result.items || []).forEach(it => {
       const i = schedule.findIndex(x => x.id === it.id);
       if (i > -1) schedule[i] = { ...schedule[i], ...it, _pending: false };
@@ -6344,36 +6323,106 @@ function saveSchedModal() {
     renderScheduleGrid();
     alert('Could not save the schedule — your change has been undone.\n\n' + (err.message || err));
   });
+  deleteIds.forEach(id => {
+    const removed = removedLocal.find(x => x.id === id);
+    schedEnqueue(async () => {
+      try {
+        await api('deleteScheduleItem', { id, performedBy: officeUserName() });
+        schedRecentDeletes.set(id, Date.now());
+        schedRecentSaves = schedRecentSaves.filter(r => r.item.id !== id);
+      } catch (err) {
+        if (!/not found/i.test(err.message || '')) throw err;
+      } finally {
+        schedPendingDeletes.delete(id);
+      }
+    }, err => {
+      if (removed) schedule.push({ ...removed, _pending: false });
+      renderScheduleGrid();
+      alert('Could not remove a slot — it has been put back.\n\n' + (err.message || err));
+    });
+  });
+}
+
+function saveSchedModal() {
+  if (isSavingSched || !schedModalState) return;
+  const val = document.getElementById('sched-item').value;
+  const note = document.getElementById('sched-note').value.trim();
+  if (!val) { alert('Select a work order, status or free text'); return; }
+  const type = val.split(':')[0];
+  const ref = val.slice(type.length + 1);
+  if (type === 'note' && !note) { alert('Enter the text for this slot'); return; }
+  const isRecurring = type === 'job' && isRecurringJobId(ref);
+  const property = isRecurring ? rjPropGetValue('sched-rj-prop') : '';
+  if (isRecurring && !property) { alert('Please choose the property for this recurring job, so the worker knows where to go.'); return; }
+  const withOn = type === 'job' && document.getElementById('sched-with-tick').checked;
+  const selected = withOn ? Array.from(document.querySelectorAll('#sched-with-chips .wo-chip.on')).map(b => b.getAttribute('data-v')) : [];
+  if (withOn && !selected.length) { alert('Pick which worker they need to meet, or untick "Other worker required?"'); return; }
+  if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to change the schedule'); return; }
+
+  const me = officeUserInitials();
+  const base = { type, jobId: type === 'job' ? ref : '', status: type === 'status' ? ref : '', note, property };
+  const items = [], previous = [];
+  let deleteIds = [];
+  // An unlinked slot for the same job that the other worker already has that day is reused, not duplicated
+  const findExisting = (date, name) => type === 'job' ? schedule.find(x => x.date === date && x.worker === name && x.type === 'job' && String(x.jobId) === String(ref) && !x.linkId) : null;
+  const putSlot = (slot, date, name, members, linkId, sort) => {
+    const fields = { ...base, date, worker: name, withWorkers: members.length > 1 ? schedOthersOf(members, name) : '', linkId };
+    if (slot) { previous.push({ ...slot }); items.push(schedPlainItem({ ...slot, ...fields, updatedBy: me })); }
+    else items.push({ id: newSchedId(), ...fields, sort, createdBy: me });
+  };
+
+  if (schedModalState.id) {
+    const cur = schedule.find(x => x.id === schedModalState.id);
+    if (!cur) { closeSchedModal(); return; }
+    const group = cur.linkId ? schedule.filter(x => x.linkId === cur.linkId && x.date === cur.date) : [cur];
+    const members = [cur.worker, ...selected.filter(n => n !== cur.worker)];
+    const linkId = members.length > 1 ? (cur.linkId || newLinkId()) : '';
+    members.forEach(name => {
+      const slot = group.find(x => x.worker === name) || (name !== cur.worker ? findExisting(cur.date, name) : null);
+      putSlot(slot, cur.date, name, members, linkId, Date.now());
+    });
+    const dropped = group.filter(x => !members.includes(x.worker));
+    if (dropped.length) {
+      const names = dropped.map(x => x.worker).join(', ');
+      if (confirm('Also remove ' + (dropped[0].jobId || 'this job') + ' from ' + names + "'s schedule?\n\nOK = remove it from their schedule\nCancel = keep it on their schedule")) deleteIds = dropped.map(x => x.id);
+      else dropped.forEach(x => { previous.push({ ...x }); items.push(schedPlainItem({ ...x, withWorkers: '', linkId: '', updatedBy: me })); });
+    }
+  } else {
+    const days = Array.from(document.querySelectorAll('#sched-days .wo-chip.on')).map(b => b.getAttribute('data-v'));
+    if (!days.length) { alert('Pick at least one day'); return; }
+    const t = Date.now();
+    days.forEach((d, i) => {
+      const members = [schedModalState.worker, ...selected.filter(n => n !== schedModalState.worker)];
+      const linkId = members.length > 1 ? newLinkId() : '';
+      members.forEach((name, k) => putSlot(name === schedModalState.worker ? null : findExisting(d, name), d, name, members, linkId, t + i * 10 + k));
+    });
+  }
+  closeSchedModal();
+  schedCommit(items, previous, deleteIds);
 }
 
 function deleteSchedItem() {
   if (isSavingSched || !schedModalState || !schedModalState.id) return;
+  const cur = schedule.find(x => x.id === schedModalState.id);
+  if (!cur) { closeSchedModal(); return; }
   if (!confirm('Remove this slot from the schedule?')) return;
   if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to change the schedule'); return; }
-  isSavingSched = true;
-  setSchedModalBusy(true);
-  const id = schedModalState.id;
-  const removed = schedule.find(x => x.id === id);
-  schedule = schedule.filter(x => x.id !== id);
-  schedPendingDeletes.add(id);
-  isSavingSched = false;
-  closeSchedModal();
-  renderScheduleGrid();
-  schedEnqueue(async () => {
-    try {
-      await api('deleteScheduleItem', { id, performedBy: officeUserName() });
-      schedRecentDeletes.set(id, Date.now());
-      schedRecentSaves = schedRecentSaves.filter(r => r.item.id !== id);
-    } catch (err) {
-      if (!/not found/i.test(err.message || '')) throw err;
-    } finally {
-      schedPendingDeletes.delete(id);
+  const others = cur.linkId ? schedule.filter(x => x.linkId === cur.linkId && x.date === cur.date && x.id !== cur.id) : [];
+  let deleteIds = [cur.id];
+  const items = [], previous = [];
+  if (others.length) {
+    if (confirm(cur.worker + ' was meeting ' + others.map(x => x.worker).join(', ') + ' for ' + (cur.jobId || 'this job') + '.\n\nOK = remove it from their schedule as well\nCancel = keep it on theirs')) {
+      deleteIds = deleteIds.concat(others.map(x => x.id));
+    } else {
+      const remaining = others.map(x => x.worker);
+      others.forEach(x => {
+        previous.push({ ...x });
+        items.push(schedPlainItem({ ...x, withWorkers: remaining.length > 1 ? schedOthersOf(remaining, x.worker) : '', linkId: remaining.length > 1 ? x.linkId : '', updatedBy: officeUserInitials() }));
+      });
     }
-  }, err => {
-    if (removed) schedule.push({ ...removed, _pending: false });
-    renderScheduleGrid();
-    alert('Could not remove the slot — it has been put back.\n\n' + (err.message || err));
-  });
+  }
+  closeSchedModal();
+  schedCommit(items, previous, deleteIds);
 }
 
 function loadExcelJS() {
