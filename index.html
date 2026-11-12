@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-69 (Job photos: Photos panel on office Jobs and worker My Jobs, loaded on demand; captions; locked once closed) -->
+<!-- BUILD MARKER: NB-70 (Photos: counts follow every refresh, open panels reload when photos change, closing a panel forgets it) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -6862,7 +6862,18 @@ let photoUploading = false;
 const PHOTO_MAX = 1600, PHOTO_THUMB = 400;
 
 function setPhotoCountsFromData(data) {
-  if (data && data.photoCounts && typeof data.photoCounts === 'object') photoCounts = data.photoCounts;
+  if (!data || !data.photoCounts || typeof data.photoCounts !== 'object') return;
+  photoCounts = data.photoCounts;
+  // Someone else added / removed photos since we last looked: reload an open
+  // panel straight away, and forget the copy for a closed one.
+  Object.keys(photoCache).forEach(k => {
+    const c = photoCache[k];
+    if (!c || c.loading || !c.photos || photoUploading) return;
+    if (c.photos.length === (photoCounts[k] || 0)) return;
+    if (openPhotoPanels.has('o|' + k) || openPhotoPanels.has('w|' + k)) loadJobPhotos(k, true);
+    else delete photoCache[k];
+  });
+  Object.keys(photoCounts).forEach(refreshPhotoButton);
 }
 
 function jobPhotoCount(id) { const c = photoCache[String(id)]; return c && c.photos && !c.loading ? c.photos.length : (photoCounts[String(id)] || 0); }
@@ -6920,6 +6931,8 @@ function toggleJobPhotos(ctx, id) {
   if (openPhotoPanels.has(key)) {
     openPhotoPanels.delete(key); el.style.display = 'none'; el.innerHTML = '';
     if (btn) btn.classList.remove('jc-btn-on');
+    const other = (ctx === 'o' ? 'w|' : 'o|') + id;
+    if (!openPhotoPanels.has(other) && !photoUploading) delete photoCache[String(id)];
     return;
   }
   openPhotoPanels.add(key);
