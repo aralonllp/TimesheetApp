@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-65 (Worker job list refreshes reliably on tablets: deferred refresh applied when picker closes, touch-safe close) -->
+<!-- BUILD MARKER: NB-66 (Schedule Creation: recurring jobs with a property; worker Log time fills WO, date and property) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -245,6 +245,8 @@ textarea { height: 60px; resize: none; }
 .notif-x { border: none; background: transparent; color: var(--color-text-secondary); font-size: 18px; line-height: 1; width: 28px; height: 28px; margin: -6px -6px -6px 2px; border-radius: 50%; cursor: pointer; font-family: inherit; flex-shrink: 0; }
 .notif-x:hover { background: var(--color-background-secondary); color: var(--color-text-primary); }
 .notif-msg { font-size: 13px; margin-top: 4px; white-space: pre-wrap; word-break: break-word; color: var(--color-text-primary); }
+#sched-rj-prop label { margin-top: 12px; }
+.rj-tag { font-size: 10px; padding: 0 6px; border-radius: 10px; font-weight: 700; background: #e3eefc; color: #1f4e8c; white-space: nowrap; }
 .pending-tag { font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 700; margin-left: 6px; background: #fff3cd; color: #856404; white-space: nowrap; }
 .jobs-toggle button.jobs-view-alert:not(.active) { color: #856404; }
 .office-subnav button .tab-badge { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 4px; border-radius: 9px; background: #f0ad00; color: #111; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }
@@ -798,8 +800,9 @@ textarea { height: 60px; resize: none; }
           <p class="section-heading" id="sched-modal-title">Add to schedule</p>
           <p class="text-muted" id="sched-modal-sub" style="font-size:12px;margin-top:2px;"></p>
           <label style="margin-top:14px;">Work order or status</label>
-          <select id="sched-item"></select>
+          <select id="sched-item" onchange="schedItemChanged()"></select>
           <p class="wo-hint" id="sched-item-hint"></p>
+          <div id="sched-rj-prop" class="rj-prop-wrap"></div>
           <label id="sched-note-label">Note (optional)</label>
           <textarea id="sched-note" placeholder="e.g. meet electrician 1pm, use side entrance"></textarea>
           <div id="sched-multi">
@@ -5228,6 +5231,11 @@ function ssSyncLabel(selId) {
   var sel = document.getElementById(selId);
   var inp = document.getElementById(selId + '_ssi');
   if (!sel || !inp) return;
+  if (!sel.options) {   // property picker (rjProp) — label comes from its hidden value
+    var hv = document.getElementById(selId + '_val');
+    inp.value = hv && hv.value ? propLabel(hv.value, 60) : '';
+    return;
+  }
   var opt = sel.options[sel.selectedIndex];
   inp.value = (opt && opt.value) ? opt.text : '';
 }
@@ -5593,8 +5601,8 @@ async function sendSchedules() {
         if (it.type === 'status') text = it.status;
         else if (it.type === 'note') text = it.note;
         else {
-          const j = jobs.find(x => String(x.id) === String(it.jobId));
-          text = it.jobId + (j && j.property ? ' · ' + j.property : '');
+          const sj = schedSlotJob(it);
+          text = it.jobId + (sj && sj.property ? ' · ' + sj.property : '');
         }
         if (it.note && it.type !== 'note') text += ' (' + it.note + ')';
         lines.push(dayLabel + ': ' + text);
@@ -6051,7 +6059,19 @@ function schedItemsFor(date, worker) {
   return schedule.filter(x => x.date === date && x.worker === worker).sort((a, b) => (a.sort - b.sort) || String(a.id).localeCompare(String(b.id)));
 }
 
+// Normalised view of a job slot, whether it points at a WO or a recurring job (RWO).
+// For recurring jobs the location comes from the slot itself.
+function schedSlotJob(it) {
+  const j = jobs.find(x => String(x.id) === String(it.jobId));
+  if (j) return { id: j.id, property: j.property || '', description: j.description || '', priority: j.priority || '', open: !!j.open, recurring: false, job: j };
+  const rj = recurringJobs.find(x => String(x.id) === String(it.jobId));
+  if (rj) return { id: rj.id, property: it.property || '', description: rj.description || '', priority: '', open: rj.active !== false && rj.active !== 'FALSE', recurring: true, job: rj };
+  return null;
+}
+
 function schedJobText(it) {
+  const sj = schedSlotJob(it);
+  if (sj && sj.recurring) return `<span class="sched-wo">${escWO(sj.id)}</span> <span class="rj-tag">Recurring</span> · ${escWO(sj.property || 'No property set')}${sj.description ? ' – ' + escWO(sj.description) : ''}`;
   const j = jobs.find(x => String(x.id) === String(it.jobId));
   if (!j) return `<span class="sched-wo">${escWO(it.jobId)}</span>`;
   return `<span class="sched-wo">${escWO(j.id)}</span>${j.priority ? ` <span class="prio prio-${escWO(j.priority)}" style="margin-left:2px;padding:0 6px;font-size:10px;">${escWO(j.priority)}</span>` : ''} · ${escWO(j.property || '')}${j.description ? ' – ' + escWO(j.description) : ''}${!j.open ? '<div style="margin-top:4px;"><span class="done-tag">✓ Job Completed</span></div>' : ''}`;
@@ -6116,7 +6136,10 @@ function renderScheduleInto(o) {
         if (it.type === 'job') {
           const j = jobs.find(x => String(x.id) === String(it.jobId));
           let hrsHtml = '', overCls = '';
-          if (o.readOnly) {
+          if (o.readOnly && !j) {
+            const logged = dayHrs[ds + '|' + w.name + '|' + String(it.jobId)] || 0;
+            hrsHtml = `<div class="sv-hours"><span>Logged: <strong>${logged ? fmtHrs(logged) + 'h' : '—'}</strong></span></div>`;
+          } else if (o.readOnly) {
             const logged = dayHrs[ds + '|' + w.name + '|' + String(it.jobId)] || 0;
             const total = jobTotals[String(it.jobId)] || 0;
             const est = j && j.estHours !== '' && j.estHours != null ? parseFloat(j.estHours) : null;
@@ -6149,14 +6172,32 @@ function fillSchedItemSelect(worker) {
   const openJobs = jobs.filter(j => j.open && expandAssignedTo(j.assignedTo).includes(worker)).slice().sort((a, b) => (parseInt(String(b.id).replace(/\D/g, ''), 10) || 0) - (parseInt(String(a.id).replace(/\D/g, ''), 10) || 0));
   let html = '<option value="">Select...</option>';
   if (openJobs.length) html += `<optgroup label="Open work orders assigned to ${escWO(worker)}">` + openJobs.map(j => `<option value="job:${escWO(j.id)}">${escWO(j.id)} · ${escWO(propLabel(j.property, 40))}${j.description ? ' · ' + escWO(j.description.length > 50 ? j.description.slice(0, 50) + '…' : j.description) : ''}</option>`).join('') + '</optgroup>';
+  const myRecurring = recurringJobs.filter(j => j.active !== false && j.active !== 'FALSE' && expandAssignedTo(j.assignedTo || '').includes(worker))
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+  if (myRecurring.length) html += `<optgroup label="Recurring jobs assigned to ${escWO(worker)}">` + myRecurring.map(j => `<option value="job:${escWO(j.id)}">${escWO(j.id)} · ${escWO(j.description || '')}</option>`).join('') + '</optgroup>';
   const pickable = scheduleStatuses.filter(st => st.name !== WEEKEND_COVER_STATUS);
   if (pickable.length) html += '<optgroup label="Statuses">' + pickable.map(st => `<option value="status:${escWO(st.name)}">${escWO(st.name)}</option>`).join('') + '</optgroup>';
   html += '<optgroup label="Other"><option value="note:">Free text (no WO)</option></optgroup>';
   sel.innerHTML = html;
-  document.getElementById('sched-item-hint').textContent = openJobs.length
-    ? 'Showing the ' + openJobs.length + ' open work order' + (openJobs.length === 1 ? '' : 's') + ' assigned to ' + worker + '.'
-    : 'No open work orders are assigned to ' + worker + ' — assign them on the WO Creation or Jobs tab first.';
+  document.getElementById('sched-item-hint').textContent = (openJobs.length || myRecurring.length)
+    ? 'Showing the ' + openJobs.length + ' open work order' + (openJobs.length === 1 ? '' : 's') + (myRecurring.length ? ' and ' + myRecurring.length + ' recurring job' + (myRecurring.length === 1 ? '' : 's') : '') + ' assigned to ' + worker + '.'
+    : 'No open work orders or recurring jobs are assigned to ' + worker + ' — assign them on the WO Creation, Jobs or Recurring Jobs tab first.';
   if (!sel._ssAttached) ssAttach('sched-item', 'Search WO, location or status...'); else ssRefresh('sched-item');
+}
+
+function schedItemChanged() {
+  const val = document.getElementById('sched-item').value;
+  const ref = val.indexOf('job:') === 0 ? val.slice(4) : '';
+  if (ref && isRecurringJobId(ref)) rjPropShow('sched-rj-prop');
+  else rjPropHide('sched-rj-prop');
+}
+
+function rjPropSetValue(cid, value) {
+  rjPropShow(cid);
+  const hidden = document.getElementById(cid + '_val');
+  const inp = document.getElementById(cid + '_ssi');
+  if (hidden) hidden.value = value || '';
+  if (inp) { inp.value = value ? propLabel(value, 60) : ''; inp.readOnly = true; }
 }
 
 function renderSchedChips(elId, options, selected) {
@@ -6184,6 +6225,8 @@ function openSchedModal(itemId, date, worker) {
     }
     sel.value = val;
     note.value = it.note || '';
+    schedItemChanged();
+    if (it.type === 'job' && isRecurringJobId(it.jobId)) rjPropSetValue('sched-rj-prop', it.property || '');
     const d = new Date(it.date + 'T00:00:00');
     document.getElementById('sched-modal-title').textContent = 'Edit schedule slot';
     document.getElementById('sched-modal-sub').textContent = it.worker + ' — ' + SCHED_DAY_NAMES[(d.getDay() + 6) % 7] + ' ' + fmtUKDate(it.date);
@@ -6193,6 +6236,7 @@ function openSchedModal(itemId, date, worker) {
     schedModalState = { id: null, date, worker };
     sel.value = '';
     note.value = '';
+    rjPropHide('sched-rj-prop');
     document.getElementById('sched-modal-title').textContent = 'Add to schedule';
     document.getElementById('sched-modal-sub').textContent = worker + ' — tick any other days to add the same slot to them.';
     document.getElementById('sched-multi').style.display = '';
@@ -6218,6 +6262,9 @@ function saveSchedModal() {
   const type = val.split(':')[0];
   const ref = val.slice(type.length + 1);
   if (type === 'note' && !note) { alert('Enter the text for this slot'); return; }
+  const isRecurring = type === 'job' && isRecurringJobId(ref);
+  const property = isRecurring ? rjPropGetValue('sched-rj-prop') : '';
+  if (isRecurring && !property) { alert('Please choose the property for this recurring job, so the worker knows where to go.'); return; }
   if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to change the schedule'); return; }
   isSavingSched = true;
   setSchedModalBusy(true);
@@ -6226,12 +6273,12 @@ function saveSchedModal() {
     const cur = schedule.find(x => x.id === schedModalState.id);
     if (!cur) { isSavingSched = false; closeSchedModal(); return; }
     previous = [{ ...cur }];
-    items = [{ id: cur.id, date: cur.date, worker: cur.worker, type, jobId: type === 'job' ? ref : '', status: type === 'status' ? ref : '', note, sort: cur.sort, updatedBy: officeUserInitials() }];
+    items = [{ id: cur.id, date: cur.date, worker: cur.worker, type, jobId: type === 'job' ? ref : '', status: type === 'status' ? ref : '', note, property, sort: cur.sort, updatedBy: officeUserInitials() }];
   } else {
     const days = Array.from(document.querySelectorAll('#sched-days .wo-chip.on')).map(b => b.getAttribute('data-v'));
     if (!days.length) { alert('Pick at least one day'); isSavingSched = false; setSchedModalBusy(false); return; }
     const base = Date.now();
-    items = days.map((d, i) => ({ id: newSchedId(), date: d, worker: schedModalState.worker, type, jobId: type === 'job' ? ref : '', status: type === 'status' ? ref : '', note, sort: base + i, createdBy: officeUserInitials() }));
+    items = days.map((d, i) => ({ id: newSchedId(), date: d, worker: schedModalState.worker, type, jobId: type === 'job' ? ref : '', status: type === 'status' ? ref : '', note, property, sort: base + i, createdBy: officeUserInitials() }));
   }
   items.forEach(it => {
     const i = schedule.findIndex(x => x.id === it.id);
@@ -6303,10 +6350,10 @@ function loadExcelJS() {
 function schedExportText(it) {
   if (it.type === 'status') return it.status;
   if (it.type === 'note') return it.note;
-  const j = jobs.find(x => String(x.id) === String(it.jobId));
+  const sj = schedSlotJob(it);
   const parts = [];
-  if (j && j.property) parts.push(j.property);
-  if (j && j.description) parts.push(j.description);
+  if (sj && sj.property) parts.push(sj.property);
+  if (sj && sj.description) parts.push(sj.description);
   if (it.note) parts.push(it.note);
   return parts.join(' - ') + (parts.length ? ' - ' : '') + it.jobId;
 }
@@ -6481,17 +6528,18 @@ function renderWorkerWeek() {
       } else if (it.type === 'note') {
         cells = `<td class="wk-wo">—</td><td colspan="3" class="wk-desc">${escWO(it.note)}</td><td></td><td></td>`;
       } else {
-        const j = jobs.find(x => String(x.id) === String(it.jobId));
-        const canLog = j && isJobLoggable(j) && ds <= today;
+        const sj = schedSlotJob(it);
+        const j = sj && !sj.recurring ? sj.job : null;
+        const canLog = sj && (sj.recurring ? sj.open : isJobLoggable(j)) && ds <= today;
         const logged = entries.filter(e => e.worker === currentWorker && String(e.jobId) === String(it.jobId) && normaliseDate(e.date) === ds)
           .reduce((t, e) => t + (parseFloat(e.hours) || 0), 0);
         cells = `
-          <td><div class="wk-wo">${escWO(it.jobId)}</div>${j && j.priority ? `<span class="prio prio-${escWO(j.priority)}" style="margin-left:0;display:inline-block;margin-top:3px;">${escWO(j.priority)}</span>` : ''}${j && !j.open ? '<div style="margin-top:4px;"><span class="done-tag">✓ Job Completed</span></div>' : ''}</td>
-          <td>${j ? escWO(j.property || '') : ''}</td>
-          <td class="wk-desc">${j ? escWO(j.description || '') : ''}</td>
+          <td><div class="wk-wo">${escWO(it.jobId)}</div>${sj && sj.recurring ? '<span class="rj-tag" style="display:inline-block;margin-top:3px;">Recurring</span>' : ''}${j && j.priority ? `<span class="prio prio-${escWO(j.priority)}" style="margin-left:0;display:inline-block;margin-top:3px;">${escWO(j.priority)}</span>` : ''}${j && !j.open ? '<div style="margin-top:4px;"><span class="done-tag">✓ Job Completed</span></div>' : ''}</td>
+          <td>${sj ? escWO(sj.property || '') : ''}</td>
+          <td class="wk-desc">${sj ? escWO(sj.description || '') : ''}</td>
           <td class="wk-note">${escWO(it.note || '')}</td>
           <td class="wk-logged">${logged ? fmtHrs(logged) + 'h' : '—'}</td>
-          <td style="text-align:right;">${canLog ? `<button class="btn btn-sm" onclick="logTimeForJob('${escWO(it.jobId)}', '${ds}')">Log time</button>` : ''}</td>`;
+          <td style="text-align:right;">${canLog ? `<button class="btn btn-sm" onclick="logTimeForJob('${escWO(it.jobId)}', '${ds}', ${escWO(JSON.stringify(sj && sj.recurring ? sj.property : ''))})">Log time</button>` : ''}</td>`;
       }
       rows += `<tr class="day-row">${k === 0 ? dayCell : ''}${cells}</tr>`;
     });
@@ -6639,7 +6687,7 @@ function renderWorkerJobRow(j, total, mine) {
     </div>`;
 }
 
-function logTimeForJob(id, date) {
+function logTimeForJob(id, date, property) {
   switchWorkerTab('log');
   if (date) {
     document.getElementById('entry-date').value = date;
@@ -6651,6 +6699,7 @@ function logTimeForJob(id, date) {
   if (sel.value !== id) { alert(id + ' is not available to log time against.'); return; }
   if (typeof ssSyncLabel === 'function') ssSyncLabel('job-select');
   fillJobDetails();
+  if (property && isRecurringJobId(id)) rjPropSetValue('rj-prop-worker', property);
   window.scrollTo({ top: 0, behavior: 'smooth' });
   document.getElementById('entry-hours').focus();
 }
