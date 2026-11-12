@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-64 (All ntfy pushes sent as high priority; P0 stays urgent) -->
+<!-- BUILD MARKER: NB-65 (Worker job list refreshes reliably on tablets: deferred refresh applied when picker closes, touch-safe close) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -1558,26 +1558,10 @@ async function pollJobs() {
     localStorage.setItem('absenceTypes', JSON.stringify(absenceTypes));
     localStorage.setItem('entries', JSON.stringify(entries));
     localStorage.setItem('workers', JSON.stringify(workers));
-    const currentJobSel = document.getElementById('job-select');
-    const savedJobId = currentJobSel ? currentJobSel.value : '';
-    const jobPickerOpen = document.getElementById('job-select_ssd')?.classList.contains('ss-open');
-    if (!jobPickerOpen) {
-      populateJobDropdown();
-      if (savedJobId && currentJobSel) {
-        currentJobSel.value = savedJobId;
-        if (!currentJobSel.value) currentJobSel.value = '';
-      }
-      // populateJobDropdown() calls ssRefresh() internally, but that runs
-      // BEFORE the value restore above — so the overlay's visible search
-      // text gets synced against the select's momentarily-blank state and
-      // never updated again. Re-sync it now the value is actually correct.
-      if (typeof ssSyncLabel === 'function') ssSyncLabel('job-select');
-    }
-    // If the picker is open (worker is actively searching/selecting a WO), the data
-    // above has still refreshed in the background — we just leave the dropdown UI
-    // alone this cycle so their in-progress search isn't wiped. It'll pick up the
-    // latest jobs list next time populateJobDropdown() runs (next poll, or once
-    // they close/reselect).
+    // If the worker is mid-search in the job picker, leave it alone and apply
+    // the new list the moment the picker closes (see ssClose).
+    if (jobPickerInUse()) jobListRefreshPending = true;
+    else refreshWorkerJobList();
     renderEntriesByDate();
     updateHoursPlaceholder();
     if (document.getElementById('worker-myjobs-section').style.display !== 'none') renderWorkerJobs();
@@ -1594,6 +1578,28 @@ async function pollJobs() {
 function expandAssignedTo(assignedTo) {
   if (!assignedTo) return [];
   return String(assignedTo).split(',').map(s => s.trim()).filter(Boolean);
+}
+
+let jobListRefreshPending = false;
+
+// Only counts as "in use" when the list is open AND the search box still has focus —
+// a tablet can leave the open class behind (keyboard dismissed, app backgrounded).
+function jobPickerInUse() {
+  const dd = document.getElementById('job-select_ssd');
+  const inp = document.getElementById('job-select_ssi');
+  return !!(dd && dd.classList.contains('ss-open') && inp && document.activeElement === inp && document.visibilityState === 'visible');
+}
+
+function refreshWorkerJobList() {
+  jobListRefreshPending = false;
+  const sel = document.getElementById('job-select');
+  if (!sel || !currentWorker) return;
+  const keep = sel.value;
+  const dd = document.getElementById('job-select_ssd');
+  if (dd && dd.classList.contains('ss-open')) ssClose('job-select');
+  populateJobDropdown();
+  if (keep) { sel.value = keep; if (!sel.value) sel.value = ''; }
+  if (typeof ssSyncLabel === 'function') ssSyncLabel('job-select');
 }
 
 function populateJobDropdown() {
@@ -5215,6 +5221,7 @@ function ssClose(selId) {
   inp.classList.remove('ss-open');
   dd.classList.remove('ss-open');
   ssSyncLabel(selId);
+  if (selId === 'job-select' && jobListRefreshPending) setTimeout(refreshWorkerJobList, 0);
 }
 
 function ssSyncLabel(selId) {
@@ -5320,8 +5327,8 @@ function ssRefresh(selId) {
   ssSyncLabel(selId);
 }
 
-// Close on outside click
-document.addEventListener('mousedown', function(e) {
+// Close on outside click / tap (pointerdown also covers touch, where mousedown can be skipped)
+document.addEventListener('pointerdown', function(e) {
   if (!e.target.closest('.ss-wrap')) {
     document.querySelectorAll('.ss-drop.ss-open').forEach(function(d) {
       ssClose(d.id.replace('_ssd', ''));
