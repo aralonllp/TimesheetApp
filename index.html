@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-66 (Schedule Creation: recurring jobs with a property; worker Log time fills WO, date and property) -->
+<!-- BUILD MARKER: NB-67 (Schedule Creation: "Other worker required?" — pick who to meet, shown clearly on every schedule view) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -246,6 +246,12 @@ textarea { height: 60px; resize: none; }
 .notif-x:hover { background: var(--color-background-secondary); color: var(--color-text-primary); }
 .notif-msg { font-size: 13px; margin-top: 4px; white-space: pre-wrap; word-break: break-word; color: var(--color-text-primary); }
 #sched-rj-prop label { margin-top: 12px; }
+#sched-with-wrap { margin-top: 12px; }
+label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; font-weight: 500; cursor: pointer; }
+.sched-with-check input { width: 16px; height: 16px; margin: 0; cursor: pointer; }
+#sched-with-box { margin-top: 8px; }
+.meet-flag { display: block; margin-top: 5px; padding: 3px 8px; border-radius: 6px; background: #fff3cd; color: #6b4f00; border: 1px solid #f0c94a; font-size: 11px; font-weight: 700; }
+.meet-flag span { font-weight: 400; }
 .rj-tag { font-size: 10px; padding: 0 6px; border-radius: 10px; font-weight: 700; background: #e3eefc; color: #1f4e8c; white-space: nowrap; }
 .pending-tag { font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 700; margin-left: 6px; background: #fff3cd; color: #856404; white-space: nowrap; }
 .jobs-toggle button.jobs-view-alert:not(.active) { color: #856404; }
@@ -803,6 +809,13 @@ textarea { height: 60px; resize: none; }
           <select id="sched-item" onchange="schedItemChanged()"></select>
           <p class="wo-hint" id="sched-item-hint"></p>
           <div id="sched-rj-prop" class="rj-prop-wrap"></div>
+          <div id="sched-with-wrap" style="display:none;">
+            <label class="wo-atp-check sched-with-check"><input type="checkbox" id="sched-with-tick" onchange="schedWithToggled()"> Other worker required?</label>
+            <div id="sched-with-box" style="display:none;">
+              <div class="wo-chips" id="sched-with-chips"></div>
+              <p class="wo-hint">Shown on this slot so they know who to meet. Add the job to the other worker's own schedule as well if they need it there.</p>
+            </div>
+          </div>
           <label id="sched-note-label">Note (optional)</label>
           <textarea id="sched-note" placeholder="e.g. meet electrician 1pm, use side entrance"></textarea>
           <div id="sched-multi">
@@ -5602,7 +5615,7 @@ async function sendSchedules() {
         else if (it.type === 'note') text = it.note;
         else {
           const sj = schedSlotJob(it);
-          text = it.jobId + (sj && sj.property ? ' · ' + sj.property : '');
+          text = it.jobId + (sj && sj.property ? ' · ' + sj.property : '') + (schedWithNames(it).length ? ' (meet ' + schedWithNames(it).join(', ') + ')' : '');
         }
         if (it.note && it.type !== 'note') text += ' (' + it.note + ')';
         lines.push(dayLabel + ': ' + text);
@@ -6151,7 +6164,7 @@ function renderScheduleInto(o) {
               ${over ? `<span class="over-flag" style="margin-left:0;">Over by ${fmtHrs(total - est)}h</span>` : ''}
             </div>`;
           }
-          return `<div class="sched-item${it._pending ? ' sched-pending' : ''}${overCls}"${click(it.id)}>${schedJobText(it)}${it.note ? `<div class="sched-note">${escWO(it.note)}</div>` : ''}${hrsHtml}</div>`;
+          return `<div class="sched-item${it._pending ? ' sched-pending' : ''}${overCls}"${click(it.id)}>${schedJobText(it)}${schedMeetFlagHtml(it)}${it.note ? `<div class="sched-note">${escWO(it.note)}</div>` : ''}${hrsHtml}</div>`;
         }
         return `<div class="sched-item${it._pending ? ' sched-pending' : ''}"${click(it.id)}>${escWO(it.note)}</div>`;
       }).join('');
@@ -6185,8 +6198,25 @@ function fillSchedItemSelect(worker) {
   if (!sel._ssAttached) ssAttach('sched-item', 'Search WO, location or status...'); else ssRefresh('sched-item');
 }
 
+function schedWithNames(it) { return String((it && it.withWorkers) || '').split(',').map(x => x.trim()).filter(Boolean); }
+
+function schedMeetFlagHtml(it) {
+  const names = schedWithNames(it);
+  return names.length ? `<div class="meet-flag">Meet: <span>${names.map(escWO).join(', ')}</span></div>` : '';
+}
+
+function renderSchedWithChips(forWorker, selected) {
+  const opts = scheduleOps().filter(w => w.name !== forWorker).map(w => ({ value: w.name, label: workerInitials(w.name) || w.name, title: w.name }));
+  renderSchedChips('sched-with-chips', opts, new Set(selected || []));
+}
+
+function schedWithToggled() {
+  document.getElementById('sched-with-box').style.display = document.getElementById('sched-with-tick').checked ? '' : 'none';
+}
+
 function schedItemChanged() {
   const val = document.getElementById('sched-item').value;
+  document.getElementById('sched-with-wrap').style.display = val.indexOf('job:') === 0 ? '' : 'none';
   const ref = val.indexOf('job:') === 0 ? val.slice(4) : '';
   if (ref && isRecurringJobId(ref)) rjPropShow('sched-rj-prop');
   else rjPropHide('sched-rj-prop');
@@ -6227,6 +6257,9 @@ function openSchedModal(itemId, date, worker) {
     note.value = it.note || '';
     schedItemChanged();
     if (it.type === 'job' && isRecurringJobId(it.jobId)) rjPropSetValue('sched-rj-prop', it.property || '');
+    renderSchedWithChips(it.worker, schedWithNames(it));
+    document.getElementById('sched-with-tick').checked = schedWithNames(it).length > 0;
+    schedWithToggled();
     const d = new Date(it.date + 'T00:00:00');
     document.getElementById('sched-modal-title').textContent = 'Edit schedule slot';
     document.getElementById('sched-modal-sub').textContent = it.worker + ' — ' + SCHED_DAY_NAMES[(d.getDay() + 6) % 7] + ' ' + fmtUKDate(it.date);
@@ -6237,6 +6270,10 @@ function openSchedModal(itemId, date, worker) {
     sel.value = '';
     note.value = '';
     rjPropHide('sched-rj-prop');
+    renderSchedWithChips(worker, []);
+    document.getElementById('sched-with-tick').checked = false;
+    schedWithToggled();
+    document.getElementById('sched-with-wrap').style.display = 'none';
     document.getElementById('sched-modal-title').textContent = 'Add to schedule';
     document.getElementById('sched-modal-sub').textContent = worker + ' — tick any other days to add the same slot to them.';
     document.getElementById('sched-multi').style.display = '';
@@ -6265,6 +6302,9 @@ function saveSchedModal() {
   const isRecurring = type === 'job' && isRecurringJobId(ref);
   const property = isRecurring ? rjPropGetValue('sched-rj-prop') : '';
   if (isRecurring && !property) { alert('Please choose the property for this recurring job, so the worker knows where to go.'); return; }
+  const withOn = type === 'job' && document.getElementById('sched-with-tick').checked;
+  const withWorkers = withOn ? Array.from(document.querySelectorAll('#sched-with-chips .wo-chip.on')).map(b => b.getAttribute('data-v')).join(', ') : '';
+  if (withOn && !withWorkers) { alert('Pick which worker they need to meet, or untick "Other worker required?"'); return; }
   if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to change the schedule'); return; }
   isSavingSched = true;
   setSchedModalBusy(true);
@@ -6273,12 +6313,12 @@ function saveSchedModal() {
     const cur = schedule.find(x => x.id === schedModalState.id);
     if (!cur) { isSavingSched = false; closeSchedModal(); return; }
     previous = [{ ...cur }];
-    items = [{ id: cur.id, date: cur.date, worker: cur.worker, type, jobId: type === 'job' ? ref : '', status: type === 'status' ? ref : '', note, property, sort: cur.sort, updatedBy: officeUserInitials() }];
+    items = [{ id: cur.id, date: cur.date, worker: cur.worker, type, jobId: type === 'job' ? ref : '', status: type === 'status' ? ref : '', note, property, withWorkers, sort: cur.sort, updatedBy: officeUserInitials() }];
   } else {
     const days = Array.from(document.querySelectorAll('#sched-days .wo-chip.on')).map(b => b.getAttribute('data-v'));
     if (!days.length) { alert('Pick at least one day'); isSavingSched = false; setSchedModalBusy(false); return; }
     const base = Date.now();
-    items = days.map((d, i) => ({ id: newSchedId(), date: d, worker: schedModalState.worker, type, jobId: type === 'job' ? ref : '', status: type === 'status' ? ref : '', note, property, sort: base + i, createdBy: officeUserInitials() }));
+    items = days.map((d, i) => ({ id: newSchedId(), date: d, worker: schedModalState.worker, type, jobId: type === 'job' ? ref : '', status: type === 'status' ? ref : '', note, property, withWorkers, sort: base + i, createdBy: officeUserInitials() }));
   }
   items.forEach(it => {
     const i = schedule.findIndex(x => x.id === it.id);
@@ -6354,6 +6394,7 @@ function schedExportText(it) {
   const parts = [];
   if (sj && sj.property) parts.push(sj.property);
   if (sj && sj.description) parts.push(sj.description);
+  if (schedWithNames(it).length) parts.push('MEET: ' + schedWithNames(it).join(', '));
   if (it.note) parts.push(it.note);
   return parts.join(' - ') + (parts.length ? ' - ' : '') + it.jobId;
 }
@@ -6537,7 +6578,7 @@ function renderWorkerWeek() {
           <td><div class="wk-wo">${escWO(it.jobId)}</div>${sj && sj.recurring ? '<span class="rj-tag" style="display:inline-block;margin-top:3px;">Recurring</span>' : ''}${j && j.priority ? `<span class="prio prio-${escWO(j.priority)}" style="margin-left:0;display:inline-block;margin-top:3px;">${escWO(j.priority)}</span>` : ''}${j && !j.open ? '<div style="margin-top:4px;"><span class="done-tag">✓ Job Completed</span></div>' : ''}</td>
           <td>${sj ? escWO(sj.property || '') : ''}</td>
           <td class="wk-desc">${sj ? escWO(sj.description || '') : ''}</td>
-          <td class="wk-note">${escWO(it.note || '')}</td>
+          <td class="wk-note">${schedMeetFlagHtml(it)}${escWO(it.note || '')}</td>
           <td class="wk-logged">${logged ? fmtHrs(logged) + 'h' : '—'}</td>
           <td style="text-align:right;">${canLog ? `<button class="btn btn-sm" onclick="logTimeForJob('${escWO(it.jobId)}', '${ds}', ${escWO(JSON.stringify(sj && sj.recurring ? sj.property : ''))})">Log time</button>` : ''}</td>`;
       }
