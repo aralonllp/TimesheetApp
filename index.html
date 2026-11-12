@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-71 (Photos: delete button disappears and tile shows Deleting… as soon as a delete is confirmed) -->
+<!-- BUILD MARKER: NB-73 (Photos: captions editable after upload again; caption boxes locked only while uploading) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -232,6 +232,8 @@ textarea { height: 60px; resize: none; }
 .photo-add-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .photo-pick { position: relative; overflow: hidden; cursor: pointer; }
 .photo-pick input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.photo-pick.photo-pick-off { opacity: 0.5; pointer-events: none; }
+.photo-pend-row input:disabled { background: var(--color-background-secondary); color: var(--color-text-secondary); }
 .photo-pending { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
 .photo-pend-row { display: flex; gap: 8px; align-items: center; }
 .photo-pend-row img { width: 56px; height: 42px; object-fit: cover; border-radius: 4px; flex-shrink: 0; }
@@ -6973,11 +6975,11 @@ function renderPhotosPanel(ctx, id) {
         ${pending.length ? '<div class="photo-pending">' + pending.map(pp => `
           <div class="photo-pend-row">
             <img src="${pp.preview}" alt="">
-            <input type="text" maxlength="500" placeholder="Caption (optional)" value="${escWO(pp.caption || '')}" oninput="setPendingCaption('${key}', '${pp.key}', this.value)">
-            <button class="photo-pend-x" title="Remove" onclick="removePendingPhoto('${key}', '${pp.key}')">×</button>
+            <input type="text" maxlength="500" placeholder="Caption (optional)" value="${escWO(pp.caption || '')}" oninput="setPendingCaption('${key}', '${pp.key}', this.value)"${photoUploading ? ' disabled' : ''}>
+            ${photoUploading ? '' : `<button class="photo-pend-x" title="Remove" onclick="removePendingPhoto('${key}', '${pp.key}')">×</button>`}
           </div>`).join('') + '</div>' : ''}
         <div class="photo-add-actions">
-          <label class="btn btn-sm photo-pick">Add photos<input type="file" accept="image/*" multiple onchange="pickJobPhotos('${key}', this)"></label>
+          <label class="btn btn-sm photo-pick${photoUploading ? ' photo-pick-off' : ''}">Add photos<input type="file" accept="image/*" multiple onchange="pickJobPhotos('${key}', this)"${photoUploading ? ' disabled' : ''}></label>
           ${pending.length ? `<button class="btn btn-sm btn-primary" id="${photoPanelId(ctx, k)}-up" onclick="uploadPendingPhotos('${key}')">Upload ${pending.length} photo${pending.length === 1 ? '' : 's'}</button>` : ''}
         </div>
       </div>`;
@@ -7039,10 +7041,12 @@ async function uploadPendingPhotos(key) {
   if (!list.length) return;
   if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to upload photos'); return; }
   photoUploading = true;
+  renderPhotoPanelsFor(id);
   const btn = () => document.getElementById(photoPanelId(ctx, id) + '-up');
   let done = 0, failed = [];
   for (const p of list) {
     const b = btn(); if (b) { b.disabled = true; b.textContent = 'Uploading ' + (done + 1) + ' of ' + list.length + '…'; }
+    p.caption = p.caption || '';
     try {
       const { img, url } = await readImageFile(p.file);
       const full = scaleImage(img, PHOTO_MAX, 0.78);
@@ -7101,15 +7105,17 @@ async function showViewerPhoto() {
   if (!photoViewer) return;
   const c = photoCache[photoViewer.jobId];
   const p = c.photos[photoViewer.index];
-  const img = document.getElementById('pv-img');
   const editable = photoJobEditable(photoViewer.jobId);
+  const img = document.getElementById('pv-img');
   document.getElementById('pv-count').textContent = photoViewer.jobId + ' · ' + (photoViewer.index + 1) + ' of ' + c.photos.length;
   document.getElementById('pv-meta').textContent = (p.by || '') + (p.at ? ' · ' + fmtNotifTime(p.at) : '');
   const cap = document.getElementById('pv-caption');
   cap.value = p.caption || '';
   cap.readOnly = !editable;
   cap.placeholder = editable ? 'Add a caption…' : '';
-  document.getElementById('pv-cap-save').style.display = editable ? '' : 'none';
+  const capBtn = document.getElementById('pv-cap-save');
+  capBtn.style.display = editable ? '' : 'none';
+  capBtn.disabled = false; capBtn.textContent = 'Save caption';
   document.getElementById('pv-prev').disabled = photoViewer.index === 0;
   document.getElementById('pv-next').disabled = photoViewer.index === c.photos.length - 1;
   img.src = p.thumb || '';
@@ -7122,6 +7128,23 @@ async function showViewerPhoto() {
   }
   if (photoViewer && c.photos[photoViewer.index] === p && p.full) img.src = p.full;
   img.classList.remove('pv-loading');
+}
+
+async function savePhotoCaption() {
+  if (!photoViewer) return;
+  const jobId = photoViewer.jobId;
+  const p = photoCache[jobId].photos[photoViewer.index];
+  const text = document.getElementById('pv-caption').value.trim();
+  if (text === (p.caption || '')) return;
+  const btn = document.getElementById('pv-cap-save');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    const res = await api('updateJobPhotoCaption', { id: p.id, caption: text, performedBy: photoWho() });
+    if (!res || !res.success) throw new Error((res && res.error) || 'Could not save the caption');
+    p.caption = res.caption;
+    renderPhotoPanelsFor(jobId);
+  } catch (err) { alert(err.message || err); }
+  btn.disabled = false; btn.textContent = 'Save caption';
 }
 
 function stepPhotoViewer(n) {
@@ -7137,23 +7160,6 @@ function closePhotoViewer() {
   photoViewer = null;
   document.getElementById('photo-viewer').style.display = 'none';
   document.getElementById('pv-img').src = '';
-}
-
-async function savePhotoCaption() {
-  if (!photoViewer) return;
-  const c = photoCache[photoViewer.jobId];
-  const p = c.photos[photoViewer.index];
-  const text = document.getElementById('pv-caption').value.trim();
-  if (text === (p.caption || '')) return;
-  const btn = document.getElementById('pv-cap-save');
-  btn.disabled = true; btn.textContent = 'Saving…';
-  try {
-    const res = await api('updateJobPhotoCaption', { id: p.id, caption: text, performedBy: photoWho() });
-    if (!res || !res.success) throw new Error('Could not save the caption');
-    p.caption = res.caption;
-    renderPhotoPanelsFor(photoViewer.jobId);
-  } catch (err) { alert(err.message || err); }
-  btn.disabled = false; btn.textContent = 'Save caption';
 }
 
 document.addEventListener('keydown', e => {
