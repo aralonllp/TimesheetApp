@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-59 (Schedule: saved/deleted slots can no longer vanish or reappear when a refresh overlaps the save) -->
+<!-- BUILD MARKER: NB-60 (Recurring jobs: Save changes button releases after a successful edit) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -3517,6 +3517,7 @@ async function sendRecurringUpdate(id, fields, okMsg, busyBtn, busyText) {
     const res = await api('saveRecurringJob', { job: Object.assign({ id }, fields), performedBy: officeUserName() });
     if (!res || res.id !== id) throw new Error(RJ_OLD_SCRIPT_MSG);
     Object.assign(j, fields);
+    release();
     localStorage.setItem('recurringJobs', JSON.stringify(recurringJobs));
     renderRecurringJobsList();
     populateJobDropdown();
