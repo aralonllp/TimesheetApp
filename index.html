@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-68 (Other worker required: job is added to the other worker's schedule too, each flagged to meet the other; linked edit / delete) -->
+<!-- BUILD MARKER: NB-69 (Job photos: Photos panel on office Jobs and worker My Jobs, loaded on demand; captions; locked once closed) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -217,6 +217,36 @@ textarea { height: 60px; resize: none; }
 .job-quick-btn { font-size: 12px; font-weight: 500; padding: 6px 12px; min-height: 34px; border-radius: 20px; border: 1px dashed var(--color-border-secondary); background: transparent; color: var(--color-text-primary); cursor: pointer; font-family: inherit; white-space: nowrap; }
 .job-quick-btn:hover { border-style: solid; border-color: var(--color-text-secondary); }
 .job-quick-btn.on { border-style: solid; border-color: var(--color-text-primary); background: var(--color-text-primary); color: #fff; }
+.job-photos { margin-top: 10px; border-top: 0.5px solid var(--color-border-tertiary); padding-top: 10px; }
+.photo-msg { font-size: 12px; padding: 4px 0 8px; }
+.photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-bottom: 10px; }
+.photo-tile { position: relative; border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-md); padding: 6px; background: var(--color-background-primary); }
+.photo-thumb { display: block; width: 100%; aspect-ratio: 4 / 3; border: none; padding: 0; border-radius: 6px; overflow: hidden; background: var(--color-background-secondary); cursor: zoom-in; }
+.photo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.photo-del { position: absolute; top: 10px; right: 10px; width: 28px; height: 28px; border-radius: 50%; border: none; background: rgba(0,0,0,0.6); color: #fff; font-size: 17px; line-height: 28px; cursor: pointer; font-family: inherit; }
+.photo-cap { font-size: 12px; margin-top: 6px; word-break: break-word; }
+.photo-meta { font-size: 11px; color: var(--color-text-secondary); margin-top: 2px; }
+.photo-lock { font-size: 12px; color: var(--color-text-secondary); font-style: italic; }
+.photo-add-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.photo-pick { position: relative; overflow: hidden; cursor: pointer; }
+.photo-pick input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.photo-pending { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.photo-pend-row { display: flex; gap: 8px; align-items: center; }
+.photo-pend-row img { width: 56px; height: 42px; object-fit: cover; border-radius: 4px; flex-shrink: 0; }
+.photo-pend-row input { flex: 1; font-size: 13px; }
+.photo-pend-x { border: none; background: transparent; font-size: 18px; color: var(--color-text-secondary); cursor: pointer; width: 32px; height: 32px; }
+.photo-viewer { position: fixed; inset: 0; z-index: 200; background: rgba(0,0,0,0.82); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.pv-box { background: var(--color-background-primary); border-radius: 12px; width: min(1100px, 100%); max-height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+.pv-top { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; font-size: 13px; font-weight: 600; }
+.pv-stage { position: relative; display: flex; align-items: center; justify-content: center; background: #111; min-height: 240px; }
+.pv-stage img { max-width: 100%; max-height: 68vh; display: block; transition: opacity 0.15s; }
+.pv-stage img.pv-loading { opacity: 0.6; filter: blur(1px); }
+.pv-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 44px; height: 64px; border: none; background: rgba(255,255,255,0.14); color: #fff; font-size: 34px; cursor: pointer; border-radius: 8px; }
+.pv-nav:disabled { opacity: 0.2; cursor: default; }
+#pv-prev { left: 8px; } #pv-next { right: 8px; }
+.pv-foot { padding: 10px 14px 12px; }
+.pv-foot input { flex: 1; font-size: 14px; }
+.pv-meta { font-size: 11px; color: var(--color-text-secondary); margin-top: 6px; }
 .job-comments { margin-top: 10px; border-top: 0.5px solid var(--color-border-tertiary); padding-top: 10px; }
 .jc-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
 .jc-item { background: var(--color-background-secondary); border-radius: var(--border-radius-md); padding: 8px 12px; border-left: 3px solid var(--color-text-secondary); }
@@ -1206,6 +1236,27 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
   </div>
 </div>
 
+      <div id="photo-viewer" class="photo-viewer" style="display:none;" onclick="if(event.target===this)closePhotoViewer()">
+        <div class="pv-box">
+          <div class="pv-top">
+            <span id="pv-count"></span>
+            <button class="btn btn-sm" onclick="closePhotoViewer()">Close</button>
+          </div>
+          <div class="pv-stage">
+            <button class="pv-nav" id="pv-prev" onclick="stepPhotoViewer(-1)" aria-label="Previous photo">&#8249;</button>
+            <img id="pv-img" alt="">
+            <button class="pv-nav" id="pv-next" onclick="stepPhotoViewer(1)" aria-label="Next photo">&#8250;</button>
+          </div>
+          <div class="pv-foot">
+            <div style="display:flex;gap:8px;align-items:center;">
+              <input type="text" id="pv-caption" maxlength="500" onkeydown="if(event.key==='Enter'){event.preventDefault();savePhotoCaption();}">
+              <button class="btn btn-sm btn-primary" id="pv-cap-save" onclick="savePhotoCaption()">Save caption</button>
+            </div>
+            <p class="pv-meta" id="pv-meta"></p>
+          </div>
+        </div>
+      </div>
+
 <script>
 // ══════════════════════════════════════════════════════════════════
 // ══════════════════════════════════════════════════════════════════
@@ -1580,7 +1631,8 @@ async function pollJobs() {
     else refreshWorkerJobList();
     renderEntriesByDate();
     updateHoursPlaceholder();
-    if (document.getElementById('worker-myjobs-section').style.display !== 'none') renderWorkerJobs();
+    const photoBusy = photoUploading || (document.activeElement && document.activeElement.closest && document.activeElement.closest('.job-photos'));
+    if (!photoBusy && document.getElementById('worker-myjobs-section').style.display !== 'none') renderWorkerJobs();
     if (document.getElementById('worker-myweek-section').style.display !== 'none') renderWorkerWeek();
     await flushQueue();
     if (syncQueue.length) {
@@ -2955,6 +3007,7 @@ function renderJobRow(j, hoursByJob) {
         </div>
         <div class="job-actions">
           ${sched}
+          ${photoButtonHtml('o', j)}
           <button class="btn btn-sm${openCommentJobs.has(String(j.id)) ? ' jc-btn-on' : ''}" id="jc-btn-${escWO(j.id)}" onclick="toggleJobComments('${escWO(j.id)}')">Comments${jobCommentCount(j.id) ? ' (' + jobCommentCount(j.id) + ')' : ''}</button>
           <button class="btn btn-sm" onclick="editJob('${escWO(j.id)}')">Edit</button>
           ${j.open
@@ -2967,6 +3020,7 @@ function renderJobRow(j, hoursByJob) {
       ${j.description ? `<p class="job-codes" style="margin-top:4px;"><span>Description:</span> <strong>${escWO(j.description)}</strong></p>` : ''}
       ${codesLine}
       <p style="margin-top:2px;font-size:11px;color:var(--color-text-secondary);">${assignedTxt ? 'Assigned: ' + escWO(assignedTxt) : 'Unassigned'}${j.reportedBy ? ' · Reported by ' + escWO(j.reportedBy) : ''}${j.reportedDate ? ' · ' + fmtUKDate(j.reportedDate) : ''}${j.updatedAt ? ' · Edited By: ' + (j.updatedBy ? escWO(j.updatedBy) : '—') + ' : ' + fmtUKDate(localDateStr(new Date(j.updatedAt))) : ''}${j.reopenedDate || j.reopenedBy ? ' · Reopened By: ' + (j.reopenedBy ? escWO(j.reopenedBy) : '—') + (j.reopenedDate ? ' : ' + fmtUKDate(j.reopenedDate) : '') : ''}${!j.open && (j.closedDate || j.closedBy) ? (jobPending(j) ? ' · Completed By: ' : ' · Closed By: ') + (j.closedBy ? escWO(j.closedBy) : '—') + (j.closedDate ? ' : ' + fmtUKDate(j.closedDate) : '') : ''}${!j.open && !jobPending(j) && j.confirmedBy && j.confirmedBy !== j.closedBy ? ' · Confirmed By: ' + escWO(j.confirmedBy) + (j.confirmedDate ? ' : ' + fmtUKDate(j.confirmedDate) : '') : ''}</p>
+      ${photoPanelHtml('o', j)}
       <div class="job-comments" id="job-comments-${escWO(j.id)}"${openCommentJobs.has(String(j.id)) ? '' : ' style="display:none;"'}>${openCommentJobs.has(String(j.id)) ? renderJobCommentsPanel(j.id) : ''}</div>
       <div class="job-entries" id="job-entries-${escWO(j.id)}"${expandedJobs.has(String(j.id)) ? '' : ' style="display:none;"'}>${expandedJobs.has(String(j.id)) ? renderJobEntriesTable(j.id) : ''}</div>
     </div>`;
@@ -6768,12 +6822,14 @@ function renderWorkerJobRow(j, total, mine) {
         <div class="job-actions">
           ${dates}
           ${isJobLoggable(j) ? `<button class="btn btn-sm" onclick="logTimeForJob('${escWO(j.id)}')">Log time</button>` : ''}
+          ${photoButtonHtml('w', j)}
           ${j.open ? `<button class="btn btn-sm" onclick="workerCloseJob('${escWO(j.id)}')">Close job</button>` : ''}
         </div>
       </div>
       ${j.description ? `<p class="job-codes" style="margin-top:4px;"><span>Description:</span> <strong>${escWO(j.description)}</strong></p>` : ''}
       <p class="job-codes">${parts.join('<span class="job-dates-sep">|</span>')}</p>
       <p style="margin-top:2px;font-size:11px;color:var(--color-text-secondary);">${others.length ? 'Also assigned: ' + escWO(others.map(workerInitials).join(', ')) + ' · ' : ''}Reported ${j.reportedDate ? fmtUKDate(j.reportedDate) : ''}${!j.open && j.closedDate ? ' · Closed ' + fmtUKDate(j.closedDate) + (j.closedBy ? ' by ' + escWO(j.closedBy) : '') : ''}${!j.open && isJobLoggable(j) ? ` · <span style="color:var(--color-text-warning, #9a4a00);font-weight:600;">Hours can be added until ${jobPending(j) && localDateStr(new Date()) > closedGraceEnd(j) ? 'the office signs it off' : fmtUKDate(closedGraceEnd(j))}</span>` : ''}</p>
+      ${photoPanelHtml('w', j)}
     </div>`;
 }
 
@@ -6793,6 +6849,298 @@ function logTimeForJob(id, date, property) {
   window.scrollTo({ top: 0, behavior: 'smooth' });
   document.getElementById('entry-hours').focus();
 }
+
+// ══════════════════════════════════════════════════════════════════
+//  JOB PHOTOS — only counts come with the normal data load; thumbnails
+//  are fetched when a job's Photos panel is opened, full size on tap.
+// ══════════════════════════════════════════════════════════════════
+let photoCounts = {};
+const photoCache = {};            // jobId -> { loading, photos: [], error }
+const openPhotoPanels = new Set(); // 'o|WO00016' (office) / 'w|WO00016' (worker)
+const photoPending = {};          // panelKey -> [{ key, file, preview, caption }]
+let photoUploading = false;
+const PHOTO_MAX = 1600, PHOTO_THUMB = 400;
+
+function setPhotoCountsFromData(data) {
+  if (data && data.photoCounts && typeof data.photoCounts === 'object') photoCounts = data.photoCounts;
+}
+
+function jobPhotoCount(id) { const c = photoCache[String(id)]; return c && c.photos && !c.loading ? c.photos.length : (photoCounts[String(id)] || 0); }
+
+function photoBtnLabel(id) { const n = jobPhotoCount(id); return 'Photos' + (n ? ' (' + n + ')' : ''); }
+
+function photoPanelId(ctx, id) { return 'photos-' + ctx + '-' + String(id).replace(/[^A-Za-z0-9_-]/g, '_'); }
+
+function photoPanelHtml(ctx, j) {
+  const key = ctx + '|' + j.id;
+  const open = openPhotoPanels.has(key);
+  return `<div class="job-photos" id="${photoPanelId(ctx, j.id)}"${open ? '' : ' style="display:none;"'}>${open ? renderPhotosPanel(ctx, j.id) : ''}</div>`;
+}
+
+function photoButtonHtml(ctx, j) {
+  const key = ctx + '|' + j.id;
+  return `<button class="btn btn-sm${openPhotoPanels.has(key) ? ' jc-btn-on' : ''}" id="${photoPanelId(ctx, j.id)}-btn" onclick="toggleJobPhotos('${ctx}', '${escWO(j.id)}')">${photoBtnLabel(j.id)}</button>`;
+}
+
+function refreshPhotoButton(id) {
+  ['o', 'w'].forEach(ctx => { const b = document.getElementById(photoPanelId(ctx, id) + '-btn'); if (b) b.textContent = photoBtnLabel(id); });
+}
+
+function renderPhotoPanelsFor(id) {
+  ['o', 'w'].forEach(ctx => {
+    if (!openPhotoPanels.has(ctx + '|' + id)) return;
+    const el = document.getElementById(photoPanelId(ctx, id));
+    if (el) el.innerHTML = renderPhotosPanel(ctx, id);
+  });
+  refreshPhotoButton(id);
+}
+
+async function loadJobPhotos(id, force) {
+  const k = String(id);
+  if (!force && photoCache[k] && (photoCache[k].loading || photoCache[k].photos)) return;
+  photoCache[k] = { loading: true, photos: photoCache[k] && photoCache[k].photos };
+  renderPhotoPanelsFor(k);
+  try {
+    if (!navigator.onLine || !SCRIPT_URL) throw new Error('You need to be online to view photos');
+    const res = await api('getJobPhotos', { jobId: k });
+    if (!res || !Array.isArray(res.photos)) throw new Error('The Apps Script is still running the previous version — publish a new deployment version.');
+    photoCache[k] = { loading: false, photos: res.photos };
+    photoCounts[k] = res.photos.length;
+  } catch (err) {
+    photoCache[k] = { loading: false, photos: null, error: err.message || String(err) };
+  }
+  renderPhotoPanelsFor(k);
+}
+
+function toggleJobPhotos(ctx, id) {
+  const key = ctx + '|' + id;
+  const el = document.getElementById(photoPanelId(ctx, id));
+  const btn = document.getElementById(photoPanelId(ctx, id) + '-btn');
+  if (!el) return;
+  if (openPhotoPanels.has(key)) {
+    openPhotoPanels.delete(key); el.style.display = 'none'; el.innerHTML = '';
+    if (btn) btn.classList.remove('jc-btn-on');
+    return;
+  }
+  openPhotoPanels.add(key);
+  el.style.display = '';
+  el.innerHTML = renderPhotosPanel(ctx, id);
+  if (btn) btn.classList.add('jc-btn-on');
+  loadJobPhotos(id);
+}
+
+function photoJobEditable(id) { const j = jobs.find(x => String(x.id) === String(id)); return !!(j && j.open); }
+
+function photoWho() { return currentOfficeUser ? (officeUserName() || 'Office') : (currentWorker || ''); }
+
+function renderPhotosPanel(ctx, id) {
+  const k = String(id);
+  const key = ctx + '|' + k;
+  const c = photoCache[k];
+  const editable = photoJobEditable(k);
+  let grid;
+  if (!c || (c.loading && !c.photos)) grid = '<p class="text-muted photo-msg">Loading photos…</p>';
+  else if (c.error) grid = `<p class="photo-msg" style="color:var(--color-text-error);">${escWO(c.error)} <button class="btn btn-sm" onclick="loadJobPhotos('${escWO(k)}', true)">Try again</button></p>`;
+  else if (!c.photos.length) grid = '<p class="text-muted photo-msg">No photos yet.</p>';
+  else grid = '<div class="photo-grid">' + c.photos.map(p => `
+      <div class="photo-tile">
+        <button class="photo-thumb" onclick="openPhotoViewer('${escWO(k)}', '${escWO(p.id)}')" title="View full size">${p.thumb ? `<img src="${p.thumb}" alt="">` : '<span class="text-muted" style="font-size:11px;">No preview</span>'}</button>
+        ${editable ? `<button class="photo-del" title="Delete photo" aria-label="Delete photo" onclick="deleteJobPhotoUI('${escWO(k)}', '${escWO(p.id)}')">×</button>` : ''}
+        <div class="photo-cap">${p.caption ? escWO(p.caption) : '<span class="text-muted">No caption</span>'}</div>
+        <div class="photo-meta">${escWO(p.by || '')}${p.at ? ' · ' + fmtNotifTime(p.at) : ''}</div>
+      </div>`).join('') + '</div>';
+  const pending = photoPending[key] || [];
+  const pj = jobs.find(x => String(x.id) === k);
+  const adder = !editable
+    ? `<p class="photo-lock">${pj && jobPending(pj) ? 'Photos are locked while this job is awaiting sign-off — reopen or send it back to add or remove photos.' : 'Photos are locked because this job is closed.'}</p>`
+    : `<div class="photo-add">
+        ${pending.length ? '<div class="photo-pending">' + pending.map(pp => `
+          <div class="photo-pend-row">
+            <img src="${pp.preview}" alt="">
+            <input type="text" maxlength="500" placeholder="Caption (optional)" value="${escWO(pp.caption || '')}" oninput="setPendingCaption('${key}', '${pp.key}', this.value)">
+            <button class="photo-pend-x" title="Remove" onclick="removePendingPhoto('${key}', '${pp.key}')">×</button>
+          </div>`).join('') + '</div>' : ''}
+        <div class="photo-add-actions">
+          <label class="btn btn-sm photo-pick">Add photos<input type="file" accept="image/*" multiple onchange="pickJobPhotos('${key}', this)"></label>
+          ${pending.length ? `<button class="btn btn-sm btn-primary" id="${photoPanelId(ctx, k)}-up" onclick="uploadPendingPhotos('${key}')">Upload ${pending.length} photo${pending.length === 1 ? '' : 's'}</button>` : ''}
+        </div>
+      </div>`;
+  return grid + adder;
+}
+
+function readImageFile(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => resolve({ img, url });
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Could not read ' + (file.name || 'that photo'))); };
+    img.src = url;
+  });
+}
+
+function scaleImage(img, max, quality) {
+  const w = img.naturalWidth, h = img.naturalHeight;
+  const r = Math.min(1, max / Math.max(w, h));
+  const cv = document.createElement('canvas');
+  cv.width = Math.max(1, Math.round(w * r)); cv.height = Math.max(1, Math.round(h * r));
+  const cx = cv.getContext('2d');
+  cx.fillStyle = '#fff'; cx.fillRect(0, 0, cv.width, cv.height);
+  cx.drawImage(img, 0, 0, cv.width, cv.height);
+  return { data: cv.toDataURL('image/jpeg', quality), width: cv.width, height: cv.height };
+}
+
+async function pickJobPhotos(key, input) {
+  const files = Array.from(input.files || []).filter(f => /^image\//.test(f.type) || /\.(jpe?g|png|heic|webp)$/i.test(f.name));
+  input.value = '';
+  if (!files.length) return;
+  const list = photoPending[key] = photoPending[key] || [];
+  for (const f of files) {
+    try {
+      const { img, url } = await readImageFile(f);
+      const preview = scaleImage(img, 160, 0.7).data;
+      URL.revokeObjectURL(url);
+      list.push({ key: 'p' + Date.now() + Math.random().toString(36).slice(2, 6), file: f, preview, caption: '' });
+    } catch (e) { alert(e.message); }
+  }
+  const [ctx, id] = [key.split('|')[0], key.slice(2)];
+  const el = document.getElementById(photoPanelId(ctx, id));
+  if (el) el.innerHTML = renderPhotosPanel(ctx, id);
+}
+
+function setPendingCaption(key, pkey, val) { const p = (photoPending[key] || []).find(x => x.key === pkey); if (p) p.caption = val; }
+
+function removePendingPhoto(key, pkey) {
+  photoPending[key] = (photoPending[key] || []).filter(x => x.key !== pkey);
+  const [ctx, id] = [key.split('|')[0], key.slice(2)];
+  const el = document.getElementById(photoPanelId(ctx, id));
+  if (el) el.innerHTML = renderPhotosPanel(ctx, id);
+}
+
+async function uploadPendingPhotos(key) {
+  if (photoUploading) return;
+  const [ctx, id] = [key.split('|')[0], key.slice(2)];
+  const list = (photoPending[key] || []).slice();
+  if (!list.length) return;
+  if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to upload photos'); return; }
+  photoUploading = true;
+  const btn = () => document.getElementById(photoPanelId(ctx, id) + '-up');
+  let done = 0, failed = [];
+  for (const p of list) {
+    const b = btn(); if (b) { b.disabled = true; b.textContent = 'Uploading ' + (done + 1) + ' of ' + list.length + '…'; }
+    try {
+      const { img, url } = await readImageFile(p.file);
+      const full = scaleImage(img, PHOTO_MAX, 0.78);
+      const thumb = scaleImage(img, PHOTO_THUMB, 0.7);
+      URL.revokeObjectURL(url);
+      const res = await api('uploadJobPhoto', { photo: { id: 'ph' + Date.now() + Math.random().toString(36).slice(2, 6), jobId: id, image: full.data, thumb: thumb.data, caption: (p.caption || '').trim(), width: full.width, height: full.height }, performedBy: photoWho() });
+      if (!res || !res.photo) throw new Error('The Apps Script is still running the previous version — publish a new deployment version.');
+      const c = photoCache[id] || (photoCache[id] = { loading: false, photos: [] });
+      if (!c.photos) c.photos = [];
+      c.photos.push({ ...res.photo, thumb: thumb.data });
+      photoCounts[id] = c.photos.length;
+      photoPending[key] = (photoPending[key] || []).filter(x => x.key !== p.key);
+      done++;
+    } catch (err) {
+      failed.push(err.message || String(err));
+      if (/closed|locked|previous version/i.test(err.message || '')) break;
+    }
+  }
+  photoUploading = false;
+  renderPhotoPanelsFor(id);
+  if (failed.length) alert((done ? done + ' photo' + (done === 1 ? '' : 's') + ' uploaded, but ' : '') + failed.length + ' could not be uploaded:\n\n' + failed[0]);
+  else setSyncStatus(currentOfficeUser ? 'office' : 'worker', 'synced', done + ' photo' + (done === 1 ? '' : 's') + ' added to ' + id);
+}
+
+async function deleteJobPhotoUI(jobId, photoId) {
+  if (!confirm('Delete this photo? This cannot be undone.')) return;
+  if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to delete photos'); return; }
+  try {
+    const res = await api('deleteJobPhoto', { id: photoId, performedBy: photoWho() });
+    if (!res || !res.success) throw new Error('Could not delete the photo');
+    const c = photoCache[jobId];
+    if (c && c.photos) c.photos = c.photos.filter(p => p.id !== photoId);
+    photoCounts[jobId] = c && c.photos ? c.photos.length : Math.max(0, (photoCounts[jobId] || 1) - 1);
+    renderPhotoPanelsFor(jobId);
+  } catch (err) { alert('Could not delete the photo: ' + (err.message || err)); }
+}
+
+// ── Full-size viewer ──
+let photoViewer = null;   // { jobId, index }
+async function openPhotoViewer(jobId, photoId) {
+  const c = photoCache[jobId];
+  if (!c || !c.photos) return;
+  const index = c.photos.findIndex(p => p.id === photoId);
+  if (index < 0) return;
+  photoViewer = { jobId, index };
+  document.getElementById('photo-viewer').style.display = 'flex';
+  showViewerPhoto();
+}
+
+async function showViewerPhoto() {
+  if (!photoViewer) return;
+  const c = photoCache[photoViewer.jobId];
+  const p = c.photos[photoViewer.index];
+  const img = document.getElementById('pv-img');
+  const editable = photoJobEditable(photoViewer.jobId);
+  document.getElementById('pv-count').textContent = photoViewer.jobId + ' · ' + (photoViewer.index + 1) + ' of ' + c.photos.length;
+  document.getElementById('pv-meta').textContent = (p.by || '') + (p.at ? ' · ' + fmtNotifTime(p.at) : '');
+  const cap = document.getElementById('pv-caption');
+  cap.value = p.caption || '';
+  cap.readOnly = !editable;
+  cap.placeholder = editable ? 'Add a caption…' : '';
+  document.getElementById('pv-cap-save').style.display = editable ? '' : 'none';
+  document.getElementById('pv-prev').disabled = photoViewer.index === 0;
+  document.getElementById('pv-next').disabled = photoViewer.index === c.photos.length - 1;
+  img.src = p.thumb || '';
+  img.classList.add('pv-loading');
+  if (!p.full) {
+    try {
+      const res = await api('getJobPhoto', { id: p.id });
+      if (res && res.image) p.full = res.image; else throw new Error((res && res.error) || 'Could not load the photo');
+    } catch (err) { document.getElementById('pv-meta').textContent = err.message || String(err); }
+  }
+  if (photoViewer && c.photos[photoViewer.index] === p && p.full) img.src = p.full;
+  img.classList.remove('pv-loading');
+}
+
+function stepPhotoViewer(n) {
+  if (!photoViewer) return;
+  const c = photoCache[photoViewer.jobId];
+  const i = photoViewer.index + n;
+  if (i < 0 || i >= c.photos.length) return;
+  photoViewer.index = i;
+  showViewerPhoto();
+}
+
+function closePhotoViewer() {
+  photoViewer = null;
+  document.getElementById('photo-viewer').style.display = 'none';
+  document.getElementById('pv-img').src = '';
+}
+
+async function savePhotoCaption() {
+  if (!photoViewer) return;
+  const c = photoCache[photoViewer.jobId];
+  const p = c.photos[photoViewer.index];
+  const text = document.getElementById('pv-caption').value.trim();
+  if (text === (p.caption || '')) return;
+  const btn = document.getElementById('pv-cap-save');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    const res = await api('updateJobPhotoCaption', { id: p.id, caption: text, performedBy: photoWho() });
+    if (!res || !res.success) throw new Error('Could not save the caption');
+    p.caption = res.caption;
+    renderPhotoPanelsFor(photoViewer.jobId);
+  } catch (err) { alert(err.message || err); }
+  btn.disabled = false; btn.textContent = 'Save caption';
+}
+
+document.addEventListener('keydown', e => {
+  if (!photoViewer) return;
+  if (e.key === 'Escape') closePhotoViewer();
+  else if (e.key === 'ArrowLeft' && e.target.tagName !== 'INPUT') stepPhotoViewer(-1);
+  else if (e.key === 'ArrowRight' && e.target.tagName !== 'INPUT') stepPhotoViewer(1);
+});
 
 // ══════════════════════════════════════════════════════════════════
 //  WO CREATION
@@ -6821,6 +7169,7 @@ let isCreatingWO = false;
 var woCostCodes = [];
 
 function setCodeListsFromData(data) {
+  setPhotoCountsFromData(data);
   setNotificationsFromData(data);
   if (Array.isArray(data.jobComments)) jobComments = data.jobComments.map(c => ({ ...c, jobId: String(c.jobId || ''), text: String(c.text == null ? '' : c.text) }));
   if (typeof data.ntfyTopicPrefix === 'string') {
