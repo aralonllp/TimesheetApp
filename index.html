@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-70 (Photos: counts follow every refresh, open panels reload when photos change, closing a panel forgets it) -->
+<!-- BUILD MARKER: NB-71 (Photos: delete button disappears and tile shows Deleting… as soon as a delete is confirmed) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -223,6 +223,8 @@ textarea { height: 60px; resize: none; }
 .photo-tile { position: relative; border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-md); padding: 6px; background: var(--color-background-primary); }
 .photo-thumb { display: block; width: 100%; aspect-ratio: 4 / 3; border: none; padding: 0; border-radius: 6px; overflow: hidden; background: var(--color-background-secondary); cursor: zoom-in; }
 .photo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.photo-tile.photo-deleting { opacity: 0.45; pointer-events: none; }
+.photo-deleting-tag { position: absolute; top: 12px; left: 12px; z-index: 1; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px; background: rgba(0,0,0,0.7); color: #fff; }
 .photo-del { position: absolute; top: 10px; right: 10px; width: 28px; height: 28px; border-radius: 50%; border: none; background: rgba(0,0,0,0.6); color: #fff; font-size: 17px; line-height: 28px; cursor: pointer; font-family: inherit; }
 .photo-cap { font-size: 12px; margin-top: 6px; word-break: break-word; }
 .photo-meta { font-size: 11px; color: var(--color-text-secondary); margin-top: 2px; }
@@ -6868,7 +6870,7 @@ function setPhotoCountsFromData(data) {
   // panel straight away, and forget the copy for a closed one.
   Object.keys(photoCache).forEach(k => {
     const c = photoCache[k];
-    if (!c || c.loading || !c.photos || photoUploading) return;
+    if (!c || c.loading || !c.photos || photoUploading || c.photos.some(p => p._deleting)) return;
     if (c.photos.length === (photoCounts[k] || 0)) return;
     if (openPhotoPanels.has('o|' + k) || openPhotoPanels.has('w|' + k)) loadJobPhotos(k, true);
     else delete photoCache[k];
@@ -6956,9 +6958,10 @@ function renderPhotosPanel(ctx, id) {
   else if (c.error) grid = `<p class="photo-msg" style="color:var(--color-text-error);">${escWO(c.error)} <button class="btn btn-sm" onclick="loadJobPhotos('${escWO(k)}', true)">Try again</button></p>`;
   else if (!c.photos.length) grid = '<p class="text-muted photo-msg">No photos yet.</p>';
   else grid = '<div class="photo-grid">' + c.photos.map(p => `
-      <div class="photo-tile">
+      <div class="photo-tile${p._deleting ? ' photo-deleting' : ''}">
+        ${p._deleting ? '<span class="photo-deleting-tag">Deleting…</span>' : ''}
         <button class="photo-thumb" onclick="openPhotoViewer('${escWO(k)}', '${escWO(p.id)}')" title="View full size">${p.thumb ? `<img src="${p.thumb}" alt="">` : '<span class="text-muted" style="font-size:11px;">No preview</span>'}</button>
-        ${editable ? `<button class="photo-del" title="Delete photo" aria-label="Delete photo" onclick="deleteJobPhotoUI('${escWO(k)}', '${escWO(p.id)}')">×</button>` : ''}
+        ${editable && !p._deleting ? `<button class="photo-del" title="Delete photo" aria-label="Delete photo" onclick="deleteJobPhotoUI('${escWO(k)}', '${escWO(p.id)}')">×</button>` : ''}
         <div class="photo-cap">${p.caption ? escWO(p.caption) : '<span class="text-muted">No caption</span>'}</div>
         <div class="photo-meta">${escWO(p.by || '')}${p.at ? ' · ' + fmtNotifTime(p.at) : ''}</div>
       </div>`).join('') + '</div>';
@@ -7067,14 +7070,19 @@ async function uploadPendingPhotos(key) {
 async function deleteJobPhotoUI(jobId, photoId) {
   if (!confirm('Delete this photo? This cannot be undone.')) return;
   if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to delete photos'); return; }
+  const target = ((photoCache[jobId] || {}).photos || []).find(p => p.id === photoId);
+  if (target) { if (target._deleting) return; target._deleting = true; renderPhotoPanelsFor(jobId); }
   try {
     const res = await api('deleteJobPhoto', { id: photoId, performedBy: photoWho() });
-    if (!res || !res.success) throw new Error('Could not delete the photo');
+    if (!res || !res.success) throw new Error((res && res.error) || 'Could not delete the photo');
     const c = photoCache[jobId];
     if (c && c.photos) c.photos = c.photos.filter(p => p.id !== photoId);
     photoCounts[jobId] = c && c.photos ? c.photos.length : Math.max(0, (photoCounts[jobId] || 1) - 1);
     renderPhotoPanelsFor(jobId);
-  } catch (err) { alert('Could not delete the photo: ' + (err.message || err)); }
+  } catch (err) {
+    if (target) { target._deleting = false; renderPhotoPanelsFor(jobId); }
+    alert('Could not delete the photo: ' + (err.message || err));
+  }
 }
 
 // ── Full-size viewer ──
