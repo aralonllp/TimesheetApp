@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-77 (Worker job list: WOs newest first) -->
+<!-- BUILD MARKER: NB-78 (Holding WOs: workers raise temporary WOs, office completes or links them) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -150,6 +150,10 @@ textarea { height: 60px; resize: none; }
 .wo-section label.wo-atp-check { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; font-weight: 500; color: var(--color-text-primary); cursor: pointer; }
 .wo-card .wo-atp-check input { width: 16px; height: 16px; min-height: 0; margin: 0; cursor: pointer; }
 .wo-atp-num { max-width: 280px; margin-top: 2px; }
+.hold-tag { font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 700; margin-left: 6px; background: #ffe8cc; color: #8a4b00; white-space: nowrap; }
+.entry-row.hold-row { border-left: 3px solid #f0a040; background: #fffaf3; }
+.hold-raise { background: none; border: none; padding: 0; margin-top: 8px; font-size: 12px; color: var(--color-text-info, #185fa5); text-decoration: underline; cursor: pointer; }
+.hold-banner { margin-top: 8px; padding: 8px 12px; border-radius: var(--border-radius-md); background: #fffaf3; border: 1px solid #f0c890; font-size: 12px; color: #8a4b00; }
 .atp-tag { font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 700; margin-left: 6px; background: #e8e3fb; color: #4b2aa8; white-space: nowrap; }
 .wo-row { display: grid; gap: 14px; }
 .wo-row-2 { grid-template-columns: 1fr 1fr; }
@@ -650,6 +654,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
             <p class="text-muted" id="job-desc"></p>
             <p class="text-muted" id="job-assigned" style="font-size:12px;margin-top:4px;"></p>
           </div>
+          <button type="button" class="hold-raise" onclick="openHoldModal()">Job not listed? Raise a temporary WO</button>
           <div class="grid2">
             <div>
               <label>Date</label>
@@ -740,6 +745,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
             </div>
             <span class="wo-id-pill" id="wo-next-id">—</span>
           </div>
+          <div class="hold-banner" id="wo-hold-banner" style="display:none;"></div>
 
           <div class="wo-section">
             <p class="wo-section-title">Job details</p>
@@ -849,6 +855,20 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
           </div>
           <div class="sched-legend" id="sv-legend"></div>
           <div class="sched-scroll sched-ro"><table class="sched-grid" id="sv-grid"></table></div>
+        </div>
+      </div>
+
+      <div id="hold-link-modal" class="sched-modal" style="display:none;" onmousedown="if(event.target===this)closeHoldLinkModal()">
+        <div class="card sched-modal-box">
+          <p class="section-heading">Link <span id="hold-link-id"></span> to an existing WO</p>
+          <p class="text-muted" id="hold-link-info" style="font-size:12px;margin-top:2px;"></p>
+          <label style="margin-top:14px;">Existing work order</label>
+          <select id="hold-link-select"></select>
+          <p class="wo-hint">All hours, photos, comments and schedule slots on the temporary WO move to the WO you pick, and the temporary WO is removed.</p>
+          <div class="form-footer" style="display:flex;gap:8px;justify-content:flex-end;margin-top:1.25rem;">
+            <button class="btn" onclick="closeHoldLinkModal()">Cancel</button>
+            <button class="btn btn-primary" id="hold-link-confirm" onclick="confirmHoldLink()">Link</button>
+          </div>
         </div>
       </div>
 
@@ -1249,6 +1269,20 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 </div>
 
 <!-- ── OVERTIME MODAL ── -->
+<div id="hold-modal" class="sched-modal" style="display:none;" onmousedown="if(event.target===this)closeHoldModal()">
+  <div class="card sched-modal-box">
+    <p class="section-heading">Raise a temporary WO</p>
+    <p class="text-muted" style="font-size:12px;margin-top:2px;">For urgent work the office hasn't raised yet. You can log your hours against it straight away and the office will turn it into a proper WO.</p>
+    <div id="rj-prop-hold" class="rj-prop-wrap" style="margin-top:12px;"></div>
+    <label>What was done / needs doing <span style="color:var(--color-text-error)">*</span></label>
+    <textarea id="hold-desc" maxlength="500" placeholder="e.g. Burst pipe under kitchen sink, isolated and replaced section"></textarea>
+    <div class="form-footer" style="display:flex;gap:8px;justify-content:flex-end;margin-top:1.25rem;">
+      <button class="btn" onclick="closeHoldModal()">Cancel</button>
+      <button class="btn btn-primary" id="hold-save" onclick="raiseHoldingJob()">Raise temporary WO</button>
+    </div>
+  </div>
+</div>
+
 <div id="overtime-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:100;display:none;align-items:center;justify-content:center;">
   <div style="background:var(--color-background-primary);border-radius:var(--border-radius-lg);padding:1.5rem;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.18);">
     <p style="font-size:15px;font-weight:500;margin-bottom:0.5rem;">⏱ Overtime request</p>
@@ -1712,14 +1746,14 @@ function woNumberDesc(a, b) {
 
 function populateJobDropdown() {
   const sel = document.getElementById('job-select');
-  const open = jobs.filter(j => j.open).sort(woNumberDesc);
+  const open = jobs.filter(j => j.open).sort((a, b) => (jobIsHolding(b) - jobIsHolding(a)) || woNumberDesc(a, b));
   let html = '<option value="">Select a job...</option>';
 
   const assignedRecurring = recurringJobs.filter(j => j.active !== false && j.active !== 'FALSE' && expandAssignedTo(j.assignedTo || '').includes(currentWorker));
   const mine = open.filter(j => expandAssignedTo(j.assignedTo).includes(currentWorker));
   if (mine.length) {
     html += `<optgroup label="Your assigned jobs">`;
-    html += mine.map(j => `<option value="${j.id}">${j.id} · ${propLabel(j.property) ? propLabel(j.property) + ' · ' : ''}${j.description && j.description.length > 60 ? j.description.slice(0, 60) + '…' : (j.description || '')}</option>`).join('');
+    html += mine.map(j => `<option value="${j.id}">${j.id}${jobIsHolding(j) ? ' (temporary)' : ''} · ${propLabel(j.property) ? propLabel(j.property) + ' · ' : ''}${j.description && j.description.length > 60 ? j.description.slice(0, 60) + '…' : (j.description || '')}</option>`).join('');
     html += `</optgroup>`;
   }
   if (assignedRecurring.length) {
@@ -2892,7 +2926,7 @@ function renderJobsList() {
   document.getElementById('jobs-view-open').textContent = 'Open (' + (narrowed ? openJobs.length + ' of ' + totOpen : totOpen) + ')';
   document.getElementById('jobs-view-closed').textContent = 'Closed (' + (narrowed ? closedJobs.length + ' of ' + totClosed : totClosed) + ')';
   document.getElementById('jobs-view-all').textContent = 'All (' + (narrowed ? filtered.length + ' of ' + jobs.length : jobs.length) + ')';
-  const list = (jobsView === 'all' ? filtered : jobsView === 'open' ? openJobs : jobsView === 'pending' ? pendingJobs : closedJobs).slice().sort((a, b) => woNum(b.id) - woNum(a.id));
+  const list = (jobsView === 'all' ? filtered : jobsView === 'open' ? openJobs : jobsView === 'pending' ? pendingJobs : closedJobs).slice().sort((a, b) => (jobIsHolding(b) - jobIsHolding(a)) || woNum(b.id) - woNum(a.id));
   const listEst = list.reduce((t, j) => t + (parseFloat(j.estHours) || 0), 0);
   const listAct = list.reduce((t, j) => t + (hoursByJob[String(j.id)] || 0), 0);
   el.innerHTML = list.length
@@ -2955,8 +2989,9 @@ function jobPending(j) { return !!j && !j.open && (j.pendingClose === true || St
 function updateJobsTabBadge() {
   const btn = document.getElementById('otab-jobs');
   if (!btn) return;
-  const n = jobs.filter(jobPending).length;
-  btn.innerHTML = 'Jobs' + (n ? '<span class="tab-badge" title="' + n + ' awaiting sign-off">' + n + '</span>' : '');
+  const n = jobs.filter(j => jobPending(j) || jobIsHolding(j)).length;
+  const h = jobs.filter(jobIsHolding).length;
+  btn.innerHTML = 'Jobs' + (n ? '<span class="tab-badge" title="' + (n - h) + ' awaiting sign-off, ' + h + ' holding WO' + (h === 1 ? '' : 's') + '">' + n + '</span>' : '');
 }
 
 let isSigningOffJob = false;
@@ -3033,12 +3068,14 @@ function renderJobRow(j, hoursByJob) {
   const sched = (j.schedStart || j.schedEnd)
     ? `<span class="job-dates"><span>Start Date:</span> <strong>${j.schedStart ? fmtUKDate(j.schedStart) : '—'}</strong><span class="job-dates-sep">|</span><span>End Date:</span> <strong>${j.schedEnd ? fmtUKDate(j.schedEnd) : '—'}</strong></span>`
     : '';
+  const hold = jobIsHolding(j);
   return `
-    <div class="entry-row">
+    <div class="entry-row${hold ? ' hold-row' : ''}">
       <div class="row-between" style="gap:12px;">
         <div>
           <button class="job-expand${expandedJobs.has(String(j.id)) ? ' open' : ''}" title="Show time entries" aria-expanded="${expandedJobs.has(String(j.id))}" onclick="toggleJobEntries('${escWO(j.id)}', this)"><svg viewBox="0 0 12 12" aria-hidden="true"><path d="M4 2l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
           <span style="font-size:14px;font-weight:700;">${j.id}</span>
+          ${hold ? `<span class="hold-tag" title="Raised by ${escWO(j.reportedBy || 'a worker')} — complete it as a new WO or link it to an existing one">Holding WO</span>` : ''}
           ${j.priority ? `<span class="prio prio-${escWO(j.priority)}">${escWO(j.priority)}</span>` : ''}
           ${jobPending(j) ? '<span class="pending-tag">Awaiting sign-off</span>' : !j.open ? '<span class="closed-tag">Closed</span>' : ''}
           ${jobHasAtp(j) ? `<span class="atp-tag" title="ATP ${escWO(j.atpNumber || '')}">${j.atpNumber ? (/^ATP/i.test(j.atpNumber) ? escWO(j.atpNumber) : 'ATP ' + escWO(j.atpNumber)) : 'ATP'}</span>` : ''}
@@ -3049,12 +3086,12 @@ function renderJobRow(j, hoursByJob) {
           ${sched}
           ${photoButtonHtml('o', j)}
           <button class="btn btn-sm${openCommentJobs.has(String(j.id)) ? ' jc-btn-on' : ''}" id="jc-btn-${escWO(j.id)}" onclick="toggleJobComments('${escWO(j.id)}')">Comments${jobCommentCount(j.id) ? ' (' + jobCommentCount(j.id) + ')' : ''}</button>
-          <button class="btn btn-sm" onclick="editJob('${escWO(j.id)}')">Edit</button>
+          ${hold ? `<button class="btn btn-sm" onclick="openHoldLinkModal('${escWO(j.id)}')">Link to existing WO</button><button class="btn btn-sm btn-primary" onclick="completeHoldingJob('${escWO(j.id)}')">Complete as new WO</button>` : `<button class="btn btn-sm" onclick="editJob('${escWO(j.id)}')">Edit</button>
           ${j.open
             ? `<button class="btn btn-sm" onclick="toggleJobOpen('${escWO(j.id)}', false)">Close</button>`
             : jobPending(j)
               ? `<button class="btn btn-sm" id="jsb-${escWO(j.id)}" onclick="sendBackJob('${escWO(j.id)}')">Send back</button><button class="btn btn-sm btn-primary" id="jcc-${escWO(j.id)}" onclick="confirmJobClose('${escWO(j.id)}')">Confirm closed</button>`
-              : `<button class="btn btn-sm" onclick="toggleJobOpen('${escWO(j.id)}', true)">Reopen</button>`}
+              : `<button class="btn btn-sm" onclick="toggleJobOpen('${escWO(j.id)}', true)">Reopen</button>`}`}
         </div>
       </div>
       ${j.description ? `<p class="job-codes" style="margin-top:4px;"><span>Description:</span> <strong>${escWO(j.description)}</strong></p>` : ''}
@@ -6985,6 +7022,7 @@ function renderWorkerJobRow(j, total, mine) {
       <div class="row-between" style="gap:12px;flex-wrap:wrap;">
         <div>
           <span style="font-size:14px;font-weight:700;">${escWO(j.id)}</span>
+          ${jobIsHolding(j) ? '<span class="hold-tag" title="Raised by a worker — the office will turn this into a proper WO">Temporary</span>' : ''}
           ${j.priority ? `<span class="prio prio-${escWO(j.priority)}">${escWO(j.priority)}</span>` : ''}
           ${jobHasAtp(j) ? '<span class="atp-tag">ATP</span>' : ''}
           <span class="job-codes" style="margin-left:10px;"><span>Location:</span> <strong>${escWO(propLabel(j.property, 50))}</strong></span>
@@ -7599,14 +7637,24 @@ function woSuggestedEnd(code, startStr) {
 function initWOForm() {
   const editing = editingJobId ? jobs.find(j => j.id === editingJobId) : null;
   if (editingJobId && !editing) editingJobId = null;
-  document.getElementById('wo-form-title').textContent = editing ? 'Edit work order' : 'New work order';
-  document.getElementById('wo-create-btn').textContent = editing ? 'Save changes' : 'Create work order';
-  document.getElementById('wo-clear-btn').textContent = editing ? 'Cancel' : 'Clear';
-  document.getElementById('otab-wocreate').textContent = editing ? 'Edit ' + editing.id : 'WO Creation';
+  const holding = holdingJobId ? jobs.find(j => j.id === holdingJobId && jobIsHolding(j)) : null;
+  if (holdingJobId && !holding) holdingJobId = null;
+  document.getElementById('wo-form-title').textContent = editing ? 'Edit work order' : holding ? 'Complete ' + holding.id + ' as a new work order' : 'New work order';
+  document.getElementById('wo-create-btn').textContent = editing ? 'Save changes' : holding ? 'Create WO from ' + holding.id : 'Create work order';
+  document.getElementById('wo-clear-btn').textContent = editing || holding ? 'Cancel' : 'Clear';
+  document.getElementById('otab-wocreate').textContent = editing ? 'Edit ' + editing.id : holding ? 'Complete ' + holding.id : 'WO Creation';
   document.getElementById('wo-next-id').textContent = editing ? editing.id : nextWOId();
-  const repDate = editing ? (editing.reportedDate || '') : localDateStr(new Date());
-  const repBy = editing ? (editing.reportedBy || '') : officeUserInitials();
-  document.getElementById('wo-meta').textContent = (editing ? 'Reported ' : 'Reporting ') + (repDate ? fmtUKDate(repDate) : '—') + (repBy ? ' by ' + repBy : '');
+  const repDate = editing ? (editing.reportedDate || '') : holding ? (holding.reportedDate || '') : localDateStr(new Date());
+  const repBy = editing ? (editing.reportedBy || '') : holding ? (holding.reportedBy || '') : officeUserInitials();
+  document.getElementById('wo-meta').textContent = (editing || holding ? 'Reported ' : 'Reporting ') + (repDate ? fmtUKDate(repDate) : '—') + (repBy ? ' by ' + repBy : '');
+  const banner = document.getElementById('wo-hold-banner');
+  if (banner) {
+    banner.style.display = holding ? '' : 'none';
+    if (holding) {
+      const hrs = entries.filter(e => String(e.jobId) === holding.id).reduce((t, e) => t + (parseFloat(e.hours) || 0), 0);
+      banner.textContent = 'Temporary WO raised by ' + (holding.reportedBy || 'a worker') + (holding.reportedDate ? ' on ' + fmtUKDate(holding.reportedDate) : '') + ': "' + holding.description + '". ' + (hrs ? fmtHrs(hrs) + 'h logged so far will move to the new WO.' : 'No hours logged against it yet.');
+    }
+  }
   const startEl = document.getElementById('wo-sched-start');
   if (!startEl.value && document.getElementById('wo-priority').value !== 'P5') startEl.value = localDateStr(new Date());
 
@@ -7705,6 +7753,7 @@ function woStartChanged() {
 }
 
 let editingJobId = null;
+let holdingJobId = null;
 
 function ensureSelectOption(selId, value, label) {
   const sel = document.getElementById(selId);
@@ -7718,6 +7767,7 @@ function editJob(id) {
   const job = jobs.find(j => j.id === id);
   if (!job) return;
   editingJobId = id;
+  holdingJobId = null;
   switchOfficeTab('wocreate');
   document.getElementById('wo-description').value = job.description || '';
 
@@ -7749,8 +7799,9 @@ function editJob(id) {
 }
 
 function woClearOrCancel() {
-  if (editingJobId) {
+  if (editingJobId || holdingJobId) {
     editingJobId = null;
+    holdingJobId = null;
     resetWOForm();
     switchOfficeTab('jobs');
   } else {
@@ -7774,6 +7825,140 @@ function resetWOForm() {
   document.getElementById('wo-sched-end').value = '';
   woSelectedWorkers = new Set();
   initWOForm();
+}
+
+// ── Holding (temporary) WOs ───────────────────────────────────────
+function jobIsHolding(j) { return !!j && (j.holding === true || String(j.holding).toUpperCase() === 'TRUE'); }
+
+function openHoldModal() {
+  rjPropHide('rj-prop-hold');
+  rjPropShow('rj-prop-hold');
+  document.getElementById('hold-desc').value = '';
+  const btn = document.getElementById('hold-save');
+  btn.disabled = false; btn.textContent = 'Raise temporary WO';
+  document.getElementById('hold-modal').style.display = 'flex';
+}
+function closeHoldModal() { document.getElementById('hold-modal').style.display = 'none'; ssClose('rj-prop-hold'); }
+
+async function raiseHoldingJob() {
+  const property = rjPropGetValue('rj-prop-hold');
+  const description = document.getElementById('hold-desc').value.trim().replace(/\s+/g, ' ');
+  if (!property) { alert('Please pick the property'); return; }
+  if (!description) { alert('Please describe the work'); return; }
+  if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to raise a temporary WO'); return; }
+  const btn = document.getElementById('hold-save');
+  if (btn.disabled) return;
+  btn.disabled = true; btn.textContent = 'Raising...';
+  try {
+    const loc = locationsAll.find(p => p.name === property);
+    const res = await api('createHoldingJob', { job: { property, description, worker: currentWorker, costCentre: loc ? loc.costCentre : '' }, performedBy: currentWorker });
+    if (!res || !res.id) throw new Error('The Apps Script is still running the previous version — ask the office to publish a new deployment version.');
+    const job = { priority: '', costCode: '', estHours: '', schedStart: '', schedEnd: '', ...(res.job || {}), id: res.id, property, description, assignedTo: currentWorker, reportedBy: currentWorker, reportedDate: localDateStr(new Date()), open: true, holding: true };
+    jobs.push(job);
+    localStorage.setItem('jobs', JSON.stringify(jobs));
+    populateJobDropdown();
+    const sel = document.getElementById('job-select');
+    sel.value = job.id;
+    ssRefresh('job-select');
+    fillJobDetails();
+    closeHoldModal();
+    setSyncStatus('worker', 'synced', job.id + ' raised — you can log your hours against it now');
+  } catch (err) {
+    alert('Could not raise the temporary WO: ' + (err.message || err));
+  } finally {
+    btn.disabled = false; btn.textContent = 'Raise temporary WO';
+  }
+}
+
+function completeHoldingJob(id) {
+  const job = jobs.find(j => j.id === id && jobIsHolding(j));
+  if (!job) return;
+  editingJobId = null;
+  holdingJobId = id;
+  resetWOForm();
+  switchOfficeTab('wocreate');
+  document.getElementById('wo-description').value = job.description || '';
+  ensureSelectOption('wo-location', job.property, job.property);
+  document.getElementById('wo-location').value = job.property || '';
+  ssRefresh('wo-location');
+  const loc = locationsAll.find(p => p.name === job.property);
+  document.getElementById('wo-costcentre').value = loc ? loc.costCentre : (job.costCentre || '');
+  document.getElementById('wo-highlighted').value = job.reportedBy || '';
+  woSelectedWorkers = new Set(expandAssignedTo(job.assignedTo));
+  renderWOAssignChips();
+  initWOForm();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+let holdLinkId = null;
+function openHoldLinkModal(id) {
+  const hold = jobs.find(j => j.id === id && jobIsHolding(j));
+  if (!hold) return;
+  holdLinkId = id;
+  document.getElementById('hold-link-id').textContent = id;
+  const hrs = entries.filter(e => String(e.jobId) === id).reduce((t, e) => t + (parseFloat(e.hours) || 0), 0);
+  document.getElementById('hold-link-info').textContent = 'Raised by ' + (hold.reportedBy || '—') + ' · ' + propLabel(hold.property, 50) + ' · "' + hold.description + '" · ' + fmtHrs(hrs) + 'h logged';
+  const real = jobs.filter(j => !jobIsHolding(j)).sort(woNumberDesc);
+  const opt = j => `<option value="${escWO(j.id)}">${escWO(j.id)}${j.open ? '' : ' (closed)'} · ${escWO(propLabel(j.property, 40))} · ${escWO(String(j.description || '').slice(0, 50))}</option>`;
+  const same = real.filter(j => j.property === hold.property);
+  const sel = document.getElementById('hold-link-select');
+  sel.innerHTML = '<option value="">Select a work order...</option>' +
+    (same.length ? `<optgroup label="Same property">${same.map(opt).join('')}</optgroup>` : '') +
+    `<optgroup label="All work orders">${real.filter(j => j.property !== hold.property).map(opt).join('')}</optgroup>`;
+  if (!sel._ssAttached) ssAttach('hold-link-select', 'Search WO, property, description...'); else ssRefresh('hold-link-select');
+  const btn = document.getElementById('hold-link-confirm');
+  btn.disabled = false; btn.textContent = 'Link';
+  document.getElementById('hold-link-modal').style.display = 'flex';
+}
+function closeHoldLinkModal() { document.getElementById('hold-link-modal').style.display = 'none'; ssClose('hold-link-select'); holdLinkId = null; }
+
+async function confirmHoldLink() {
+  const holdId = holdLinkId;
+  const hold = jobs.find(j => j.id === holdId);
+  const targetId = document.getElementById('hold-link-select').value;
+  if (!hold || !targetId) { alert('Please pick the work order it belongs to'); return; }
+  if (!confirm('Move everything on ' + holdId + ' to ' + targetId + ' and remove ' + holdId + '?')) return;
+  if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to do this'); return; }
+  const btn = document.getElementById('hold-link-confirm');
+  btn.disabled = true; btn.textContent = 'Linking...';
+  try {
+    const res = await api('resolveHoldingJob', { holdId, targetId, performedBy: officeUserName() });
+    if (!res || res.mode !== 'link') throw new Error('The Apps Script is still running the previous version — publish a new deployment version and try again.');
+    const target = jobs.find(j => j.id === targetId);
+    if (target && res.assignedTo != null) target.assignedTo = res.assignedTo;
+    applyHoldingResolved(holdId, targetId, null);
+    notifyHoldingRaiser(hold.reportedBy, holdId, target || { id: targetId });
+    closeHoldLinkModal();
+    renderOfficeDashboard();
+    setSyncStatus('office', 'synced', holdId + ' linked to ' + targetId);
+    refreshOffice();
+  } catch (err) {
+    btn.disabled = false; btn.textContent = 'Link';
+    alert('Could not link ' + holdId + ': ' + (err.message || err));
+  }
+}
+
+// Mirror the server move locally so nothing flickers before the refresh lands
+function applyHoldingResolved(oldId, newId, newJob) {
+  jobs = jobs.filter(j => j.id !== oldId);
+  if (newJob) jobs.push(newJob);
+  entries.forEach(e => { if (String(e.jobId) === oldId) e.jobId = newId; });
+  schedule.forEach(x => { if (String(x.jobId) === oldId) x.jobId = newId; });
+  jobComments.forEach(c => { if (c.jobId === oldId) c.jobId = newId; });
+  if (photoCounts[oldId]) { photoCounts[newId] = (photoCounts[newId] || 0) + photoCounts[oldId]; delete photoCounts[oldId]; }
+  delete photoCache[oldId]; delete photoCache[newId];
+  localStorage.setItem('jobs', JSON.stringify(jobs));
+}
+
+function notifyHoldingRaiser(name, oldId, job) {
+  if (!name || !workers.some(w => w.name === name)) return;
+  notifyWorker(name, {
+    title: oldId + ' is now ' + job.id,
+    message: 'Your temporary WO ' + oldId + ' is now ' + job.id + (job.property ? ' (' + job.property + ')' : '') + '. Any hours you logged have been moved across.',
+    priority: 4,
+    tags: ['white_check_mark']
+  });
+  flushNtfyQueue();
 }
 
 async function createWorkOrder() {
@@ -7855,6 +8040,39 @@ async function createWorkOrder() {
       isCreatingWO = false;
       btn.disabled = false;
       btn.textContent = editingJobId ? 'Save changes' : 'Create work order';
+    }
+    return;
+  }
+  const holdingJob = holdingJobId ? jobs.find(j => j.id === holdingJobId && jobIsHolding(j)) : null;
+  if (holdingJob) {
+    isCreatingWO = true;
+    btn.disabled = true; btn.textContent = 'Creating...';
+    setSyncStatus('office', 'pending', 'Completing ' + holdingJob.id + '...');
+    try {
+      const res = await api('resolveHoldingJob', { holdId: holdingJob.id, job: { ...job, updatedBy: officeUserInitials() }, performedBy: officeUserName() });
+      if (!res || !res.id || res.mode !== 'complete') throw new Error('The Apps Script is still running the previous version — publish a new deployment version and try again.');
+      const created = { ...holdingJob, ...job, ...(res.job || {}), id: res.id, holding: false, open: holdingJob.open };
+      delete created.performedBy;
+      applyHoldingResolved(holdingJob.id, created.id, created);
+      const raiser = holdingJob.reportedBy;
+      notifyJobAllocated(created, expandAssignedTo(created.assignedTo).filter(n => n !== raiser));
+      notifyHoldingRaiser(raiser, holdingJob.id, created);
+      holdingJobId = null;
+      resetWOForm();
+      switchOfficeTab('jobs');
+      renderOfficeDashboard();
+      const t = document.getElementById('toast-wo-created');
+      t.textContent = '✓ ' + holdingJob.id + ' is now ' + created.id;
+      showToast('toast-wo-created');
+      setSyncStatus('office', 'synced', holdingJob.id + ' completed as ' + created.id);
+      refreshOffice();
+    } catch (err) {
+      setSyncStatus('office', 'error', holdingJob.id + ' not completed');
+      alert('Could not complete ' + holdingJob.id + ': ' + (err.message || err));
+    } finally {
+      isCreatingWO = false;
+      btn.disabled = false;
+      if (holdingJobId) initWOForm(); else btn.textContent = 'Create work order';
     }
     return;
   }
