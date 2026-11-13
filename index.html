@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-76 (Weekend Cover: split days between two workers) -->
+<!-- BUILD MARKER: NB-77 (Worker job list: WOs newest first) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -683,6 +683,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
           <label>User</label>
           <select id="office-user-select">
             <option value="">Select user...</option>
+            <option value="Keisha_Schultz">Keisha Schultz</option>
             <option value="Chris_Denton">Chris Denton</option>
             <option value="Peter_Cooper">Peter Cooper</option>
             <option value="Admin">Admin</option>
@@ -1704,9 +1705,14 @@ function refreshWorkerJobList() {
   if (typeof ssSyncLabel === 'function') ssSyncLabel('job-select');
 }
 
+function woNumberDesc(a, b) {
+  const n = j => { const m = /(\d+)/.exec(String(j.id || '')); return m ? parseInt(m[1], 10) : -1; };
+  return n(b) - n(a) || String(b.id).localeCompare(String(a.id));
+}
+
 function populateJobDropdown() {
   const sel = document.getElementById('job-select');
-  const open = jobs.filter(j => j.open);
+  const open = jobs.filter(j => j.open).sort(woNumberDesc);
   let html = '<option value="">Select a job...</option>';
 
   const assignedRecurring = recurringJobs.filter(j => j.active !== false && j.active !== 'FALSE' && expandAssignedTo(j.assignedTo || '').includes(currentWorker));
@@ -1721,7 +1727,7 @@ function populateJobDropdown() {
     html += assignedRecurring.map(j => `<option value="${j.id}">${j.id} · ${escWO(j.description || '')}</option>`).join('');
     html += `</optgroup>`;
   }
-  const recentlyClosed = jobs.filter(j => !j.open && isJobLoggable(j) && expandAssignedTo(j.assignedTo).includes(currentWorker));
+  const recentlyClosed = jobs.filter(j => !j.open && isJobLoggable(j) && expandAssignedTo(j.assignedTo).includes(currentWorker)).sort(woNumberDesc);
   if (recentlyClosed.length) {
     html += `<optgroup label="Recently closed — hours still allowed">`;
     html += recentlyClosed.map(j => `<option value="${j.id}">${j.id} · ${propLabel(j.property) ? propLabel(j.property) + ' · ' : ''}${j.description && j.description.length > 50 ? j.description.slice(0, 50) + '…' : (j.description || '')} · ${jobPending(j) && localDateStr(new Date()) > closedGraceEnd(j) ? 'until office sign-off' : 'until ' + fmtUKDate(closedGraceEnd(j))}</option>`).join('');
