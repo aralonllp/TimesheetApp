@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-79 (Holding WO: no highlighted-by prefill; job rows lock while closing/reopening) -->
+<!-- BUILD MARKER: NB-80 (Schedule: deleting a slot with logged hours removes it from both schedules) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -6165,7 +6165,7 @@ function schedDaysForWeek(start, names) {
   const set = new Set(names);
   [5, 6].forEach(i => {
     const d = addDaysLocal(start, i), ds = localDateStr(d);
-    if (schedule.some(x => x.date === ds && set.has(x.worker)) || entries.some(e => set.has(String(e.worker || '').trim()) && normaliseDate(e.date) === ds)) days.push(d);
+    if (Array.from(set).some(n => schedItemsFor(ds, n).length || schedRaisedFor(ds, n).length)) days.push(d);
   });
   return days;
 }
@@ -6282,12 +6282,13 @@ function textOn(hex) {
 }
 
 function schedItemsFor(date, worker) {
-  return schedule.filter(x => x.date === date && x.worker === worker).sort((a, b) => (a.sort - b.sort) || String(a.id).localeCompare(String(b.id)));
+  return schedule.filter(x => x.date === date && x.worker === worker && x.type !== 'hide').sort((a, b) => (a.sort - b.sort) || String(a.id).localeCompare(String(b.id)));
 }
 
 // Hours a worker logged that day against jobs that weren't on their schedule (derived from entries, never saved)
 function schedRaisedFor(date, worker) {
-  const planned = new Set(schedule.filter(x => x.date === date && x.worker === worker && x.type === 'job').map(x => String(x.jobId)));
+  // 'hide' rows mark jobs the office removed from the schedule even though hours were logged
+  const planned = new Set(schedule.filter(x => x.date === date && x.worker === worker && (x.type === 'job' || x.type === 'hide')).map(x => String(x.jobId)));
   const map = new Map();
   entries.forEach(e => {
     if (String(e.worker || '').trim() !== worker || normaliseDate(e.date) !== date) return;
@@ -6657,7 +6658,8 @@ function deleteSchedItem() {
   if (isSavingSched || !schedModalState || !schedModalState.id) return;
   const cur = schedule.find(x => x.id === schedModalState.id);
   if (!cur) { closeSchedModal(); return; }
-  if (!confirm('Remove this slot from the schedule?')) return;
+  const logged = cur.type === 'job' ? entries.filter(e => String(e.worker || '').trim() === cur.worker && normaliseDate(e.date) === cur.date && String(e.jobId) === String(cur.jobId)).reduce((t, e) => t + (parseFloat(e.hours) || 0), 0) : 0;
+  if (!confirm(logged ? workerInitials(cur.worker) + ' has ' + fmtHrs(logged) + 'h logged on ' + cur.jobId + ' that day.\n\nRemove it from the schedule anyway? The hours stay on their timesheet.' : 'Remove this slot from the schedule?')) return;
   if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to change the schedule'); return; }
   const others = cur.linkId ? schedule.filter(x => x.linkId === cur.linkId && x.date === cur.date && x.id !== cur.id) : [];
   let deleteIds = [cur.id];
@@ -6673,6 +6675,12 @@ function deleteSchedItem() {
       });
     }
   }
+  // Stop removed jobs that have hours logged from coming back as "Worker raised"
+  schedule.filter(x => deleteIds.includes(x.id) && x.type === 'job').forEach(x => {
+    const has = entries.some(e => String(e.worker || '').trim() === x.worker && normaliseDate(e.date) === x.date && String(e.jobId) === String(x.jobId));
+    const hidden = schedule.some(h => h.type === 'hide' && h.worker === x.worker && h.date === x.date && String(h.jobId) === String(x.jobId));
+    if (has && !hidden) items.push({ id: newSchedId(), type: 'hide', jobId: x.jobId, status: '', note: '', property: '', withWorkers: '', linkId: '', date: x.date, worker: x.worker, sort: 0, createdBy: officeUserInitials() });
+  });
   closeSchedModal();
   schedCommit(items, previous, deleteIds);
 }
