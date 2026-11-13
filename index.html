@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-78 (Holding WOs: workers raise temporary WOs, office completes or links them) -->
+<!-- BUILD MARKER: NB-79 (Holding WO: no highlighted-by prefill; job rows lock while closing/reopening) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -150,6 +150,8 @@ textarea { height: 60px; resize: none; }
 .wo-section label.wo-atp-check { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; font-weight: 500; color: var(--color-text-primary); cursor: pointer; }
 .wo-card .wo-atp-check input { width: 16px; height: 16px; min-height: 0; margin: 0; cursor: pointer; }
 .wo-atp-num { max-width: 280px; margin-top: 2px; }
+.entry-row.row-busy { opacity: 0.6; transition: opacity 0.15s; }
+.entry-row.row-busy button { cursor: progress; }
 .hold-tag { font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 700; margin-left: 6px; background: #ffe8cc; color: #8a4b00; white-space: nowrap; }
 .entry-row.hold-row { border-left: 3px solid #f0a040; background: #fffaf3; }
 .hold-raise { background: none; border: none; padding: 0; margin-top: 8px; font-size: 12px; color: var(--color-text-info, #185fa5); text-decoration: underline; cursor: pointer; }
@@ -2943,13 +2945,30 @@ function addQuickJobFilter(field, value) {
   renderJobsList();
 }
 
-async function toggleJobOpen(id, open) {
+// Locks every button on a job row while something is saving; returns an undo for failures
+function lockJobRow(btn, label) {
+  const row = btn && btn.closest ? btn.closest('.entry-row') : null;
+  const btns = row ? Array.from(row.querySelectorAll('button')) : (btn ? [btn] : []);
+  const before = btns.map(b => b.disabled);
+  const text = btn ? btn.textContent : '';
+  btns.forEach(b => { b.disabled = true; });
+  if (btn && label) btn.textContent = label;
+  if (row) row.classList.add('row-busy');
+  return () => {
+    btns.forEach((b, i) => { b.disabled = before[i]; });
+    if (btn && label) btn.textContent = text;
+    if (row) row.classList.remove('row-busy');
+  };
+}
+
+async function toggleJobOpen(id, open, btn) {
   if (isTogglingJob) return;
   const job = jobs.find(j => j.id === id);
   if (!job) return;
   if (!confirm((open ? 'Reopen ' : 'Close ') + id + '?')) return;
   if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to ' + (open ? 'reopen' : 'close') + ' a job'); return; }
   isTogglingJob = true;
+  const unlock = lockJobRow(btn, open ? 'Reopening…' : 'Closing…');
   setSyncStatus('office', 'pending', (open ? 'Reopening ' : 'Closing ') + id + '...');
   try {
     const result = await api(open ? 'reopenJob' : 'closeJob', { id, performedBy: officeUserName(), closedBy: officeUserInitials() });
@@ -2965,6 +2984,7 @@ async function toggleJobOpen(id, open) {
     renderOfficeDashboard();
     setSyncStatus('office', 'synced', id + (open ? ' reopened' : ' closed'));
   } catch (err) {
+    unlock();
     setSyncStatus('office', 'error', 'Could not update ' + id);
     alert('Could not ' + (open ? 'reopen ' : 'close ') + id + ': ' + (err.message || err));
   } finally {
@@ -3004,6 +3024,7 @@ async function confirmJobClose(id) {
   isSigningOffJob = true;
   ['jcc-', 'jsb-'].forEach(p => { const b = document.getElementById(p + id); if (b) b.disabled = true; });
   const b = document.getElementById('jcc-' + id); if (b) b.textContent = 'Confirming…';
+  lockJobRow(b, '');
   try {
     const res = await api('confirmJobClose', { id, performedBy: officeUserName(), confirmedBy: officeUserInitials() });
     if (!res || !res.success) throw new Error('The Apps Script is still running the previous version — publish a new deployment version and try again.');
@@ -3031,6 +3052,7 @@ async function sendBackJob(id) {
   isSigningOffJob = true;
   ['jcc-', 'jsb-'].forEach(p => { const b = document.getElementById(p + id); if (b) b.disabled = true; });
   const b = document.getElementById('jsb-' + id); if (b) b.textContent = 'Sending back…';
+  lockJobRow(b, '');
   try {
     const result = await api('reopenJob', { id, performedBy: officeUserName(), closedBy: officeUserInitials() });
     Object.assign(job, { open: true, pendingClose: false, closedDate: '', closedBy: '', confirmedDate: '', confirmedBy: '', reopenedDate: result.reopenedDate || localDateStr(new Date()), reopenedBy: result.reopenedBy || officeUserInitials() });
@@ -3088,10 +3110,10 @@ function renderJobRow(j, hoursByJob) {
           <button class="btn btn-sm${openCommentJobs.has(String(j.id)) ? ' jc-btn-on' : ''}" id="jc-btn-${escWO(j.id)}" onclick="toggleJobComments('${escWO(j.id)}')">Comments${jobCommentCount(j.id) ? ' (' + jobCommentCount(j.id) + ')' : ''}</button>
           ${hold ? `<button class="btn btn-sm" onclick="openHoldLinkModal('${escWO(j.id)}')">Link to existing WO</button><button class="btn btn-sm btn-primary" onclick="completeHoldingJob('${escWO(j.id)}')">Complete as new WO</button>` : `<button class="btn btn-sm" onclick="editJob('${escWO(j.id)}')">Edit</button>
           ${j.open
-            ? `<button class="btn btn-sm" onclick="toggleJobOpen('${escWO(j.id)}', false)">Close</button>`
+            ? `<button class="btn btn-sm" onclick="toggleJobOpen('${escWO(j.id)}', false, this)">Close</button>`
             : jobPending(j)
               ? `<button class="btn btn-sm" id="jsb-${escWO(j.id)}" onclick="sendBackJob('${escWO(j.id)}')">Send back</button><button class="btn btn-sm btn-primary" id="jcc-${escWO(j.id)}" onclick="confirmJobClose('${escWO(j.id)}')">Confirm closed</button>`
-              : `<button class="btn btn-sm" onclick="toggleJobOpen('${escWO(j.id)}', true)">Reopen</button>`}`}
+              : `<button class="btn btn-sm" onclick="toggleJobOpen('${escWO(j.id)}', true, this)">Reopen</button>`}`}
         </div>
       </div>
       ${j.description ? `<p class="job-codes" style="margin-top:4px;"><span>Description:</span> <strong>${escWO(j.description)}</strong></p>` : ''}
@@ -6934,13 +6956,14 @@ function isJobLoggable(j) {
 }
 
 let isWorkerClosingJob = false;
-async function workerCloseJob(id) {
+async function workerCloseJob(id, btn) {
   if (isWorkerClosingJob) return;
   const job = jobs.find(j => j.id === id);
   if (!job || !job.open) return;
   if (!confirm('Close ' + id + '?\n\nYou can still log hours against it for ' + CLOSED_GRACE_DAYS + ' days.')) return;
   if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to close a job'); return; }
   isWorkerClosingJob = true;
+  const unlock = lockJobRow(btn, 'Closing…');
   setSyncStatus('worker', 'pending', 'Closing ' + id + '...');
   try {
     const result = await api('closeJob', { id, performedBy: currentWorker, closedBy: workerInitials(currentWorker), pending: true });
@@ -6957,6 +6980,7 @@ async function workerCloseJob(id) {
     renderWorkerJobs();
     setSyncStatus('worker', 'synced', id + ' closed');
   } catch (err) {
+    unlock();
     setSyncStatus('worker', 'error', 'Could not close ' + id);
     alert('Could not close ' + id + ': ' + (err.message || err));
   } finally {
@@ -7031,7 +7055,7 @@ function renderWorkerJobRow(j, total, mine) {
           ${dates}
           ${isJobLoggable(j) ? `<button class="btn btn-sm" onclick="logTimeForJob('${escWO(j.id)}')">Log time</button>` : ''}
           ${photoButtonHtml('w', j)}
-          ${j.open ? `<button class="btn btn-sm" onclick="workerCloseJob('${escWO(j.id)}')">Close job</button>` : ''}
+          ${j.open ? `<button class="btn btn-sm" onclick="workerCloseJob('${escWO(j.id)}', this)">Close job</button>` : ''}
         </div>
       </div>
       ${j.description ? `<p class="job-codes" style="margin-top:4px;"><span>Description:</span> <strong>${escWO(j.description)}</strong></p>` : ''}
@@ -7883,7 +7907,6 @@ function completeHoldingJob(id) {
   ssRefresh('wo-location');
   const loc = locationsAll.find(p => p.name === job.property);
   document.getElementById('wo-costcentre').value = loc ? loc.costCentre : (job.costCentre || '');
-  document.getElementById('wo-highlighted').value = job.reportedBy || '';
   woSelectedWorkers = new Set(expandAssignedTo(job.assignedTo));
   renderWOAssignChips();
   initWOForm();
