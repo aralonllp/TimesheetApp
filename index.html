@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-86 (Notifications: allowance note removed; Keisha Schultz removed as an office user) -->
+<!-- BUILD MARKER: NB-87 (Sign-in: worker initials + PIN, office username + password, self-service PIN reset, admin alerts, office user admin) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -425,6 +425,14 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 .form-note { margin-top: 10px; font-size: 12px; }
 .form-section { margin-bottom: 1.5rem; }
 .pin-input { letter-spacing: 4px; }
+.initials-input { text-transform: uppercase; letter-spacing: 3px; font-weight: 600; }
+.initials-input::placeholder { text-transform: none; letter-spacing: normal; font-weight: 400; }
+.ou-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 0; border-top: 1px solid var(--color-border-tertiary, #eee); }
+.ou-row:first-child { border-top: none; }
+.ou-name { flex: 1; min-width: 160px; font-size: 13px; }
+.ou-name .text-muted { font-size: 12px; }
+.temp-box { margin-top: 10px; padding: 10px 12px; border-radius: var(--border-radius-md); background: #fffaf3; border: 1px solid #f0c890; font-size: 13px; }
+.temp-box code { font-size: 16px; font-weight: 700; letter-spacing: 2px; }
 .section-label { font-size: 13px; font-weight: 500; color: var(--color-text-secondary); margin-bottom: 0.25rem; }
 .stat-label { font-size: 13px; }
 .card-header { margin-bottom: 1rem; }
@@ -584,15 +592,14 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
       <div class="login-wrap">
         <p class="screen-title">Sign in</p>
         <div class="card">
-          <label>Your name</label>
-          <select id="worker-select">
-            <option value="">Select worker...</option>
-          </select>
+          <label>Your initials</label>
+          <input type="text" id="worker-initials" placeholder="e.g. BW" maxlength="5" autocomplete="off" autocapitalize="characters" spellcheck="false" class="initials-input" oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g,'')" onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('worker-pin').focus();}">
           <label>PIN</label>
-          <input type="password" id="worker-pin" placeholder="••••" maxlength="4" class="pin-input" onkeydown="if(event.key==='Enter'){event.preventDefault();workerLogin();}">
+          <input type="password" id="worker-pin" placeholder="••••" maxlength="4" inputmode="numeric" autocomplete="off" class="pin-input" onkeydown="if(event.key==='Enter'){event.preventDefault();workerLogin();}">
           <div class="form-footer">
-            <button class="btn btn-primary full-width" onclick="workerLogin()">Sign in</button>
+            <button class="btn btn-primary full-width" id="worker-login-btn" onclick="workerLogin()">Sign in</button>
           </div>
+          <button type="button" class="hold-raise" style="display:block;margin:10px auto 0;" onclick="openForgotPin()">Forgot PIN?</button>
           <div class="sync-status" id="login-sync-status">
             <span class="sync-dot" id="login-sync-dot"></span>
             <span id="login-sync-text">Connecting to Google Sheets...</span>
@@ -706,15 +713,10 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
       <div class="login-wrap">
         <p class="screen-title">Office access</p>
         <div class="card">
-          <label>User</label>
-          <select id="office-user-select">
-            <option value="">Select user...</option>
-            <option value="Chris_Denton">Chris Denton</option>
-            <option value="Peter_Cooper">Peter Cooper</option>
-            <option value="Admin">Admin</option>
-          </select>
+          <label>Username</label>
+          <input type="text" id="office-username" placeholder="Username" autocomplete="username" autocapitalize="none" spellcheck="false" onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('office-pin').focus();}">
           <label>Password</label>
-          <input type="password" id="office-pin" placeholder="Enter password" onkeydown="if(event.key==='Enter'){event.preventDefault();officeLogin();}">
+          <input type="password" id="office-pin" placeholder="Enter password" autocomplete="current-password" onkeydown="if(event.key==='Enter'){event.preventDefault();officeLogin();}">
           <div class="form-footer">
             <button class="btn btn-primary full-width" onclick="officeLogin()">Sign in</button>
           </div>
@@ -728,7 +730,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
           <p class="section-heading">Office dashboard</p>
         </div>
         <div style="display:flex;align-items:center;gap:10px;">
-          <span class="text-muted" style="font-size:13px;">Logged in as <strong id="office-user-display"></strong></span>
+          <span class="text-muted" style="font-size:13px;">Logged in as <strong id="office-user-display"></strong> · <button type="button" class="hold-raise" style="margin:0;font-size:13px;" onclick="openPasswordChange(false)">Change password</button></span>
           <div class="sync-status">
             <span class="sync-dot" id="office-sync-dot"></span>
             <span id="office-sync-text">—</span>
@@ -1294,16 +1296,35 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
               <input type="text" id="new-worker-name" placeholder="e.g. Dave S" onkeydown="if(event.key==='Enter'){event.preventDefault();addWorker();}">
             </div>
             <div>
-              <label style="margin-top:0;">PIN</label>
-              <input type="text" id="new-worker-pin" placeholder="4 digits" maxlength="4" style="letter-spacing:4px;" onkeydown="if(event.key==='Enter'){event.preventDefault();addWorker();}">
+              <label style="margin-top:0;">Initials <span class="text-muted" style="font-weight:400;">(what they sign in with)</span></label>
+              <input type="text" id="new-worker-initials" placeholder="e.g. DS" maxlength="5" class="initials-input" oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g,'')" onkeydown="if(event.key==='Enter'){event.preventDefault();addWorker();}">
             </div>
           </div>
+          <p class="wo-hint">They get a temporary PIN to sign in with and choose their own straight away.</p>
+          <div id="new-worker-temp"></div>
           <div class="form-footer">
-            <button class="btn btn-primary" onclick="addWorker()">Add worker</button>
+            <button class="btn btn-primary" id="add-worker-btn" onclick="addWorker()">Add worker</button>
           </div>
         </div>
       </div>
       </div><!-- end workers card -->
+
+      <div class="card" id="office-users-card" style="display:none;margin-top:1rem;">
+        <div class="row-between card-header"><p class="section-heading">Office users <span class="text-muted" style="font-weight:400;font-size:12px;">admin only</span></p></div>
+        <div id="office-users-list"><p class="text-muted">Loading...</p></div>
+        <div id="office-users-temp"></div>
+        <div style="margin-top:1rem;padding-top:1rem;border-top:0.5px solid var(--color-border-tertiary);">
+          <p style="font-size:13px;font-weight:500;margin-bottom:0.75rem;">Add office user</p>
+          <div class="grid2">
+            <div><label style="margin-top:0;">Username</label><input type="text" id="ou-username" placeholder="e.g. jane.smith" autocapitalize="none" spellcheck="false"></div>
+            <div><label style="margin-top:0;">Full name</label><input type="text" id="ou-name" placeholder="e.g. Jane Smith"></div>
+            <div><label>Initials</label><input type="text" id="ou-initials" placeholder="e.g. JS" maxlength="5" class="initials-input" oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g,'')"></div>
+            <div><label>Access</label><select id="ou-role"><option value="office">Office</option><option value="admin">Admin</option></select></div>
+          </div>
+          <div class="form-footer"><button class="btn btn-primary" id="ou-add-btn" onclick="addOfficeUserUI()">Add office user</button></div>
+        </div>
+        <p class="wo-hint" id="ou-admin-topic" style="margin-top:1rem;"></p>
+      </div>
       </div><!-- end workers tab -->
 
       <!-- Locations tab -->
@@ -1345,6 +1366,71 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 </div>
 
 <!-- ── OVERTIME MODAL ── -->
+<div id="pin-set-modal" class="sched-modal" style="display:none;">
+  <div class="card sched-modal-box" style="max-width:380px;">
+    <p class="section-heading" id="pin-set-title">Choose a new PIN</p>
+    <p class="text-muted" id="pin-set-sub" style="font-size:12px;margin-top:2px;">You signed in with a temporary PIN. Pick your own 4-digit PIN to carry on.</p>
+    <label style="margin-top:12px;">New PIN</label>
+    <input type="password" id="pin-set-new" maxlength="4" inputmode="numeric" autocomplete="off" class="pin-input" placeholder="••••">
+    <label>New PIN again</label>
+    <input type="password" id="pin-set-again" maxlength="4" inputmode="numeric" autocomplete="off" class="pin-input" placeholder="••••" onkeydown="if(event.key==='Enter'){event.preventDefault();submitNewPin();}">
+    <div class="form-footer" style="display:flex;gap:8px;justify-content:flex-end;margin-top:1.25rem;">
+      <button class="btn" onclick="closeModalById('pin-set-modal')">Cancel</button>
+      <button class="btn btn-primary" id="pin-set-btn" onclick="submitNewPin()">Save PIN</button>
+    </div>
+  </div>
+</div>
+
+<div id="forgot-pin-modal" class="sched-modal" style="display:none;">
+  <div class="card sched-modal-box" style="max-width:400px;">
+    <p class="section-heading">Forgot PIN</p>
+    <div id="fp-step1">
+      <p class="text-muted" style="font-size:12px;margin-top:2px;">We'll send a 6-digit code to your phone, the same way your job notifications arrive.</p>
+      <label style="margin-top:12px;">Your initials</label>
+      <input type="text" id="fp-initials" maxlength="5" autocomplete="off" autocapitalize="characters" spellcheck="false" class="initials-input" oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g,'')" onkeydown="if(event.key==='Enter'){event.preventDefault();sendPinResetCode();}">
+      <div class="form-footer" style="display:flex;gap:8px;justify-content:flex-end;margin-top:1.25rem;">
+        <button class="btn" onclick="closeModalById('forgot-pin-modal')">Cancel</button>
+        <button class="btn btn-primary" id="fp-send" onclick="sendPinResetCode()">Send code</button>
+      </div>
+    </div>
+    <div id="fp-step2" style="display:none;">
+      <p class="text-muted" id="fp-sent" style="font-size:12px;margin-top:2px;"></p>
+      <label style="margin-top:12px;">Code from your phone</label>
+      <input type="text" id="fp-code" maxlength="6" inputmode="numeric" autocomplete="one-time-code" class="pin-input" placeholder="••••••">
+      <label>New PIN</label>
+      <input type="password" id="fp-new" maxlength="4" inputmode="numeric" autocomplete="off" class="pin-input" placeholder="••••">
+      <label>New PIN again</label>
+      <input type="password" id="fp-again" maxlength="4" inputmode="numeric" autocomplete="off" class="pin-input" placeholder="••••" onkeydown="if(event.key==='Enter'){event.preventDefault();confirmPinResetUI();}">
+      <div class="form-footer" style="display:flex;gap:8px;justify-content:space-between;margin-top:1.25rem;">
+        <button class="btn" onclick="sendPinResetCode(true)">Send a new code</button>
+        <div style="display:flex;gap:8px;">
+          <button class="btn" onclick="closeModalById('forgot-pin-modal')">Cancel</button>
+          <button class="btn btn-primary" id="fp-confirm" onclick="confirmPinResetUI()">Reset PIN</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="pw-set-modal" class="sched-modal" style="display:none;">
+  <div class="card sched-modal-box" style="max-width:400px;">
+    <p class="section-heading">Choose a new password</p>
+    <p class="text-muted" id="pw-set-sub" style="font-size:12px;margin-top:2px;">You signed in with a temporary password. Pick your own to carry on.</p>
+    <div id="pw-current-wrap">
+      <label style="margin-top:12px;">Current password</label>
+      <input type="password" id="pw-current" autocomplete="current-password">
+    </div>
+    <label>New password <span class="text-muted" style="font-weight:400;">(at least 8 characters)</span></label>
+    <input type="password" id="pw-new" autocomplete="new-password">
+    <label>New password again</label>
+    <input type="password" id="pw-again" autocomplete="new-password" onkeydown="if(event.key==='Enter'){event.preventDefault();submitNewPassword();}">
+    <div class="form-footer" style="display:flex;gap:8px;justify-content:flex-end;margin-top:1.25rem;">
+      <button class="btn" id="pw-cancel" onclick="cancelPasswordChange()">Cancel</button>
+      <button class="btn btn-primary" id="pw-set-btn" onclick="submitNewPassword()">Save password</button>
+    </div>
+  </div>
+</div>
+
 <div id="hold-modal" class="sched-modal" style="display:none;" onmousedown="if(event.target===this)closeHoldModal()">
   <div class="card sched-modal-box">
     <p class="section-heading">Raise a temporary WO</p>
@@ -1694,20 +1780,162 @@ function switchTab(tab) {
 
 // ── Worker helpers ────────────────────────────────────────────────
 
-function populateWorkerDropdown() {
-  const sel = document.getElementById('worker-select');
-  const active = workers.filter(w => w.active !== false && w.active !== 'FALSE');
-  sel.innerHTML = '<option value="">Select worker...</option>' +
-    active.map(w => `<option value="${w.name}">${w.name}</option>`).join('');
+function populateWorkerDropdown() { /* sign-in is by initials now */ }
+
+// ── Worker sign-in (initials + PIN) ──────────────────────────────
+// Checked by the server. After a good online sign-in a salted hash is kept on
+// this device so the same worker can still sign in if the tablet is offline.
+let pinChangeCtx = null;
+
+function closeModalById(id) { document.getElementById(id).style.display = 'none'; }
+function isNetworkError(err) { return /Failed to fetch|NetworkError|network|HTTP \d|Bad response|No SCRIPT_URL/i.test(String(err && err.message || err)); }
+
+async function sha256Hex(text) {
+  if (!window.crypto || !crypto.subtle) return '';
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+function deviceSalt() {
+  try {
+    let s = localStorage.getItem('deviceSalt');
+    if (!s) { s = Array.from(crypto.getRandomValues(new Uint8Array(16))).map(b => b.toString(16).padStart(2, '0')).join(''); localStorage.setItem('deviceSalt', s); }
+    return s;
+  } catch (e) { return 'nosalt'; }
+}
+function readPinCache() { try { return JSON.parse(localStorage.getItem('pinCache') || '{}'); } catch (e) { return {}; } }
+async function rememberPin(initials, name, pin) {
+  const h = await sha256Hex(deviceSalt() + ':' + initials + ':' + pin);
+  if (!h) return;
+  const c = readPinCache();
+  c[initials] = { name, h };
+  try { localStorage.setItem('pinCache', JSON.stringify(c)); } catch (e) {}
+}
+async function offlinePinMatch(initials, pin) {
+  const rec = readPinCache()[initials];
+  if (!rec) return null;
+  return (await sha256Hex(deviceSalt() + ':' + initials + ':' + pin)) === rec.h ? rec.name : false;
 }
 
-function workerLogin() {
-  const w = document.getElementById('worker-select').value;
-  const p = document.getElementById('worker-pin').value;
-  if (!w || p.length < 4) { alert('Please select your name and enter a 4-digit PIN.'); return; }
-  const worker = workers.find(x => x.name === w);
-  if (worker && String(worker.pin) !== String(p)) { alert('Incorrect PIN. Please try again.'); return; }
-  currentWorker = w.trim().replace(/\s+/g, ' ');
+async function workerLogin() {
+  const initials = document.getElementById('worker-initials').value.trim().toUpperCase();
+  const pin = document.getElementById('worker-pin').value.trim();
+  if (!initials || pin.length !== 4) { alert('Enter your initials and your 4-digit PIN.'); return; }
+  const btn = document.getElementById('worker-login-btn');
+  if (btn.disabled) return;
+  btn.disabled = true; btn.textContent = 'Signing in...';
+  try {
+    if (!navigator.onLine || !SCRIPT_URL) throw new Error('NetworkError: offline');
+    const res = await api('workerLogin', { initials, pin });
+    if (!res || !res.success) throw new Error((res && res.error) || 'Initials or PIN not recognised');
+    if (res.mustChange) {
+      pinChangeCtx = { initials, currentPin: pin, name: res.name };
+      openPinSetModal();
+      return;
+    }
+    await rememberPin(initials, res.name, pin);
+    finishWorkerLogin(res.name);
+  } catch (err) {
+    if (isNetworkError(err)) {
+      const name = await offlinePinMatch(initials, pin);
+      if (name) { finishWorkerLogin(name); return; }
+      alert(name === false ? 'Initials or PIN not recognised.' : 'No connection. Sign in once while online on this tablet, then it will work offline too.');
+      return;
+    }
+    alert(err.message || err);
+    document.getElementById('worker-pin').value = '';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Sign in';
+  }
+}
+
+function openPinSetModal() {
+  document.getElementById('pin-set-new').value = '';
+  document.getElementById('pin-set-again').value = '';
+  document.getElementById('pin-set-title').textContent = 'Hi ' + (pinChangeCtx.name || '') + ', choose a new PIN';
+  document.getElementById('pin-set-modal').style.display = 'flex';
+  setTimeout(() => document.getElementById('pin-set-new').focus(), 50);
+}
+
+function readNewPin(a, b) {
+  const p1 = document.getElementById(a).value.trim(), p2 = document.getElementById(b).value.trim();
+  if (!/^\d{4}$/.test(p1)) { alert('Your PIN must be 4 digits.'); return ''; }
+  if (p1 !== p2) { alert('The two PINs do not match.'); return ''; }
+  return p1;
+}
+
+async function submitNewPin() {
+  if (!pinChangeCtx) return;
+  const newPin = readNewPin('pin-set-new', 'pin-set-again');
+  if (!newPin) return;
+  const btn = document.getElementById('pin-set-btn');
+  btn.disabled = true; btn.textContent = 'Saving...';
+  try {
+    await api('setWorkerPin', { initials: pinChangeCtx.initials, currentPin: pinChangeCtx.currentPin, newPin });
+    await rememberPin(pinChangeCtx.initials, pinChangeCtx.name, newPin);
+    closeModalById('pin-set-modal');
+    const name = pinChangeCtx.name;
+    pinChangeCtx = null;
+    finishWorkerLogin(name);
+  } catch (err) {
+    alert(err.message || err);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Save PIN';
+  }
+}
+
+function openForgotPin() {
+  document.getElementById('fp-initials').value = document.getElementById('worker-initials').value.trim().toUpperCase();
+  document.getElementById('fp-step1').style.display = '';
+  document.getElementById('fp-step2').style.display = 'none';
+  ['fp-code', 'fp-new', 'fp-again'].forEach(id => { document.getElementById(id).value = ''; });
+  document.getElementById('forgot-pin-modal').style.display = 'flex';
+  setTimeout(() => document.getElementById('fp-initials').focus(), 50);
+}
+
+async function sendPinResetCode(again) {
+  const initials = document.getElementById('fp-initials').value.trim().toUpperCase();
+  if (!initials) { alert('Enter your initials.'); return; }
+  if (!navigator.onLine || !SCRIPT_URL) { alert('You need a connection to reset your PIN.'); return; }
+  const btn = document.getElementById('fp-send');
+  btn.disabled = true; btn.textContent = 'Sending...';
+  try {
+    const res = await api('requestPinReset', { initials });
+    document.getElementById('fp-sent').textContent = (again ? 'New code sent' : 'Code sent') + ' to ' + (res.name || 'your') + "'s phone. It works once and expires in 10 minutes.";
+    document.getElementById('fp-step1').style.display = 'none';
+    document.getElementById('fp-step2').style.display = '';
+    setTimeout(() => document.getElementById('fp-code').focus(), 50);
+  } catch (err) {
+    alert(err.message || err);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Send code';
+  }
+}
+
+async function confirmPinResetUI() {
+  const initials = document.getElementById('fp-initials').value.trim().toUpperCase();
+  const code = document.getElementById('fp-code').value.trim();
+  if (!/^\d{6}$/.test(code)) { alert('Enter the 6-digit code from your phone.'); return; }
+  const newPin = readNewPin('fp-new', 'fp-again');
+  if (!newPin) return;
+  const btn = document.getElementById('fp-confirm');
+  btn.disabled = true; btn.textContent = 'Resetting...';
+  try {
+    const res = await api('confirmPinReset', { initials, code, newPin });
+    await rememberPin(initials, res.name, newPin);
+    closeModalById('forgot-pin-modal');
+    document.getElementById('worker-initials').value = initials;
+    finishWorkerLogin(res.name);
+  } catch (err) {
+    alert(err.message || err);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Reset PIN';
+  }
+}
+
+function finishWorkerLogin(name) {
+  const w = String(name || '').trim().replace(/\s+/g, ' ');
+  document.getElementById('worker-pin').value = '';
+  currentWorker = w;
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('timesheet-screen').style.display = 'block';
   document.getElementById('worker-greeting').textContent = 'Hello, ' + w;
@@ -1736,6 +1964,7 @@ function workerLogout() {
   document.getElementById('login-screen').style.display = 'block';
   document.getElementById('timesheet-screen').style.display = 'none';
   document.getElementById('worker-pin').value = '';
+  document.getElementById('worker-initials').value = '';
 }
 
 async function pollJobs() {
@@ -2766,40 +2995,91 @@ function showToast(id) {
 
 // ── Office ────────────────────────────────────────────────────────
 
+// Office sign-in: username + password, checked by the server, which returns the
+// user's name / initials / role and a session token for admin-only actions.
+let officeUser = null;
+let officeToken = '';
+let pwChangeForced = false;
+
 async function officeLogin() {
-  const user = document.getElementById('office-user-select').value;
+  const username = document.getElementById('office-username').value.trim().toLowerCase();
   const p = document.getElementById('office-pin').value;
-  if (!user) { alert('Please select a user'); return; }
-  if (!p) { alert('Enter a password'); return; }
+  if (!username || !p) { alert('Enter your username and password'); return; }
   const btn = document.querySelector('#office-login-screen .btn-primary');
-  if (btn) { btn.textContent = 'Signing in...'; btn.disabled = true; }
+  if (btn.disabled) return;
+  btn.textContent = 'Signing in...'; btn.disabled = true;
   try {
-    const result = await api('officeLogin', { user, password: p });
-    if (result.success) {
-      currentOfficeUser = user;
-      startReminderTimer();
-      document.getElementById('office-login-screen').style.display = 'none';
-      document.getElementById('office-screen').style.display = 'block';
-      document.querySelector('.app').classList.add('office-wide');
-      document.getElementById('office-user-display').textContent = (OFFICE_USERS[user] && OFFICE_USERS[user].name) || user;
-      refreshOffice();
-    } else {
-      alert('Incorrect password');
-    }
+    const result = await api('officeLogin', { username, password: p });
+    if (!result || !result.success || !result.user) throw new Error((result && result.error) || 'Username or password not recognised');
+    officeToken = result.token || '';
+    officeUser = result.user;
+    if (officeUser.mustChange) { openPasswordChange(true, p); return; }
+    enterOffice();
   } catch (err) {
-    alert('Could not connect — check your internet connection');
+    alert(isNetworkError(err) ? 'Could not connect — check your internet connection' : (err.message || err));
+    document.getElementById('office-pin').value = '';
   } finally {
-    if (btn) { btn.textContent = 'Sign in'; btn.disabled = false; }
+    btn.textContent = 'Sign in'; btn.disabled = false;
+  }
+}
+
+function enterOffice() {
+  currentOfficeUser = officeUser.username;
+  startReminderTimer();
+  document.getElementById('office-login-screen').style.display = 'none';
+  document.getElementById('office-screen').style.display = 'block';
+  document.querySelector('.app').classList.add('office-wide');
+  document.getElementById('office-user-display').textContent = officeUser.name;
+  document.getElementById('office-users-card').style.display = officeUser.role === 'admin' ? '' : 'none';
+  document.getElementById('office-pin').value = '';
+  refreshOffice();
+}
+
+function openPasswordChange(forced, current) {
+  pwChangeForced = !!forced;
+  document.getElementById('pw-set-sub').textContent = forced ? 'You signed in with a temporary password. Pick your own to carry on.' : 'Change the password you sign in with.';
+  document.getElementById('pw-current-wrap').style.display = forced ? 'none' : '';
+  document.getElementById('pw-current').value = forced ? current : '';
+  document.getElementById('pw-new').value = '';
+  document.getElementById('pw-again').value = '';
+  document.getElementById('pw-set-modal').style.display = 'flex';
+  setTimeout(() => document.getElementById(forced ? 'pw-new' : 'pw-current').focus(), 50);
+}
+
+function cancelPasswordChange() {
+  closeModalById('pw-set-modal');
+  if (pwChangeForced) { officeUser = null; officeToken = ''; }
+}
+
+async function submitNewPassword() {
+  const current = document.getElementById('pw-current').value;
+  const p1 = document.getElementById('pw-new').value, p2 = document.getElementById('pw-again').value;
+  if (p1.length < 8) { alert('Your new password must be at least 8 characters.'); return; }
+  if (p1 !== p2) { alert('The two passwords do not match.'); return; }
+  const btn = document.getElementById('pw-set-btn');
+  btn.disabled = true; btn.textContent = 'Saving...';
+  try {
+    await api('changeOfficePassword', { token: officeToken, currentPassword: current, newPassword: p1 });
+    closeModalById('pw-set-modal');
+    officeUser.mustChange = false;
+    if (pwChangeForced) enterOffice();
+    else setSyncStatus('office', 'synced', 'Password changed');
+  } catch (err) {
+    alert(err.message || err);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Save password';
   }
 }
 
 function officeLogout() {
   currentOfficeUser = null;
+  officeUser = null;
+  officeToken = '';
   stopReminderTimer();
   document.getElementById('office-login-screen').style.display = 'block';
   document.getElementById('office-screen').style.display = 'none';
   document.getElementById('office-pin').value = '';
-  document.getElementById('office-user-select').value = '';
+  document.getElementById('office-username').value = '';
 }
 
 async function refreshOffice() {
@@ -4908,6 +5188,7 @@ function switchOfficeTab(tab) {
   if (tab === 'locations') renderLocationsList();
   if (tab === 'weekendcover') renderWeekendCover();
   if (tab === 'notifs') renderNotificationsTab();
+  if (tab === 'workers') loadOfficeUsers();
 }
 
 // ── Workers management ───────────────────────────────────────────
@@ -4928,10 +5209,11 @@ function renderWorkersList() {
         <label class="text-muted" style="font-size:12px;margin:0;display:flex;align-items:center;gap:4px;font-weight:400;">Daily hours
           <input type="number" min="0.25" max="24" step="0.25" value="${workerDailyHours(w.name)}" style="width:68px;font-size:12px;padding:4px 6px;" onchange="setWorkerDailyHoursUI('${w.name.replace(/'/g, "\\'")}', this)">
         </label>
-        <span class="text-muted" style="font-size:12px;">PIN: <strong>${w.pin}</strong></span>
-        <input type="text" id="pin-reset-${w.name.replace(/\s/g,'_')}" placeholder="New PIN" maxlength="4"
-          style="width:80px;letter-spacing:3px;font-size:12px;padding:4px 8px;">
-        <button class="btn btn-sm" onclick="resetPin('${w.name.replace(/'/g, "\\'")}')">Reset PIN</button>
+        <label class="text-muted" style="font-size:12px;margin:0;display:flex;align-items:center;gap:4px;font-weight:400;">Initials
+          <input type="text" value="${escWO(workerInitials(w.name))}" maxlength="5" class="initials-input" style="width:64px;font-size:12px;padding:4px 6px;letter-spacing:1px;" oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g,'')" onchange="setWorkerInitialsUI('${w.name.replace(/'/g, "\\'")}', this)">
+        </label>
+        ${w.mustChangePin ? '<span class="hold-tag" title="Signs in with a temporary PIN and picks their own">Temp PIN</span>' : ''}
+        <button class="btn btn-sm" onclick="resetPin('${w.name.replace(/'/g, "\\'")}', this)">Reset PIN</button>
         <button class="btn btn-sm" onclick="toggleWorkerOnSchedule('${w.name.replace(/'/g, "\\'")}')">${isOnSchedule(w) ? 'On schedule ✓' : 'Off schedule'}</button>
         <button class="btn btn-sm" onclick="toggleWorkerWeekendCover('${w.name.replace(/'/g, "\\'")}')">${isWeekendCoverWorker(w) ? 'Weekend rota ✓' : 'Not on weekend rota'}</button>
         <button class="btn btn-sm" onclick="toggleWorker('${w.name.replace(/'/g, "\\'")}', ${active})">${active ? 'Deactivate' : 'Reactivate'}</button>
@@ -4940,33 +5222,161 @@ function renderWorkersList() {
   }).join('');
 }
 
+function tempBox(html) { return `<div class="temp-box">${html}</div>`; }
+
 async function addWorker() {
-  const name = document.getElementById('new-worker-name').value.trim();
-  const pin = document.getElementById('new-worker-pin').value.trim();
+  const name = document.getElementById('new-worker-name').value.trim().replace(/\s+/g, ' ');
+  const initials = document.getElementById('new-worker-initials').value.trim().toUpperCase();
   if (!name) { alert('Please enter a name.'); return; }
-  if (pin.length !== 4 || isNaN(pin)) { alert('PIN must be exactly 4 digits.'); return; }
+  if (!initials) { alert('Please enter their initials — this is what they sign in with.'); return; }
   if (workers.find(w => w.name.toLowerCase() === name.toLowerCase())) { alert('A worker with that name already exists.'); return; }
-  const worker = { name, pin, active: true };
-  workers.push(worker);
-  localStorage.setItem('workers', JSON.stringify(workers));
-  document.getElementById('new-worker-name').value = '';
-  document.getElementById('new-worker-pin').value = '';
-  renderWorkersList();
-  const { synced } = await queueOrSend('addWorker', { worker });
-  if (synced) setSyncStatus('office', 'synced', 'Worker saved to Sheets');
+  const clash = workers.find(w => w.active !== false && w.active !== 'FALSE' && workerInitials(w.name) === initials);
+  if (clash) { alert(initials + ' is already used by ' + clash.name + '.'); return; }
+  if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to add a worker.'); return; }
+  const btn = document.getElementById('add-worker-btn');
+  btn.disabled = true; btn.textContent = 'Adding...';
+  try {
+    const res = await api('addWorker', { worker: { name, initials }, token: officeToken });
+    if (!res || !res.tempPin) throw new Error('The Apps Script is still running the previous version — publish a new deployment version and try again.');
+    workers.push({ name: res.name, initials: res.initials, active: true, onSchedule: true, mustChangePin: true });
+    localStorage.setItem('workers', JSON.stringify(workers));
+    document.getElementById('new-worker-name').value = '';
+    document.getElementById('new-worker-initials').value = '';
+    renderWorkersList();
+    document.getElementById('new-worker-temp').innerHTML = tempBox(`${escWO(res.name)} signs in with <strong>${escWO(res.initials)}</strong> and temporary PIN <code>${escWO(res.tempPin)}</code>. They'll choose their own PIN straight away. This PIN isn't shown again.`);
+    setSyncStatus('office', 'synced', res.name + ' added');
+  } catch (err) {
+    alert('Could not add the worker: ' + (err.message || err));
+  } finally {
+    btn.disabled = false; btn.textContent = 'Add worker';
+  }
 }
 
-async function resetPin(name) {
-  const inputId = 'pin-reset-' + name.replace(/\s/g, '_');
-  const newPin = document.getElementById(inputId).value.trim();
-  if (newPin.length !== 4 || isNaN(newPin)) { alert('New PIN must be exactly 4 digits.'); return; }
-  const worker = workers.find(w => w.name === name);
-  if (!worker) return;
-  worker.pin = newPin;
-  localStorage.setItem('workers', JSON.stringify(workers));
-  renderWorkersList();
-  const { synced } = await queueOrSend('updateWorker', { worker });
-  if (synced) setSyncStatus('office', 'synced', 'PIN updated in Sheets');
+async function resetPin(name, btn) {
+  if (!confirm('Give ' + name + ' a temporary PIN?\n\nTheir current PIN stops working. They can also reset it themselves with "Forgot PIN?" on the tablet.')) return;
+  if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to reset a PIN.'); return; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Resetting...'; }
+  try {
+    const res = await api('officeResetWorkerPin', { name, token: officeToken });
+    if (!res || !res.tempPin) throw new Error('The Apps Script is still running the previous version — publish a new deployment version and try again.');
+    const w = workers.find(x => x.name === name);
+    if (w) w.mustChangePin = true;
+    renderWorkersList();
+    document.getElementById('new-worker-temp').innerHTML = tempBox(`Temporary PIN for ${escWO(name)} (${escWO(workerInitials(name))}): <code>${escWO(res.tempPin)}</code>. They'll choose their own PIN when they sign in. This PIN isn't shown again.`);
+    document.getElementById('new-worker-temp').scrollIntoView({ block: 'center', behavior: 'smooth' });
+  } catch (err) {
+    alert('Could not reset the PIN: ' + (err.message || err));
+    if (btn) { btn.disabled = false; btn.textContent = 'Reset PIN'; }
+  }
+}
+
+async function setWorkerInitialsUI(name, input) {
+  const w = workers.find(x => x.name === name);
+  const prev = workerInitials(name);
+  const ini = input.value.trim().toUpperCase();
+  if (!w || ini === prev) return;
+  if (!ini) { input.value = prev; return; }
+  const clash = workers.find(x => x !== w && x.active !== false && x.active !== 'FALSE' && workerInitials(x.name) === ini);
+  if (clash) { alert(ini + ' is already used by ' + clash.name + '.'); input.value = prev; return; }
+  if (!confirm('Change ' + name + "'s initials from " + prev + ' to ' + ini + '?\n\nThey will sign in with ' + ini + ' from now on.')) { input.value = prev; return; }
+  input.disabled = true;
+  try {
+    const res = await api('setWorkerInitials', { name, initials: ini, token: officeToken });
+    if (!res || !res.success) throw new Error('The Apps Script is still running the previous version — publish a new deployment version and try again.');
+    w.initials = res.initials;
+    localStorage.setItem('workers', JSON.stringify(workers));
+    setSyncStatus('office', 'synced', name + ' now signs in as ' + res.initials);
+  } catch (err) {
+    input.value = prev;
+    alert('Could not change the initials: ' + (err.message || err));
+  } finally {
+    input.disabled = false;
+  }
+}
+
+// ── Office users (admin only) ────────────────────────────────────
+async function loadOfficeUsers() {
+  const el = document.getElementById('office-users-list');
+  if (!officeUser || officeUser.role !== 'admin' || !el) return;
+  try {
+    const res = await api('listOfficeUsers', { token: officeToken });
+    renderOfficeUsers(res.users || []);
+    document.getElementById('ou-admin-topic').textContent = res.adminTopic ? 'Admin alerts (repeated wrong PINs or passwords, and reset-code misuse) go to the ntfy topic "' + res.adminTopic + '". Subscribe to it in the ntfy app on the admin phone.' : '';
+  } catch (err) {
+    el.innerHTML = '<p class="text-muted">' + escWO(err.message || 'Could not load office users') + '</p>';
+  }
+}
+
+function renderOfficeUsers(users) {
+  document.getElementById('office-users-list').innerHTML = users.map(u => {
+    const me = u.username === officeUser.username;
+    const arg = escWO(JSON.stringify(u.username));
+    return `<div class="ou-row">
+      <div class="ou-name"><strong>${escWO(u.name)}</strong> <span class="text-muted">· ${escWO(u.username)} · ${escWO(u.initials)}</span>
+        ${u.role === 'admin' ? '<span class="nf-kind-tag manual" style="margin-left:6px;">Admin</span>' : ''}${u.mustChange ? '<span class="hold-tag">Temp password</span>' : ''}${me ? '<span class="text-muted" style="margin-left:6px;font-size:12px;">(you)</span>' : ''}</div>
+      ${me ? '' : `<button class="btn btn-sm" onclick="toggleOfficeAdmin(${arg}, this)">${u.role === 'admin' ? 'Make office user' : 'Make admin'}</button>`}
+      <button class="btn btn-sm" onclick="resetOfficeUserPasswordUI(${arg}, this)">Reset password</button>
+      ${me ? '' : `<button class="btn btn-sm" style="color:var(--color-text-error);" onclick="removeOfficeUserUI(${arg}, this)">Remove</button>`}
+    </div>`;
+  }).join('') || '<p class="text-muted">No office users.</p>';
+  officeUsersCache = users;
+}
+let officeUsersCache = [];
+
+async function addOfficeUserUI() {
+  const user = {
+    username: document.getElementById('ou-username').value.trim().toLowerCase(),
+    name: document.getElementById('ou-name').value.trim(),
+    initials: document.getElementById('ou-initials').value.trim().toUpperCase(),
+    role: document.getElementById('ou-role').value,
+    isNew: true
+  };
+  if (!user.username || !user.name || !user.initials) { alert('Fill in the username, name and initials.'); return; }
+  const btn = document.getElementById('ou-add-btn');
+  btn.disabled = true; btn.textContent = 'Adding...';
+  try {
+    const res = await api('saveOfficeUser', { user, token: officeToken });
+    ['ou-username', 'ou-name', 'ou-initials'].forEach(id => { document.getElementById(id).value = ''; });
+    document.getElementById('office-users-temp').innerHTML = tempBox(`${escWO(res.user.name)} signs in as <strong>${escWO(res.user.username)}</strong> with temporary password <code>${escWO(res.tempPassword)}</code>. They'll choose their own when they first sign in. This password isn't shown again.`);
+    loadOfficeUsers();
+  } catch (err) {
+    alert('Could not add the user: ' + (err.message || err));
+  } finally {
+    btn.disabled = false; btn.textContent = 'Add office user';
+  }
+}
+
+async function toggleOfficeAdmin(username, btn) {
+  const u = officeUsersCache.find(x => x.username === username);
+  if (!u) return;
+  const role = u.role === 'admin' ? 'office' : 'admin';
+  if (!confirm((role === 'admin' ? 'Give ' + u.name + ' admin access?' : 'Remove admin access from ' + u.name + '?'))) return;
+  btn.disabled = true;
+  try {
+    await api('saveOfficeUser', { user: { username, name: u.name, initials: u.initials, role, isNew: false }, token: officeToken });
+    loadOfficeUsers();
+  } catch (err) { btn.disabled = false; alert(err.message || err); }
+}
+
+async function resetOfficeUserPasswordUI(username, btn) {
+  const u = officeUsersCache.find(x => x.username === username);
+  if (!confirm('Give ' + (u ? u.name : username) + ' a temporary password?\n\nTheir current password stops working.')) return;
+  btn.disabled = true; btn.textContent = 'Resetting...';
+  try {
+    const res = await api('resetOfficeUserPassword', { username, token: officeToken });
+    document.getElementById('office-users-temp').innerHTML = tempBox(`Temporary password for ${escWO(u ? u.name : username)}: <code>${escWO(res.tempPassword)}</code>. They'll choose their own when they sign in. This password isn't shown again.`);
+    loadOfficeUsers();
+  } catch (err) { alert(err.message || err); btn.disabled = false; btn.textContent = 'Reset password'; }
+}
+
+async function removeOfficeUserUI(username, btn) {
+  const u = officeUsersCache.find(x => x.username === username);
+  if (!confirm('Remove ' + (u ? u.name : username) + ' as an office user? They will no longer be able to sign in.')) return;
+  btn.disabled = true;
+  try {
+    await api('removeOfficeUser', { username, token: officeToken });
+    loadOfficeUsers();
+  } catch (err) { alert(err.message || err); btn.disabled = false; }
 }
 
 async function toggleWorker(name, currentlyActive) {
@@ -7709,11 +8119,6 @@ document.addEventListener('keydown', e => {
 //  WO CREATION
 // ══════════════════════════════════════════════════════════════════
 
-const OFFICE_USERS = {
-  Peter_Cooper:   { name: 'Peter Cooper',   initials: 'PC'  },
-  Chris_Denton:   { name: 'Chris Denton',   initials: 'CBD' },
-  Admin:          { name: 'Admin',          initials: 'ADM' }
-};
 
 const WO_PRIORITIES = [
   { code: 'P0', label: 'P0 – Immediate / Urgent', days: 1 },
@@ -7928,17 +8333,9 @@ function workerInitials(name) {
   return String(name || '').trim().split(/\s+/).map(p => p.charAt(0)).join('').toUpperCase();
 }
 
-function officeUserName() {
-  if (!currentOfficeUser) return '';
-  const u = OFFICE_USERS[currentOfficeUser];
-  return u ? u.name : String(currentOfficeUser).replace(/_/g, ' ');
-}
+function officeUserName() { return officeUser ? officeUser.name : ''; }
 
-function officeUserInitials() {
-  const u = OFFICE_USERS[currentOfficeUser];
-  if (u) return u.initials;
-  return String(currentOfficeUser || '').split(/[_\s]+/).map(p => p.charAt(0)).join('').toUpperCase();
-}
+function officeUserInitials() { return officeUser ? officeUser.initials : ''; }
 
 function nextWOId() {
   let max = 0;
