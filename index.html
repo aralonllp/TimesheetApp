@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-85 (Notifications tab: send custom notifications, sent log, daily allowance) -->
+<!-- BUILD MARKER: NB-86 (Notifications: allowance note removed; Keisha Schultz removed as an office user) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -709,7 +709,6 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
           <label>User</label>
           <select id="office-user-select">
             <option value="">Select user...</option>
-            <option value="Keisha_Schultz">Keisha Schultz</option>
             <option value="Chris_Denton">Chris Denton</option>
             <option value="Peter_Cooper">Peter Cooper</option>
             <option value="Admin">Admin</option>
@@ -5980,7 +5979,7 @@ async function loadNtfyAllowance() {
     num.textContent = remaining.toLocaleString('en-GB');
     num.classList.toggle('nf-low', limit ? remaining < limit * 0.1 : remaining < 25);
     document.getElementById('nf-remaining-lbl').textContent = 'Remaining today' + (limit ? ' of ' + limit.toLocaleString('en-GB') : '');
-    note.textContent = 'From ntfy.sh. ' + (a.limits && a.limits.basis === 'ip' ? 'The allowance is per internet connection, so it only covers notifications sent from this office network.' : '');
+    note.textContent = '';
   } catch (e) {
     nfAllowance = null;
     num.textContent = '—';
@@ -7711,7 +7710,6 @@ document.addEventListener('keydown', e => {
 // ══════════════════════════════════════════════════════════════════
 
 const OFFICE_USERS = {
-  Keisha_Schultz: { name: 'Keisha Schultz', initials: 'KYS' },
   Peter_Cooper:   { name: 'Peter Cooper',   initials: 'PC'  },
   Chris_Denton:   { name: 'Chris Denton',   initials: 'CBD' },
   Admin:          { name: 'Admin',          initials: 'ADM' }
