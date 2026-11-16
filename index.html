@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-92 (Office sign-in by initials; Admin signs in as admin) -->
+<!-- BUILD MARKER: NB-93 (Sign-in: no placeholders on the worker or office initials boxes) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -593,7 +593,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
         <p class="screen-title">Sign in</p>
         <div class="card">
           <label>Your initials</label>
-          <input type="text" id="worker-initials" placeholder="e.g. BW" maxlength="5" autocomplete="off" autocapitalize="characters" spellcheck="false" class="initials-input" oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g,'')" onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('worker-pin').focus();}">
+          <input type="text" id="worker-initials" maxlength="5" autocomplete="off" autocapitalize="characters" spellcheck="false" class="initials-input" oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g,'')" onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('worker-pin').focus();}">
           <label>PIN</label>
           <input type="password" id="worker-pin" placeholder="••••" maxlength="4" inputmode="numeric" autocomplete="off" class="pin-input" onkeydown="if(event.key==='Enter'){event.preventDefault();workerLogin();}">
           <div class="form-footer">
@@ -714,7 +714,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
         <p class="screen-title">Office access</p>
         <div class="card">
           <label>Your initials</label>
-          <input type="text" id="office-username" placeholder="e.g. PC" autocomplete="username" autocapitalize="none" spellcheck="false" onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('office-pin').focus();}">
+          <input type="text" id="office-username" autocomplete="username" autocapitalize="none" spellcheck="false" onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('office-pin').focus();}">
           <label>Password</label>
           <input type="password" id="office-pin" placeholder="Enter password" autocomplete="current-password" onkeydown="if(event.key==='Enter'){event.preventDefault();officeLogin();}">
           <div class="form-footer">
