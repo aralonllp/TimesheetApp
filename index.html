@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-97 (Security: changing or resetting a PIN / password ends that person's other sessions) -->
+<!-- BUILD MARKER: NB-98 (PIN reset code sent at urgent priority) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -1885,7 +1885,7 @@ async function publishNtfyList(list) {
   let ok = true;
   for (const m of list) {
     try {
-      const r = await fetch(NTFY_SERVER, { method: 'POST', body: JSON.stringify({ topic: m.topic, title: m.title || '', message: m.message || '', priority: 4, tags: m.tags || [] }) });
+      const r = await fetch(NTFY_SERVER, { method: 'POST', body: JSON.stringify({ topic: m.topic, title: m.title || '', message: m.message || '', priority: Math.max(4, m.priority || 4), tags: m.tags || [] }) });
       if (!r.ok) ok = false;
     } catch (e) { ok = false; }
   }
