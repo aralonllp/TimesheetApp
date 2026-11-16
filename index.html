@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-83 (Jobs filters: value list only offers what the current results contain) -->
+<!-- BUILD MARKER: NB-84 (Recurring jobs: saved changes no longer undone by a refresh that was already in flight) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -1363,6 +1363,28 @@ let entries = [];
 let workers = [];
 let weekSubmissions = [];
 let recurringJobs = [];
+// Recurring changes saved in the last minute. A data load that started before the save
+// can come back with the old values; these are laid back over it until the server agrees.
+const recentRecurringSaves = new Map();
+const RECENT_RJ_MS = 60000;
+function noteRecurringSaved(id, fields) {
+  const cur = recentRecurringSaves.get(id);
+  recentRecurringSaves.set(id, { fields: { ...(cur ? cur.fields : {}), ...fields }, at: Date.now() });
+}
+function rjSame(a, b) {
+  const n = v => (v === true || String(v).toUpperCase() === 'TRUE') ? 'TRUE' : (v === false || String(v).toUpperCase() === 'FALSE') ? 'FALSE' : String(v == null ? '' : v).trim();
+  return n(a) === n(b);
+}
+function withRecentRecurring(list) {
+  recentRecurringSaves.forEach((r, id) => {
+    const j = list.find(x => x.id === id);
+    const agrees = j && Object.keys(r.fields).every(k => rjSame(j[k], r.fields[k]));
+    if (agrees || Date.now() - r.at > RECENT_RJ_MS) { recentRecurringSaves.delete(id); return; }
+    if (j) Object.assign(j, r.fields);
+    else if (r.fields.id) list.push({ ...r.fields });
+  });
+  return list;
+}
 let absenceTypes = [];
 let currentOfficeUser = null;
 let overtimeRequests = [];
@@ -1473,7 +1495,7 @@ function loadInitialData() {
     syncQueue.forEach(q => {
       if (!entries.find(e => e.id === q.id)) entries.push(q);
     });
-    recurringJobs = (data.recurringJobs || []).map(j => ({ ...j, assignedTo: String(j.assignedTo || '') }));
+    recurringJobs = withRecentRecurring((data.recurringJobs || []).map(j => ({ ...j, assignedTo: String(j.assignedTo || '') })));
     setPropertiesFromData(data.properties || []);
     setCodeListsFromData(data);
     setScheduleFromData(data);
@@ -1682,7 +1704,7 @@ async function pollJobs() {
         entries.push(r.entry);
       }
     });
-    recurringJobs = (data.recurringJobs || recurringJobs).map(j => ({ ...j, assignedTo: String(j.assignedTo || '') }));
+    recurringJobs = withRecentRecurring((data.recurringJobs || recurringJobs).map(j => ({ ...j, assignedTo: String(j.assignedTo || '') })));
     absenceTypes = data.absenceTypes || absenceTypes;
     overtimeRequests = data.overtimeRequests || overtimeRequests;
     if (data.properties) setPropertiesFromData(data.properties);
@@ -2743,7 +2765,7 @@ async function refreshOffice() {
           entries.push(r.entry);
         }
       });
-        recurringJobs = (data.recurringJobs || []).map(j => ({ ...j, assignedTo: String(j.assignedTo || '') }));
+        recurringJobs = withRecentRecurring((data.recurringJobs || []).map(j => ({ ...j, assignedTo: String(j.assignedTo || '') })));
     if (data.properties) setPropertiesFromData(data.properties);
     setCodeListsFromData(data);
     setScheduleFromData(data);
@@ -3728,7 +3750,9 @@ async function sendRecurringUpdate(id, fields, okMsg, busyBtn, busyText) {
   try {
     const res = await api('saveRecurringJob', { job: Object.assign({ id }, fields), performedBy: officeUserName() });
     if (!res || res.id !== id) throw new Error(RJ_OLD_SCRIPT_MSG);
-    Object.assign(j, fields);
+    noteRecurringSaved(id, fields);
+    const live = recurringJobs.find(x => x.id === id) || j;
+    Object.assign(live, fields);
     release();
     localStorage.setItem('recurringJobs', JSON.stringify(recurringJobs));
     renderRecurringJobsList();
@@ -3810,7 +3834,9 @@ async function addRecurringJob() {
   try {
     const res = await api('saveRecurringJob', { job: { description, costCode, assignedTo: '' }, performedBy: officeUserName() });
     if (!res || !/^RWO\d+$/i.test(String(res.id || ''))) throw new Error(RJ_OLD_SCRIPT_MSG);
-    recurringJobs.push({ id: res.id, property: '', description, costCode, active: true, assignedTo: '' });
+    const created = { id: res.id, property: '', description, costCode, active: true, assignedTo: '' };
+    recurringJobs.push(created);
+    noteRecurringSaved(res.id, created);
     cancelEditRecurring();
     localStorage.setItem('recurringJobs', JSON.stringify(recurringJobs));
     renderRecurringJobsList();
