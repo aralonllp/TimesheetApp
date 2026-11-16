@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-93 (Sign-in: no placeholders on the worker or office initials boxes) -->
+<!-- BUILD MARKER: NB-94 (Security: every request carries a signed session token; nothing loads before sign-in) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -1567,7 +1567,8 @@ let pollTimer = null;
 window.addEventListener('load', () => {
   document.querySelector('.app').classList.add('worker-wide');
   if (SCRIPT_URL) {
-    loadInitialData();
+    loadLocalData();
+    api('ping').then(() => setSyncStatus('login', 'synced', 'Connected')).catch(() => setSyncStatus('login', 'error', 'Offline'));
   } else {
     document.getElementById('config-banner').style.display = 'block';
     setSyncStatus('login', 'error', 'Not connected — set SCRIPT_URL');
@@ -1584,19 +1585,48 @@ window.addEventListener('online', () => {
 
 // ── API helpers ───────────────────────────────────────────────────
 
+// Signed session tokens from sign-in; every call carries one
+let workerToken = '';
+function currentToken() { return (currentOfficeUser && officeToken) || workerToken || officeToken || ''; }
+function readWorkerTokens() { try { return JSON.parse(localStorage.getItem('workerTokens') || '{}'); } catch (e) { return {}; } }
+function saveWorkerToken(name, token) {
+  if (!token) return;
+  workerToken = token;
+  const t = readWorkerTokens(); t[name] = token;
+  try { localStorage.setItem('workerTokens', JSON.stringify(t)); } catch (e) {}
+}
+let authExpiredShown = false;
+function handleAuthExpired() {
+  if (authExpiredShown) return;
+  if (currentOfficeUser && officeToken) {
+    authExpiredShown = true;
+    alert('Your office session has expired — please sign in again.');
+    officeLogout();
+    authExpiredShown = false;
+  } else if (currentWorker && workerToken) {
+    authExpiredShown = true;
+    const t = readWorkerTokens(); delete t[currentWorker];
+    try { localStorage.setItem('workerTokens', JSON.stringify(t)); } catch (e) {}
+    alert('Please sign in again so your entries can sync.');
+    workerLogout();
+    authExpiredShown = false;
+  }
+}
+
 function api(action, payload = {}, _attempt = 0) {
   if (!SCRIPT_URL) return Promise.reject(new Error('No SCRIPT_URL configured'));
   const MAX_ATTEMPTS = 3; // 1 initial try + 2 retries
   return fetch(SCRIPT_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain' },
-    body: JSON.stringify({ action, ...payload })
+    body: JSON.stringify({ action, ...payload, token: payload.token || currentToken() })
   })
   .then(function(r) {
     if (!r.ok) throw new Error('HTTP ' + r.status); // transient — worth retrying
     return r.json().catch(function() { throw new Error('Bad response from server'); }); // non-JSON — also transient
   })
   .then(function(data) {
+    if (data.authError) { handleAuthExpired(); const e = new Error(data.error); e.authError = true; throw e; }
     if (data.error) throw new Error(data.error); // real app-level error — not retried
     return data;
   })
@@ -1694,6 +1724,12 @@ function loadInitialData() {
   }).catch(function(err) {
     console.error('loadInitialData failed:', err);
     setSyncStatus('login', 'error', 'Offline — using local data');
+    loadLocalData();
+  });
+}
+
+function loadLocalData() {
+  {
     jobs = JSON.parse(localStorage.getItem('jobs') || '[]');
     entries = JSON.parse(localStorage.getItem('entries') || '[]');
     workers = JSON.parse(localStorage.getItem('workers') || '[]');
@@ -1705,7 +1741,7 @@ function loadInitialData() {
     overtimeRequests = JSON.parse(localStorage.getItem('overtimeRequests') || '[]');
     sanitiseLoadedData();
     populateWorkerDropdown();
-  });
+  }
 }
 
 async function flushQueue() {
@@ -1846,11 +1882,12 @@ async function workerLogin() {
       return;
     }
     await rememberPin(initials, res.name, pin);
+    saveWorkerToken(res.name, res.token);
     finishWorkerLogin(res.name);
   } catch (err) {
     if (isNetworkError(err)) {
       const name = await offlinePinMatch(initials, pin);
-      if (name) { finishWorkerLogin(name); return; }
+      if (name) { workerToken = readWorkerTokens()[name] || ''; finishWorkerLogin(name); return; }
       alert(name === false ? 'Initials or PIN not recognised.' : 'No connection. Sign in once while online on this tablet, then it will work offline too.');
       return;
     }
@@ -1883,8 +1920,9 @@ async function submitNewPin() {
   const btn = document.getElementById('pin-set-btn');
   btn.disabled = true; btn.textContent = 'Saving...';
   try {
-    await api('setWorkerPin', { initials: pinChangeCtx.initials, currentPin: pinChangeCtx.currentPin, newPin });
+    const res = await api('setWorkerPin', { initials: pinChangeCtx.initials, currentPin: pinChangeCtx.currentPin, newPin });
     await rememberPin(pinChangeCtx.initials, pinChangeCtx.name, newPin);
+    saveWorkerToken(pinChangeCtx.name, res.token);
     closeModalById('pin-set-modal');
     const name = pinChangeCtx.name;
     pinChangeCtx = null;
@@ -1938,6 +1976,7 @@ async function confirmPinResetUI() {
     const res = await api('confirmPinReset', { initials, code, newPin });
     if (!res.success) { publishNtfyList(res.ntfy); throw new Error(res.reason || 'Could not reset your PIN'); }
     await rememberPin(initials, res.name, newPin);
+    saveWorkerToken(res.name, res.token);
     closeModalById('forgot-pin-modal');
     document.getElementById('worker-initials').value = initials;
     finishWorkerLogin(res.name);
@@ -1969,11 +2008,13 @@ function finishWorkerLogin(name) {
     syncQueue.length ? syncQueue.length + ' entries pending sync' : 'Synced');
     if (pollTimer) clearInterval(pollTimer);
   	pollTimer = setInterval(pollJobs, POLL_INTERVAL_MS);
+    if (workerToken) pollJobs();
   	setTimeout(updateHoursPlaceholder, 500);
 }
 
 function workerLogout() {
   currentWorker = null;
+  workerToken = '';
   closeNotifications();
   updateNotifBadge();
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
