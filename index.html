@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-95 (Sessions: renew while in use, quiet re-sign-in when one ends, tablet signs out after 30 min idle) -->
+<!-- BUILD MARKER: NB-96 (Security: workers only receive their own data) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -7830,6 +7830,7 @@ function renderWorkerJobs() {
     totals[k] = (totals[k] || 0) + h;
     if (e.worker === currentWorker) mineHrs[k] = (mineHrs[k] || 0) + h;
   });
+  if (serverJobHours) Object.keys(serverJobHours).forEach(k => { totals[k] = Math.max(totals[k] || 0, serverJobHours[k]); });
   el.innerHTML = list.length
     ? list.map(j => renderWorkerJobRow(j, totals[String(j.id)] || 0, mineHrs[String(j.id)] || 0)).join('')
     : '<p class="text-muted">' + (q ? 'No jobs match that search.' : (workerJobsView === 'open' ? 'No open jobs assigned to you.' : 'No closed jobs.')) + '</p>';
@@ -8222,7 +8223,11 @@ let isCreatingWO = false;
 
 var woCostCodes = [];
 
+// Signed-in workers only get their own entries, so job totals come from the server
+let serverJobHours = null;
+
 function setCodeListsFromData(data) {
+  serverJobHours = data && data.jobHours && typeof data.jobHours === 'object' ? data.jobHours : null;
   setPhotoCountsFromData(data);
   setNotificationsFromData(data);
   if (Array.isArray(data.jobComments)) jobComments = data.jobComments.map(c => ({ ...c, jobId: String(c.jobId || ''), text: String(c.text == null ? '' : c.text) }));
