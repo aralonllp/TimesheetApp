@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-81 (Holding WOs: numbering reuses the lowest free HWO number) -->
+<!-- BUILD MARKER: NB-82 (Schedule: raise a new WO from the Add to schedule box) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -351,6 +351,8 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 .sched-add:hover { border-color: var(--color-text-primary); color: var(--color-text-primary); }
 .sched-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.35); display: flex; align-items: flex-start; justify-content: center; z-index: 10000; padding: 60px 16px; overflow-y: auto; }
 .sched-modal-box { width: 100%; max-width: 560px; margin: 0; }
+.sched-wo-box { width: 100%; max-width: 900px; margin: 0; }
+.sched-wo-box .wo-card { margin: 0; }
 .wk-day { margin-bottom: 12px; }
 .wk-table td { padding: 8px 10px; font-size: 12px; vertical-align: middle; border-right: 0.5px solid var(--color-border-tertiary); border-bottom: 0.5px solid var(--color-border-tertiary); }
 .wk-table td:last-child { border-right: none; }
@@ -888,6 +890,13 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
         </div>
       </div>
 
+      <div id="sched-wo-modal" class="sched-modal" style="display:none;">
+        <div class="sched-wo-box">
+          <button type="button" class="btn btn-sm" style="margin-bottom:10px;" onclick="schedRaiseWOBack()">&larr; Back to schedule</button>
+          <div id="sched-wo-slot"></div>
+        </div>
+      </div>
+
       <div id="sched-modal" class="sched-modal" style="display:none;" onmousedown="if(event.target===this)closeSchedModal()">
         <div class="card sched-modal-box">
           <p class="section-heading" id="sched-modal-title">Add to schedule</p>
@@ -895,6 +904,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
           <label style="margin-top:14px;">Work order or status</label>
           <select id="sched-item" onchange="schedItemChanged()"></select>
           <p class="wo-hint" id="sched-item-hint"></p>
+          <button type="button" class="hold-raise" id="sched-raise-wo" style="margin-top:4px;" onclick="schedRaiseWO()">+ Raise a new work order</button>
           <div id="sched-rj-prop" class="rj-prop-wrap"></div>
           <div id="sched-with-wrap" style="display:none;">
             <label class="wo-atp-check sched-with-check"><input type="checkbox" id="sched-with-tick" onchange="schedWithToggled()"> Other worker required?</label>
@@ -6449,6 +6459,58 @@ function fillSchedItemSelect(worker) {
     ? 'Showing the ' + openJobs.length + ' open work order' + (openJobs.length === 1 ? '' : 's') + (myRecurring.length ? ' and ' + myRecurring.length + ' recurring job' + (myRecurring.length === 1 ? '' : 's') : '') + ' assigned to ' + worker + '.'
     : 'No open work orders or recurring jobs are assigned to ' + worker + ' — assign them on the WO Creation, Jobs or Recurring Jobs tab first.';
   if (!sel._ssAttached) ssAttach('sched-item', 'Search WO, location or status...'); else ssRefresh('sched-item');
+  document.getElementById('sched-raise-wo').textContent = '+ Raise a new work order for ' + worker;
+}
+
+// ── Raise a WO without leaving the schedule ──────────────────────
+// The WO Creation card is borrowed into an overlay; on create it goes back
+// to its tab and the new WO is picked in the schedule box.
+let schedWOReturn = null;
+
+function schedRaiseWO() {
+  if (!schedModalState) return;
+  const worker = schedModalState.worker;
+  schedWOReturn = { worker, date: schedModalState.date };
+  editingJobId = null;
+  holdingJobId = null;
+  document.getElementById('sched-wo-slot').appendChild(document.querySelector('#office-tab-wocreate .wo-card'));
+  resetWOForm();
+  if (schedModalState.date) document.getElementById('wo-sched-start').value = schedModalState.date;
+  if (workers.some(w => w.name === worker)) woSelectedWorkers = new Set([worker]);
+  renderWOAssignChips();
+  initWOForm();
+  document.getElementById('wo-clear-btn').textContent = 'Cancel';
+  document.getElementById('sched-modal').style.display = 'none';
+  document.getElementById('sched-wo-modal').style.display = 'flex';
+  document.getElementById('sched-wo-modal').scrollTop = 0;
+}
+
+function schedRaiseWOBack(newId) {
+  if (!schedWOReturn) return;
+  const ret = schedWOReturn;
+  schedWOReturn = null;
+  const card = document.querySelector('#sched-wo-slot .wo-card');
+  const tab = document.getElementById('office-tab-wocreate');
+  if (card) tab.insertBefore(card, document.getElementById('toast-wo-created').nextSibling);
+  ['wo-location', 'wo-costcode'].forEach(id => ssClose(id));
+  resetWOForm();
+  document.getElementById('sched-wo-modal').style.display = 'none';
+  if (!schedModalState) return;
+  document.getElementById('sched-modal').style.display = 'flex';
+  if (!newId) return;
+  const sel = document.getElementById('sched-item');
+  const keep = sel.value;
+  fillSchedItemSelect(ret.worker);
+  const val = 'job:' + newId;
+  if (!Array.from(sel.options).some(o => o.value === val)) {
+    const j = jobs.find(x => x.id === newId);
+    const o = document.createElement('option'); o.value = val;
+    o.textContent = newId + ' · ' + (j ? propLabel(j.property, 40) : '') + ' (not assigned to ' + ret.worker + ')';
+    sel.insertBefore(o, sel.options[1] || null);
+  }
+  sel.value = val || keep;
+  ssRefresh('sched-item');
+  schedItemChanged();
 }
 
 function schedWithNames(it) { return String((it && it.withWorkers) || '').split(',').map(x => x.trim()).filter(Boolean); }
@@ -6540,6 +6602,7 @@ function openSchedModal(itemId, date, worker) {
 }
 
 function closeSchedModal() {
+  if (schedWOReturn) schedRaiseWOBack();
   document.getElementById('sched-modal').style.display = 'none';
   schedModalState = null;
 }
@@ -7831,6 +7894,7 @@ function editJob(id) {
 }
 
 function woClearOrCancel() {
+  if (schedWOReturn) { schedRaiseWOBack(); return; }
   if (editingJobId || holdingJobId) {
     editingJobId = null;
     holdingJobId = null;
@@ -8118,11 +8182,12 @@ async function createWorkOrder() {
     notifyJobAllocated(created, expandAssignedTo(created.assignedTo));
     localStorage.setItem('jobs', JSON.stringify(jobs));
     renderOfficeDashboard();
+    setSyncStatus('office', 'synced', created.id + ' created');
+    if (schedWOReturn) { schedRaiseWOBack(created.id); return; }
     resetWOForm();
     const t = document.getElementById('toast-wo-created');
     t.textContent = '✓ ' + created.id + ' created';
     showToast('toast-wo-created');
-    setSyncStatus('office', 'synced', created.id + ' created');
   } catch (err) {
     setSyncStatus('office', 'error', 'Work order not created');
     alert('Could not create the work order: ' + (err.message || err));
