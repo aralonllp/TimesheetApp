@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-91 (Office sign-in by initials) -->
+<!-- BUILD MARKER: NB-92 (Office sign-in by initials; Admin signs in as admin) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -714,7 +714,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
         <p class="screen-title">Office access</p>
         <div class="card">
           <label>Your initials</label>
-          <input type="text" id="office-username" placeholder="e.g. PC" autocomplete="username" autocapitalize="characters" spellcheck="false" class="initials-input" oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9._-]/g,'')" onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('office-pin').focus();}">
+          <input type="text" id="office-username" placeholder="e.g. PC" autocomplete="username" autocapitalize="none" spellcheck="false" onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('office-pin').focus();}">
           <label>Password</label>
           <input type="password" id="office-pin" placeholder="Enter password" autocomplete="current-password" onkeydown="if(event.key==='Enter'){event.preventDefault();officeLogin();}">
           <div class="form-footer">
@@ -5328,7 +5328,7 @@ function renderOfficeUsers(users) {
     const me = u.username === officeUser.username;
     const arg = escWO(JSON.stringify(u.username));
     return `<div class="ou-row">
-      <div class="ou-name"><strong>${escWO(u.name)}</strong> <span class="text-muted">· signs in as ${escWO(u.initials)}</span>
+      <div class="ou-name"><strong>${escWO(u.name)}</strong> <span class="text-muted">· signs in as ${escWO(u.username === 'admin' ? 'admin' : u.initials)}</span>
         ${u.role === 'admin' ? '<span class="nf-kind-tag manual" style="margin-left:6px;">Admin</span>' : ''}${u.mustChange ? '<span class="hold-tag">Temp password</span>' : ''}${me ? '<span class="text-muted" style="margin-left:6px;font-size:12px;">(you)</span>' : ''}</div>
       ${me ? '' : `<button class="btn btn-sm" onclick="toggleOfficeAdmin(${arg}, this)">${u.role === 'admin' ? 'Make office user' : 'Make admin'}</button>`}
       <button class="btn btn-sm" onclick="resetOfficeUserPasswordUI(${arg}, this)">Reset password</button>
