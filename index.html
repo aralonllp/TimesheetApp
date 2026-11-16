@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-84 (Recurring jobs: saved changes no longer undone by a refresh that was already in flight) -->
+<!-- BUILD MARKER: NB-85 (Notifications tab: send custom notifications, sent log, daily allowance) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -184,6 +184,23 @@ textarea { height: 60px; resize: none; }
 #office-tab-wocreate .wo-loc-row .ss-input { height: 100%; font-size: 14px; }
 .wo-readonly { background: var(--color-background-secondary, #f3f3f3); color: var(--color-text-secondary); cursor: not-allowed; }
 .wo-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.nf-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 1rem; align-items: start; }
+@media (max-width: 800px) { .nf-grid { grid-template-columns: 1fr; } }
+.nf-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+.nf-stat { padding: 12px; border-radius: var(--border-radius-md); background: var(--color-background-secondary); }
+.nf-stat-num { font-size: 26px; font-weight: 700; line-height: 1.1; }
+.nf-stat-num.nf-low { color: var(--color-text-warning); }
+.nf-stat-lbl { font-size: 12px; color: var(--color-text-secondary); margin-top: 2px; }
+.nf-item { padding: 10px 0; border-top: 1px solid var(--color-border-tertiary, #eee); }
+.nf-item:first-child { border-top: none; }
+.nf-item-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 13px; }
+.nf-item-title { font-weight: 700; }
+.nf-item-meta { font-size: 11px; color: var(--color-text-secondary); }
+.nf-item-msg { font-size: 13px; margin-top: 3px; white-space: pre-wrap; word-break: break-word; }
+.nf-item-to { font-size: 12px; color: var(--color-text-secondary); margin-top: 3px; }
+.nf-kind-tag { font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 20px; background: var(--color-background-secondary); color: var(--color-text-secondary); }
+.nf-kind-tag.manual { background: #e6f0fb; color: #185fa5; }
+.nf-day { font-size: 12px; font-weight: 700; color: var(--color-text-secondary); margin: 14px 0 2px; text-transform: uppercase; letter-spacing: .03em; }
 .wo-chip { min-width: 52px; padding: 6px 10px; font-size: 13px; font-weight: 600; border: 1px solid #ccc; border-radius: 20px; background: transparent; color: var(--color-text-primary); cursor: pointer; font-family: inherit; }
 .wo-chip.on { background: var(--color-text-primary); color: #fff; border-color: var(--color-text-primary); }
 .wo-hint { font-size: 11px; color: var(--color-text-secondary); margin-top: 4px; }
@@ -730,6 +747,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
         <button onclick="switchOfficeTab('jobs')" id="otab-jobs">Jobs</button>
         <button onclick="switchOfficeTab('schedule')" id="otab-schedule">Schedule Creation</button>
         <button onclick="switchOfficeTab('weekendcover')" id="otab-weekendcover">Weekend Cover</button>
+        <button onclick="switchOfficeTab('notifs')" id="otab-notifs">Notifications</button>
         <button onclick="switchOfficeTab('overtime')" id="otab-overtime">Overtime</button>
         <button onclick="switchOfficeTab('weekapprovals')" id="otab-weekapprovals">Weekly Approvals</button>
         <button onclick="switchOfficeTab('recurring')" id="otab-recurring">Recurring Jobs</button>
@@ -1181,6 +1199,53 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
       </div>
 
       <!-- Workers tab -->
+      <!-- Notifications tab -->
+      <div id="office-tab-notifs" style="display:none;">
+        <div class="nf-grid">
+          <div class="card">
+            <p class="section-heading">Send a notification</p>
+            <label style="margin-top:12px;">Title</label>
+            <input type="text" id="nf-title" maxlength="80" placeholder="Message from the office">
+            <label>Message <span style="color:var(--color-text-error)">*</span></label>
+            <textarea id="nf-message" maxlength="1000" placeholder="e.g. Site meeting at 8am tomorrow in the yard"></textarea>
+            <div class="row-between" style="margin-top:12px;">
+              <label style="margin:0;">Send to</label>
+              <div style="display:flex;gap:6px;">
+                <button type="button" class="btn btn-sm" onclick="nfSelectAll(true)">All</button>
+                <button type="button" class="btn btn-sm" onclick="nfSelectAll(false)">None</button>
+              </div>
+            </div>
+            <div class="wo-chips" id="nf-workers" style="margin-top:8px;"></div>
+            <p class="wo-hint" id="nf-picked"></p>
+            <div class="form-footer" style="display:flex;justify-content:flex-end;margin-top:1rem;">
+              <button class="btn btn-primary" id="nf-send" onclick="sendCustomNotification()">Send notification</button>
+            </div>
+          </div>
+          <div class="card">
+            <p class="section-heading">Today</p>
+            <div class="nf-stats">
+              <div class="nf-stat"><div class="nf-stat-num" id="nf-today">—</div><div class="nf-stat-lbl">Sent today</div></div>
+              <div class="nf-stat"><div class="nf-stat-num" id="nf-remaining">—</div><div class="nf-stat-lbl" id="nf-remaining-lbl">Remaining today</div></div>
+            </div>
+            <p class="wo-hint" id="nf-limit-note"></p>
+          </div>
+        </div>
+        <div class="card" style="margin-top:1rem;">
+          <div class="row-between card-header" style="flex-wrap:wrap;gap:8px;">
+            <p class="section-heading">Sent notifications <span class="text-muted" style="font-weight:400;font-size:12px;">last 14 days</span></p>
+            <div style="display:flex;gap:6px;align-items:center;">
+              <div class="jobs-toggle" id="nf-kind">
+                <button class="active" onclick="nfSetKind('all')" data-k="all">All</button>
+                <button onclick="nfSetKind('manual')" data-k="manual">Sent from here</button>
+                <button onclick="nfSetKind('auto')" data-k="auto">Automatic</button>
+              </div>
+              <button class="btn btn-sm" onclick="loadSentNotifications()">Refresh</button>
+            </div>
+          </div>
+          <div id="nf-log"><p class="text-muted">Loading…</p></div>
+        </div>
+      </div>
+
       <div id="office-tab-overtime" style="display:none;">
         <div class="card">
           <div class="row-between card-header">
@@ -4825,7 +4890,7 @@ async function officeReviewOvertime(id, status) {
 }
 
 function switchOfficeTab(tab) {
-  const tabs = ['daily','wocreate','jobs','schedule','weekendcover','schedview','entries','absences','workers','locations','recurring','overtime','weekapprovals'];
+  const tabs = ['daily','wocreate','jobs','schedule','weekendcover','notifs','schedview','entries','absences','workers','locations','recurring','overtime','weekapprovals'];
   tabs.forEach(t => {
     const el = document.getElementById('office-tab-' + t);
     const btn = document.getElementById('otab-' + t);
@@ -4843,6 +4908,7 @@ function switchOfficeTab(tab) {
   if (tab === 'schedview') renderScheduleView();
   if (tab === 'locations') renderLocationsList();
   if (tab === 'weekendcover') renderWeekendCover();
+  if (tab === 'notifs') renderNotificationsTab();
 }
 
 // ── Workers management ───────────────────────────────────────────
@@ -5627,7 +5693,8 @@ let notifLogQueue = (() => { try { return JSON.parse(localStorage.getItem('notif
 let notifLogTimer = null, notifLogBusy = false;
 
 function queueNotificationLog(worker, msg) {
-  const n = { id: 'nt' + Date.now() + Math.random().toString(36).slice(2, 7), worker: String(worker || '').trim(), title: msg.title || '', message: msg.message || '', at: new Date().toISOString() };
+  const n = { id: 'nt' + Date.now() + Math.random().toString(36).slice(2, 7), worker: String(worker || '').trim(), title: msg.title || '', message: msg.message || '', at: new Date().toISOString(),
+    sentBy: (typeof officeUserName === 'function' && officeUserName()) || currentWorker || '', kind: msg.kind === 'manual' ? 'manual' : 'auto' };
   if (!n.worker) return;
   notifLogQueue.push(n);
   try { localStorage.setItem('notifLogQueue', JSON.stringify(notifLogQueue)); } catch (e) {}
@@ -5792,6 +5859,134 @@ async function flushNtfyQueueNow_() {
 }
 
 window.addEventListener('online', () => { flushNtfyQueue(); });
+
+// ══════════════════════════════════════════════════════════════════
+//  NOTIFICATIONS TAB (office)
+// ══════════════════════════════════════════════════════════════════
+let sentNotifications = null;
+let nfKind = 'all';
+let nfAllowance = null;
+
+function nfWorkers() { return workers.filter(w => w.active !== false && w.active !== 'FALSE').slice().sort((a, b) => a.name.localeCompare(b.name)); }
+
+function renderNotificationsTab() {
+  const box = document.getElementById('nf-workers');
+  const keep = new Set(Array.from(box.querySelectorAll('.wo-chip.on')).map(b => b.dataset.v));
+  box.innerHTML = nfWorkers().map(w => {
+    const ini = workerInitials(w.name);
+    return `<button type="button" class="wo-chip${keep.has(w.name) ? ' on' : ''}" data-v="${escWO(w.name)}" title="${escWO(w.name)}" onclick="this.classList.toggle('on');nfUpdatePicked()">${escWO(ini || w.name)}</button>`;
+  }).join('') || '<p class="text-muted">No active workers.</p>';
+  nfUpdatePicked();
+  renderSentNotifications();
+  loadSentNotifications();
+  loadNtfyAllowance();
+}
+
+function nfPicked() { return Array.from(document.querySelectorAll('#nf-workers .wo-chip.on')).map(b => b.dataset.v); }
+function nfSelectAll(on) { document.querySelectorAll('#nf-workers .wo-chip').forEach(b => b.classList.toggle('on', on)); nfUpdatePicked(); }
+function nfUpdatePicked() {
+  const p = nfPicked();
+  document.getElementById('nf-picked').textContent = p.length ? 'Sending to ' + p.join(', ') : 'Pick who to send it to';
+}
+
+async function sendCustomNotification() {
+  if (!ntfyTopicPrefix) { alert('Notifications are not set up yet.'); return; }
+  const title = document.getElementById('nf-title').value.trim() || 'Message from the office';
+  const message = document.getElementById('nf-message').value.trim();
+  const to = nfPicked();
+  if (!message) { alert('Please write a message'); return; }
+  if (!to.length) { alert('Please pick at least one worker'); return; }
+  if (nfAllowance && nfAllowance.remaining != null && to.length > nfAllowance.remaining && !confirm('Only ' + nfAllowance.remaining + ' notifications are left today and this needs ' + to.length + '. Some may not go through until tomorrow. Send anyway?')) return;
+  if (!confirm('Send "' + title + '" to ' + (to.length === 1 ? to[0] : to.length + ' workers') + '?')) return;
+  const btn = document.getElementById('nf-send');
+  btn.disabled = true; btn.textContent = 'Sending…';
+  const at = new Date().toISOString();
+  to.forEach(n => notifyWorker(n, { title, message, priority: 4, tags: ['loudspeaker'], kind: 'manual' }));
+  const r = await flushNtfyQueue();
+  btn.disabled = false; btn.textContent = 'Send notification';
+  const failed = r && r.failed;
+  setSyncStatus('office', failed ? 'pending' : 'synced', failed ? 'Some notifications queued — will retry' : 'Notification sent to ' + to.length + ' worker' + (to.length === 1 ? '' : 's'));
+  document.getElementById('nf-message').value = '';
+  document.getElementById('nf-title').value = '';
+  nfSelectAll(false);
+  // Show it straight away; the server copy replaces it on the next load
+  sentNotifications = to.map((w, i) => ({ id: 'local' + i + at, at, worker: w, title, message, sentBy: officeUserName(), kind: 'manual' })).concat(sentNotifications || []);
+  renderSentNotifications();
+  setTimeout(() => { loadSentNotifications(); loadNtfyAllowance(); }, 2500);
+}
+
+async function loadSentNotifications() {
+  if (!SCRIPT_URL || !navigator.onLine) return;
+  try {
+    const res = await api('getSentNotifications');
+    if (!res || !Array.isArray(res.items)) throw new Error('old');
+    sentNotifications = res.items;
+  } catch (e) {
+    if (!sentNotifications) document.getElementById('nf-log').innerHTML = '<p class="text-muted">Could not load the log' + (e.message === 'old' ? ' — publish a new deployment version of the Apps Script.' : '.') + '</p>';
+    return;
+  }
+  renderSentNotifications();
+}
+
+function nfSetKind(k) {
+  nfKind = k;
+  document.querySelectorAll('#nf-kind button').forEach(b => b.classList.toggle('active', b.dataset.k === k));
+  renderSentNotifications();
+}
+
+function renderSentNotifications() {
+  const el = document.getElementById('nf-log');
+  if (!el || !sentNotifications) return;
+  const today = localDateStr(new Date());
+  document.getElementById('nf-today').textContent = sentNotifications.filter(n => localDateStr(new Date(n.at)) === today).length;
+  // One row per send: same title, message and sender within the same minute
+  const groups = [];
+  const byKey = new Map();
+  sentNotifications.slice().sort((a, b) => String(b.at).localeCompare(String(a.at))).filter(n => nfKind === 'all' || n.kind === nfKind).forEach(n => {
+    const key = [n.title, n.message, n.sentBy, n.kind, String(n.at).slice(0, 16)].join('|');
+    let g = byKey.get(key);
+    if (!g) { g = { ...n, to: [] }; byKey.set(key, g); groups.push(g); }
+    if (!g.to.includes(n.worker)) g.to.push(n.worker);
+  });
+  if (!groups.length) { el.innerHTML = '<p class="text-muted">Nothing sent' + (nfKind === 'all' ? '' : ' of this kind') + ' in the last 14 days.</p>'; return; }
+  let lastDay = '';
+  el.innerHTML = groups.slice(0, 300).map(g => {
+    const d = new Date(g.at);
+    const day = localDateStr(d);
+    const head = day !== lastDay ? `<p class="nf-day">${day === today ? 'Today' : schedDayName(d) + ' ' + fmtUKDate(day)}</p>` : '';
+    lastDay = day;
+    const time = String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+    const to = g.to.map(n => workerInitials(n) || n);
+    return `${head}<div class="nf-item">
+      <div class="nf-item-head"><span class="nf-item-title">${escWO(g.title || '(no title)')}</span><span class="nf-kind-tag ${g.kind === 'manual' ? 'manual' : ''}">${g.kind === 'manual' ? 'Sent from here' : 'Automatic'}</span><span class="nf-item-meta">${time}${g.sentBy ? ' · ' + escWO(g.sentBy) : ''}</span></div>
+      ${g.message ? `<div class="nf-item-msg">${escWO(g.message)}</div>` : ''}
+      <div class="nf-item-to" title="${escWO(g.to.join(', '))}">To ${escWO(to.join(', '))}</div>
+    </div>`;
+  }).join('');
+}
+
+// ntfy.sh's own count of what this connection can still send today
+async function loadNtfyAllowance() {
+  const num = document.getElementById('nf-remaining'), note = document.getElementById('nf-limit-note');
+  if (!navigator.onLine) return;
+  try {
+    const r = await fetch(NTFY_SERVER + '/v1/account', { cache: 'no-store' });
+    if (!r.ok) throw new Error(r.status);
+    const a = await r.json();
+    const limit = a.limits && a.limits.messages, used = a.stats && a.stats.messages;
+    const remaining = a.stats && a.stats.messages_remaining != null ? a.stats.messages_remaining : (limit != null && used != null ? limit - used : null);
+    if (remaining == null) throw new Error('no stats');
+    nfAllowance = { remaining, limit };
+    num.textContent = remaining.toLocaleString('en-GB');
+    num.classList.toggle('nf-low', limit ? remaining < limit * 0.1 : remaining < 25);
+    document.getElementById('nf-remaining-lbl').textContent = 'Remaining today' + (limit ? ' of ' + limit.toLocaleString('en-GB') : '');
+    note.textContent = 'From ntfy.sh. ' + (a.limits && a.limits.basis === 'ip' ? 'The allowance is per internet connection, so it only covers notifications sent from this office network.' : '');
+  } catch (e) {
+    nfAllowance = null;
+    num.textContent = '—';
+    note.textContent = 'Could not check the ntfy.sh allowance right now.';
+  }
+}
 
 function notifyJobAllocated(job, names) {
   if (!names || !names.length) return;
