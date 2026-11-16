@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-87 (Sign-in: worker initials + PIN, office username + password, self-service PIN reset, admin alerts, office user admin) -->
+<!-- BUILD MARKER: NB-89 (Sign-in: initials fields styled like other inputs; Forgot PIN shows why a code could not be sent) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -425,8 +425,8 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 .form-note { margin-top: 10px; font-size: 12px; }
 .form-section { margin-bottom: 1.5rem; }
 .pin-input { letter-spacing: 4px; }
-.initials-input { text-transform: uppercase; letter-spacing: 3px; font-weight: 600; }
-.initials-input::placeholder { text-transform: none; letter-spacing: normal; font-weight: 400; }
+.initials-input { text-transform: uppercase; }
+.initials-input::placeholder { text-transform: none; }
 .ou-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 0; border-top: 1px solid var(--color-border-tertiary, #eee); }
 .ou-row:first-child { border-top: none; }
 .ou-name { flex: 1; min-width: 160px; font-size: 13px; }
@@ -5210,7 +5210,7 @@ function renderWorkersList() {
           <input type="number" min="0.25" max="24" step="0.25" value="${workerDailyHours(w.name)}" style="width:68px;font-size:12px;padding:4px 6px;" onchange="setWorkerDailyHoursUI('${w.name.replace(/'/g, "\\'")}', this)">
         </label>
         <label class="text-muted" style="font-size:12px;margin:0;display:flex;align-items:center;gap:4px;font-weight:400;">Initials
-          <input type="text" value="${escWO(workerInitials(w.name))}" maxlength="5" class="initials-input" style="width:64px;font-size:12px;padding:4px 6px;letter-spacing:1px;" oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g,'')" onchange="setWorkerInitialsUI('${w.name.replace(/'/g, "\\'")}', this)">
+          <input type="text" value="${escWO(workerInitials(w.name))}" maxlength="5" class="initials-input" style="width:64px;font-size:12px;padding:4px 6px;" oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g,'')" onchange="setWorkerInitialsUI('${w.name.replace(/'/g, "\\'")}', this)">
         </label>
         ${w.mustChangePin ? '<span class="hold-tag" title="Signs in with a temporary PIN and picks their own">Temp PIN</span>' : ''}
         <button class="btn btn-sm" onclick="resetPin('${w.name.replace(/'/g, "\\'")}', this)">Reset PIN</button>
