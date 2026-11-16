@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-82 (Schedule: raise a new WO from the Add to schedule box) -->
+<!-- BUILD MARKER: NB-83 (Jobs filters: value list only offers what the current results contain) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -2825,10 +2825,10 @@ function jobStatusFlags(j, hoursByJob) {
   return flags;
 }
 
-function jobMatchesFilters(j, hoursByJob) {
+function jobMatchesFilters(j, hoursByJob, skipField) {
   if (!jobFilters.length) return true;
   const byField = {};
-  jobFilters.forEach(f => (byField[f.field] = byField[f.field] || []).push(f.value));
+  jobFilters.forEach(f => { if (f.field !== skipField) (byField[f.field] = byField[f.field] || []).push(f.value); });
   return Object.keys(byField).every(field => {
     const vals = field === 'status' ? jobStatusFlags(j, hoursByJob) : JOB_FILTER_FIELDS[field].values(j).map(String);
     return field === 'status' ? byField[field].every(v => vals.includes(v)) : byField[field].some(v => vals.includes(v));
@@ -2852,11 +2852,19 @@ function fillJobFilterValues() {
   let opts = [];
   if (def) {
     const used = new Set(jobFilters.filter(f => f.field === field).map(f => f.value));
-    const vals = field === 'status' ? JOB_STATUS_FILTERS.map(s => s.value) : Array.from(new Set(jobs.flatMap(j => def.values(j).map(String))));
+    // Only offer values found in the jobs currently showing (search, view and the other filters applied).
+    // Filters on this same field are ignored so you can still add a second value to it.
+    const hoursByJob = {};
+    entries.forEach(e => { const k = String(e.jobId); hoursByJob[k] = (hoursByJob[k] || 0) + (parseFloat(e.hours) || 0); });
+    const pool = jobs.filter(j => jobInCurrentView(j) && jobMatchesSearch(j) && jobMatchesFilters(j, hoursByJob, field === 'status' ? null : field));
+    const count = {};
+    pool.forEach(j => new Set(field === 'status' ? jobStatusFlags(j, hoursByJob) : def.values(j).map(String)).forEach(v => { count[v] = (count[v] || 0) + 1; }));
+    const vals = field === 'status' ? JOB_STATUS_FILTERS.map(s => s.value).filter(v => count[v]) : Object.keys(count);
     const real = vals.filter(v => v !== '__none' && !used.has(v));
     if (field !== 'status') real.sort(def.sort || ((a, b) => def.display(a).localeCompare(def.display(b), 'en-GB', { numeric: true })));
     if (vals.includes('__none') && !used.has('__none')) real.push('__none');
-    opts = real.map(v => `<option value="${escWO(v)}">${escWO(def.display(v))}</option>`);
+    opts = real.map(v => `<option value="${escWO(v)}">${escWO(def.display(v))} (${count[v]})</option>`);
+    if (!opts.length) opts = [`<option value="" disabled>No other ${escWO(def.label.toLowerCase())} options in these results</option>`];
   }
   sel.innerHTML = '<option value="">' + (def ? 'Choose ' + def.label.toLowerCase() + '...' : 'Pick a filter first') + '</option>' + opts.join('');
   sel.value = '';
@@ -2916,6 +2924,16 @@ function setJobsView(view) {
   renderJobsList();
 }
 
+function jobInCurrentView(j) {
+  return jobsView === 'all' || (jobsView === 'open' ? j.open : jobsView === 'pending' ? jobPending(j) : (!j.open && !jobPending(j)));
+}
+
+function jobMatchesSearch(j) {
+  const q = ((document.getElementById('jobs-search') || {}).value || '').trim().toLowerCase();
+  return !q || [j.id, j.property, j.description, j.costCentre, j.costCode, j.issueHighlightedBy, j.atpNumber, jobComments.filter(c => c.jobId === String(j.id)).map(c => c.text).join(' '), jobHasAtp(j) ? 'ATP' : '', j.priority, expandAssignedTo(j.assignedTo).map(workerInitials).join(' ')]
+    .some(v => String(v || '').toLowerCase().includes(q));
+}
+
 function renderJobsList() {
   const el = document.getElementById('job-list');
   if (!el) return;
@@ -2924,8 +2942,7 @@ function renderJobsList() {
   const hoursByJob = {};
   entries.forEach(e => { const k = String(e.jobId); hoursByJob[k] = (hoursByJob[k] || 0) + (parseFloat(e.hours) || 0); });
   initJobFilterUI();
-  const matches = j => (!q || [j.id, j.property, j.description, j.costCentre, j.costCode, j.issueHighlightedBy, j.atpNumber, jobComments.filter(c => c.jobId === String(j.id)).map(c => c.text).join(' '), jobHasAtp(j) ? 'ATP' : '', j.priority, expandAssignedTo(j.assignedTo).map(workerInitials).join(' ')]
-      .some(v => String(v || '').toLowerCase().includes(q))) && jobMatchesFilters(j, hoursByJob);
+  const matches = j => jobMatchesSearch(j) && jobMatchesFilters(j, hoursByJob);
   const filtered = jobs.filter(matches);
   const openJobs = filtered.filter(j => j.open);
   const pendingJobs = filtered.filter(jobPending);
