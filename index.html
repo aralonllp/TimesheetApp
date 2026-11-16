@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-94 (Security: every request carries a signed session token; nothing loads before sign-in) -->
+<!-- BUILD MARKER: NB-95 (Sessions: renew while in use, quiet re-sign-in when one ends, tablet signs out after 30 min idle) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -426,6 +426,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 .form-section { margin-bottom: 1.5rem; }
 .pin-input { letter-spacing: 4px; }
 .initials-input { text-transform: uppercase; }
+.login-note { margin: 0 0 4px; padding: 8px 12px; border-radius: var(--border-radius-md); background: var(--color-background-secondary); font-size: 13px; color: var(--color-text-secondary); }
 .initials-input::placeholder { text-transform: none; }
 .ou-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 0; border-top: 1px solid var(--color-border-tertiary, #eee); }
 .ou-row:first-child { border-top: none; }
@@ -592,6 +593,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
       <div class="login-wrap">
         <p class="screen-title">Sign in</p>
         <div class="card">
+          <p class="login-note" id="worker-login-note" style="display:none;"></p>
           <label>Your initials</label>
           <input type="text" id="worker-initials" maxlength="5" autocomplete="off" autocapitalize="characters" spellcheck="false" class="initials-input" oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g,'')" onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('worker-pin').focus();}">
           <label>PIN</label>
@@ -713,6 +715,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
       <div class="login-wrap">
         <p class="screen-title">Office access</p>
         <div class="card">
+          <p class="login-note" id="office-login-note" style="display:none;"></p>
           <label>Your initials</label>
           <input type="text" id="office-username" autocomplete="username" autocapitalize="none" spellcheck="false" onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('office-pin').focus();}">
           <label>Password</label>
@@ -1595,37 +1598,61 @@ function saveWorkerToken(name, token) {
   const t = readWorkerTokens(); t[name] = token;
   try { localStorage.setItem('workerTokens', JSON.stringify(t)); } catch (e) {}
 }
-let authExpiredShown = false;
+// The server hands back a fresh token while someone keeps using the site
+function takeRenewedToken(sent, fresh) {
+  if (sent && sent === officeToken) officeToken = fresh;
+  else if (sent && sent === workerToken && currentWorker) saveWorkerToken(currentWorker, fresh);
+}
+
+// A session ending just puts them back on the sign-in screen with a short note
+let officeResumeTab = '';
 function handleAuthExpired() {
-  if (authExpiredShown) return;
   if (currentOfficeUser && officeToken) {
-    authExpiredShown = true;
-    alert('Your office session has expired — please sign in again.');
+    const active = document.querySelector('[id^="otab-"].active');
+    officeResumeTab = active ? active.id.slice(5) : '';
+    const login = officeUser ? (officeUser.username === 'admin' ? 'admin' : officeUser.initials) : '';
     officeLogout();
-    authExpiredShown = false;
+    document.getElementById('office-username').value = login;
+    showLoginNote('office-login-note', 'Your session ended — sign in to carry on.');
+    setTimeout(() => document.getElementById(login ? 'office-pin' : 'office-username').focus(), 50);
   } else if (currentWorker && workerToken) {
-    authExpiredShown = true;
     const t = readWorkerTokens(); delete t[currentWorker];
     try { localStorage.setItem('workerTokens', JSON.stringify(t)); } catch (e) {}
-    alert('Please sign in again so your entries can sync.');
+    const ini = workerInitials(currentWorker);
     workerLogout();
-    authExpiredShown = false;
+    document.getElementById('worker-initials').value = ini;
+    showLoginNote('worker-login-note', 'Please sign in again to carry on.');
   }
 }
+function showLoginNote(id, text) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = text;
+  el.style.display = text ? '' : 'none';
+}
+
+// Worker tablet signs itself out after 30 minutes without being used
+const WORKER_IDLE_MS = 30 * 60 * 1000;
+let workerLastActive = Date.now();
+['pointerdown', 'keydown', 'touchstart', 'wheel'].forEach(ev => document.addEventListener(ev, () => { workerLastActive = Date.now(); }, { passive: true, capture: true }));
+setInterval(() => { if (currentWorker && Date.now() - workerLastActive >= WORKER_IDLE_MS) workerLogout(); }, 60000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && currentWorker && Date.now() - workerLastActive >= WORKER_IDLE_MS) workerLogout(); });
 
 function api(action, payload = {}, _attempt = 0) {
   if (!SCRIPT_URL) return Promise.reject(new Error('No SCRIPT_URL configured'));
   const MAX_ATTEMPTS = 3; // 1 initial try + 2 retries
+  const sentToken = payload.token || currentToken();
   return fetch(SCRIPT_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain' },
-    body: JSON.stringify({ action, ...payload, token: payload.token || currentToken() })
+    body: JSON.stringify({ action, ...payload, token: sentToken })
   })
   .then(function(r) {
     if (!r.ok) throw new Error('HTTP ' + r.status); // transient — worth retrying
     return r.json().catch(function() { throw new Error('Bad response from server'); }); // non-JSON — also transient
   })
   .then(function(data) {
+    if (data.newToken) takeRenewedToken(sentToken, data.newToken);
     if (data.authError) { handleAuthExpired(); const e = new Error(data.error); e.authError = true; throw e; }
     if (data.error) throw new Error(data.error); // real app-level error — not retried
     return data;
@@ -1989,6 +2016,8 @@ async function confirmPinResetUI() {
 
 function finishWorkerLogin(name) {
   const w = String(name || '').trim().replace(/\s+/g, ' ');
+  workerLastActive = Date.now();
+  showLoginNote('worker-login-note', '');
   document.getElementById('worker-pin').value = '';
   currentWorker = w;
   document.getElementById('login-screen').style.display = 'none';
@@ -3089,7 +3118,9 @@ function enterOffice() {
   document.getElementById('office-user-display').textContent = officeUser.name;
   document.getElementById('office-users-card').style.display = officeUser.role === 'admin' ? '' : 'none';
   document.getElementById('office-pin').value = '';
+  showLoginNote('office-login-note', '');
   refreshOffice();
+  if (officeResumeTab) { switchOfficeTab(officeResumeTab); officeResumeTab = ''; }
 }
 
 function openPasswordChange(forced, current) {
