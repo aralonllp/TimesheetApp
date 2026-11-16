@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-89 (Sign-in: initials fields styled like other inputs; Forgot PIN shows why a code could not be sent) -->
+<!-- BUILD MARKER: NB-90 (Sign-in: reset codes and admin alerts sent from the browser, like every other notification) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -1816,6 +1816,20 @@ async function offlinePinMatch(initials, pin) {
   return (await sha256Hex(deviceSalt() + ':' + initials + ':' + pin)) === rec.h ? rec.name : false;
 }
 
+// The server builds reset-code / admin-alert messages; the browser publishes them,
+// the same way as every other notification (ntfy.sh won't take them from Apps Script).
+async function publishNtfyList(list) {
+  if (!Array.isArray(list) || !list.length) return true;
+  let ok = true;
+  for (const m of list) {
+    try {
+      const r = await fetch(NTFY_SERVER, { method: 'POST', body: JSON.stringify({ topic: m.topic, title: m.title || '', message: m.message || '', priority: 4, tags: m.tags || [] }) });
+      if (!r.ok) ok = false;
+    } catch (e) { ok = false; }
+  }
+  return ok;
+}
+
 async function workerLogin() {
   const initials = document.getElementById('worker-initials').value.trim().toUpperCase();
   const pin = document.getElementById('worker-pin').value.trim();
@@ -1826,7 +1840,7 @@ async function workerLogin() {
   try {
     if (!navigator.onLine || !SCRIPT_URL) throw new Error('NetworkError: offline');
     const res = await api('workerLogin', { initials, pin });
-    if (!res || !res.success) throw new Error((res && res.error) || 'Initials or PIN not recognised');
+    if (!res || !res.success) { publishNtfyList(res && res.ntfy); throw new Error((res && (res.reason || res.error)) || 'Initials or PIN not recognised'); }
     if (res.mustChange) {
       pinChangeCtx = { initials, currentPin: pin, name: res.name };
       openPinSetModal();
@@ -1900,6 +1914,8 @@ async function sendPinResetCode(again) {
   btn.disabled = true; btn.textContent = 'Sending...';
   try {
     const res = await api('requestPinReset', { initials });
+    if (!res || !res.ntfy) throw new Error('The Apps Script is still running the previous version — ask the office to publish a new deployment version.');
+    if (!(await publishNtfyList(res.ntfy))) throw new Error('Could not send the code — check the connection and try again, or ask the office to reset your PIN.');
     document.getElementById('fp-sent').textContent = (again ? 'New code sent' : 'Code sent') + ' to ' + (res.name || 'your') + "'s phone. It works once and expires in 10 minutes.";
     document.getElementById('fp-step1').style.display = 'none';
     document.getElementById('fp-step2').style.display = '';
@@ -1921,6 +1937,7 @@ async function confirmPinResetUI() {
   btn.disabled = true; btn.textContent = 'Resetting...';
   try {
     const res = await api('confirmPinReset', { initials, code, newPin });
+    if (!res.success) { publishNtfyList(res.ntfy); throw new Error(res.reason || 'Could not reset your PIN'); }
     await rememberPin(initials, res.name, newPin);
     closeModalById('forgot-pin-modal');
     document.getElementById('worker-initials').value = initials;
@@ -3010,7 +3027,7 @@ async function officeLogin() {
   btn.textContent = 'Signing in...'; btn.disabled = true;
   try {
     const result = await api('officeLogin', { username, password: p });
-    if (!result || !result.success || !result.user) throw new Error((result && result.error) || 'Username or password not recognised');
+    if (!result || !result.success || !result.user) { publishNtfyList(result && result.ntfy); throw new Error((result && (result.reason || result.error)) || 'Username or password not recognised'); }
     officeToken = result.token || '';
     officeUser = result.user;
     if (officeUser.mustChange) { openPasswordChange(true, p); return; }
