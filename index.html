@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-96 (Security: workers only receive their own data) -->
+<!-- BUILD MARKER: NB-97 (Security: changing or resetting a PIN / password ends that person's other sessions) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -3147,7 +3147,8 @@ async function submitNewPassword() {
   const btn = document.getElementById('pw-set-btn');
   btn.disabled = true; btn.textContent = 'Saving...';
   try {
-    await api('changeOfficePassword', { token: officeToken, currentPassword: current, newPassword: p1 });
+    const res = await api('changeOfficePassword', { token: officeToken, currentPassword: current, newPassword: p1 });
+    if (res && res.token) officeToken = res.token;
     closeModalById('pw-set-modal');
     officeUser.mustChange = false;
     if (pwChangeForced) enterOffice();
