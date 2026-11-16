@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-90 (Sign-in: reset codes and admin alerts sent from the browser, like every other notification) -->
+<!-- BUILD MARKER: NB-91 (Office sign-in by initials) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -713,8 +713,8 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
       <div class="login-wrap">
         <p class="screen-title">Office access</p>
         <div class="card">
-          <label>Username</label>
-          <input type="text" id="office-username" placeholder="Username" autocomplete="username" autocapitalize="none" spellcheck="false" onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('office-pin').focus();}">
+          <label>Your initials</label>
+          <input type="text" id="office-username" placeholder="e.g. PC" autocomplete="username" autocapitalize="characters" spellcheck="false" class="initials-input" oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9._-]/g,'')" onkeydown="if(event.key==='Enter'){event.preventDefault();document.getElementById('office-pin').focus();}">
           <label>Password</label>
           <input type="password" id="office-pin" placeholder="Enter password" autocomplete="current-password" onkeydown="if(event.key==='Enter'){event.preventDefault();officeLogin();}">
           <div class="form-footer">
@@ -1316,9 +1316,8 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
         <div style="margin-top:1rem;padding-top:1rem;border-top:0.5px solid var(--color-border-tertiary);">
           <p style="font-size:13px;font-weight:500;margin-bottom:0.75rem;">Add office user</p>
           <div class="grid2">
-            <div><label style="margin-top:0;">Username</label><input type="text" id="ou-username" placeholder="e.g. jane.smith" autocapitalize="none" spellcheck="false"></div>
             <div><label style="margin-top:0;">Full name</label><input type="text" id="ou-name" placeholder="e.g. Jane Smith"></div>
-            <div><label>Initials</label><input type="text" id="ou-initials" placeholder="e.g. JS" maxlength="5" class="initials-input" oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g,'')"></div>
+            <div><label style="margin-top:0;">Initials <span class="text-muted" style="font-weight:400;">(what they sign in with)</span></label><input type="text" id="ou-initials" placeholder="e.g. JS" maxlength="5" class="initials-input" oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g,'')"></div>
             <div><label>Access</label><select id="ou-role"><option value="office">Office</option><option value="admin">Admin</option></select></div>
           </div>
           <div class="form-footer"><button class="btn btn-primary" id="ou-add-btn" onclick="addOfficeUserUI()">Add office user</button></div>
@@ -3021,13 +3020,13 @@ let pwChangeForced = false;
 async function officeLogin() {
   const username = document.getElementById('office-username').value.trim().toLowerCase();
   const p = document.getElementById('office-pin').value;
-  if (!username || !p) { alert('Enter your username and password'); return; }
+  if (!username || !p) { alert('Enter your initials and password'); return; }
   const btn = document.querySelector('#office-login-screen .btn-primary');
   if (btn.disabled) return;
   btn.textContent = 'Signing in...'; btn.disabled = true;
   try {
     const result = await api('officeLogin', { username, password: p });
-    if (!result || !result.success || !result.user) { publishNtfyList(result && result.ntfy); throw new Error((result && (result.reason || result.error)) || 'Username or password not recognised'); }
+    if (!result || !result.success || !result.user) { publishNtfyList(result && result.ntfy); throw new Error((result && (result.reason || result.error)) || 'Initials or password not recognised'); }
     officeToken = result.token || '';
     officeUser = result.user;
     if (officeUser.mustChange) { openPasswordChange(true, p); return; }
@@ -5329,7 +5328,7 @@ function renderOfficeUsers(users) {
     const me = u.username === officeUser.username;
     const arg = escWO(JSON.stringify(u.username));
     return `<div class="ou-row">
-      <div class="ou-name"><strong>${escWO(u.name)}</strong> <span class="text-muted">· ${escWO(u.username)} · ${escWO(u.initials)}</span>
+      <div class="ou-name"><strong>${escWO(u.name)}</strong> <span class="text-muted">· signs in as ${escWO(u.initials)}</span>
         ${u.role === 'admin' ? '<span class="nf-kind-tag manual" style="margin-left:6px;">Admin</span>' : ''}${u.mustChange ? '<span class="hold-tag">Temp password</span>' : ''}${me ? '<span class="text-muted" style="margin-left:6px;font-size:12px;">(you)</span>' : ''}</div>
       ${me ? '' : `<button class="btn btn-sm" onclick="toggleOfficeAdmin(${arg}, this)">${u.role === 'admin' ? 'Make office user' : 'Make admin'}</button>`}
       <button class="btn btn-sm" onclick="resetOfficeUserPasswordUI(${arg}, this)">Reset password</button>
@@ -5342,19 +5341,18 @@ let officeUsersCache = [];
 
 async function addOfficeUserUI() {
   const user = {
-    username: document.getElementById('ou-username').value.trim().toLowerCase(),
     name: document.getElementById('ou-name').value.trim(),
     initials: document.getElementById('ou-initials').value.trim().toUpperCase(),
     role: document.getElementById('ou-role').value,
     isNew: true
   };
-  if (!user.username || !user.name || !user.initials) { alert('Fill in the username, name and initials.'); return; }
+  if (!user.name || !user.initials) { alert('Fill in the name and initials.'); return; }
   const btn = document.getElementById('ou-add-btn');
   btn.disabled = true; btn.textContent = 'Adding...';
   try {
     const res = await api('saveOfficeUser', { user, token: officeToken });
-    ['ou-username', 'ou-name', 'ou-initials'].forEach(id => { document.getElementById(id).value = ''; });
-    document.getElementById('office-users-temp').innerHTML = tempBox(`${escWO(res.user.name)} signs in as <strong>${escWO(res.user.username)}</strong> with temporary password <code>${escWO(res.tempPassword)}</code>. They'll choose their own when they first sign in. This password isn't shown again.`);
+    ['ou-name', 'ou-initials'].forEach(id => { document.getElementById(id).value = ''; });
+    document.getElementById('office-users-temp').innerHTML = tempBox(`${escWO(res.user.name)} signs in as <strong>${escWO(res.user.initials)}</strong> with temporary password <code>${escWO(res.tempPassword)}</code>. They'll choose their own when they first sign in. This password isn't shown again.`);
     loadOfficeUsers();
   } catch (err) {
     alert('Could not add the user: ' + (err.message || err));
