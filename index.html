@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-112 (Speed: requests time out instead of hanging; overlapping refreshes merged) -->
+<!-- BUILD MARKER: NB-114 (Schedule: open WOs flagged red once a worker has completed their week) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -397,6 +397,9 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 .sv-state { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 700; padding: 1px 8px; border-radius: 20px; white-space: nowrap; }
 .sv-state.done { background: #2e9e5b; color: #fff; }
 .sv-state.awaiting { background: #e0a030; color: #fff; }
+.sched-rich .sv-card.sv-unclosed, .sched-rich .sv-card.sched-raised.sv-unclosed { background: #fdeeee; border-color: #eab4b4; box-shadow: inset 4px 0 0 #c62828; }
+.sched-rich .sv-card.sv-unclosed .sv-prop { color: #a61b1b; }
+.sv-state.unclosed { background: #c62828; color: #fff; }
 .sched-item.sched-pending { opacity: 0.55; outline: 1px dashed var(--color-border-primary); }
 .sched-add { font-size: 11px; border: 1px dashed #bbb; background: transparent; border-radius: 6px; width: 100%; padding: 4px; cursor: pointer; color: var(--color-text-secondary); font-family: inherit; }
 .sched-add:hover { border-color: var(--color-text-primary); color: var(--color-text-primary); }
@@ -423,6 +426,9 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 .wk-table .wk-prop { font-weight: 600; font-size: 13px; color: inherit; }
 .wk-table .wk-sub { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 3px; font-size: 11px; color: var(--color-text-secondary); }
 .wk-table .wk-sub .prio, .wk-table .wk-sub .rj-tag { margin-left: 0; font-size: 10px; padding: 1px 7px; }
+.wk-table td.wk-actions { text-align: right; white-space: nowrap; }
+.wk-table td.wk-actions .btn + .btn { margin-left: 6px; }
+.wk-table td.wk-actions .btn-close-job { color: #1e6b34; border-color: #a9d8b8; }
 .wk-table .wk-logged-pill { display: inline-block; padding: 2px 8px; border-radius: 20px; background: var(--color-background-success); color: var(--color-text-success); font-weight: 700; }
 .wk-table tr.wk-total > td { background: var(--color-background-secondary); padding: 6px 10px; font-size: 12px; }
 .wk-table .wk-total-label { text-align: right; font-weight: 600; color: var(--color-text-secondary); }
@@ -431,7 +437,8 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 .wk-table .wk-total-val.wk-short { color: var(--color-text-warning); }
 @media (max-width: 1000px) {
   .wk-table th.wk-c-job { width: 170px !important; }
-  .wk-table th.wk-c-note { width: 120px !important; }
+  .wk-table th.wk-c-note { width: 100px !important; }
+  .wk-table th.wk-c-act { width: 170px !important; }
   .wk-table th.wk-c-log { width: 84px !important; }
 }
 .raised-tag { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 20px; background: #efe7fb; color: #5b3a8e; white-space: nowrap; }
@@ -959,7 +966,10 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
             <div class="wo-chips" id="sched-days"></div>
           </div>
           <div id="sched-move-wrap" style="display:none;margin-top:14px;padding-top:12px;border-top:0.5px solid var(--color-border-tertiary);">
-            <button type="button" class="btn btn-sm" id="sched-move-btn" onclick="schedMoveToggle()">Move to next week</button>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              <button type="button" class="btn btn-sm" id="sched-move-btn" onclick="schedMoveToggle()">Move to next week</button>
+              <button type="button" class="btn btn-sm" id="sched-close-job" onclick="schedCloseJob()" style="color:#1e6b34;border-color:#a9d8b8;">Close Job</button>
+            </div>
             <div id="sched-move-box" style="display:none;margin-top:8px;">
               <p class="wo-hint" style="margin-top:0;">Which day next week?</p>
               <div class="wo-chips" id="sched-move-days"></div>
@@ -6895,6 +6905,8 @@ function renderScheduleInto(o) {
     });
   }
   const click = id => o.readOnly ? '' : ` onclick="openSchedModal('${escWO(id)}')"`;
+  const weekDone = {};
+  ops.forEach(w => { weekDone[w.name] = svWeekComplete(w.name, days); });
 
   let html = `<thead><tr><th class="sched-corner">Week ${isoWeekNumber(start)}<br><span style="font-weight:400;">(${shortDot(start)} to ${shortDot(lastDay)})</span></th>`;
   html += ops.map(w => `<th title="${escWO(w.name)}">${escWO(w.name)}</th>`).join('') + '</tr></thead><tbody>';
@@ -6914,7 +6926,7 @@ function renderScheduleInto(o) {
           const locked = it.status === WEEKEND_COVER_STATUS;
           return `<div class="sched-item sched-status${it._pending ? ' sched-pending' : ''}${locked && !o.readOnly ? ' sched-locked' : ''}" style="background:${escWO(c)};color:${textOn(c)};"${locked ? (o.readOnly ? '' : ' title="Change this on the Weekend Cover tab"') : click(it.id)}>${escWO(it.status)}${it.note ? `<div style="font-weight:400;font-style:italic;">${escWO(it.note)}</div>` : ''}</div>`;
         }
-        if (it.type === 'job') return svJobCard(it, ds, w.name, dayHrs, jobTotals, click(it.id));
+        if (it.type === 'job') return svJobCard(it, ds, w.name, dayHrs, jobTotals, click(it.id), weekDone[w.name]);
         if (it.type === 'job') {
           const j = jobs.find(x => String(x.id) === String(it.jobId));
           let hrsHtml = '', overCls = '';
@@ -6940,7 +6952,7 @@ function renderScheduleInto(o) {
       html += schedRaisedFor(ds, w.name).map(r => {
         const canAdd = !o.readOnly && !r.absence && r.sj;
         const act = ` onclick="addRaisedToSchedule('${ds}', ${escWO(JSON.stringify(w.name))}, ${escWO(JSON.stringify(r.jobId))}, ${escWO(JSON.stringify(r.property || ''))})" title="Logged by the worker but not on the schedule. Click to add it to the schedule."`;
-        return svRaisedCard(r, canAdd ? act : ' title="Logged by the worker but not on the schedule"');
+        return svRaisedCard(r, canAdd ? act : ' title="Logged by the worker but not on the schedule"', weekDone[w.name]);
       }).join('');
       dayTotalCells.push(svDayTotal(d, ds, w.name, items, today, weekTotals));
       if (!o.readOnly && d.getDay() !== 0 && d.getDay() !== 6) {
@@ -6966,7 +6978,21 @@ function renderScheduleInto(o) {
 }
 
 // ── Read-only schedule view: cards in the same style as the worker's My Week ──
-function svJobCard(it, ds, worker, dayHrs, jobTotals, clickAttr) {
+// A worker's week counts as done once their logged hours reach the week's target
+// (their daily hours on each weekday that isn't a holiday / closure).
+function svWeekComplete(worker, days) {
+  let logged = 0, target = 0;
+  const set = new Set(days.map(localDateStr));
+  entries.forEach(e => { if (String(e.worker || '').trim() === worker && set.has(normaliseDate(e.date))) logged += parseFloat(e.hours) || 0; });
+  days.forEach(d => {
+    if (d.getDay() < 1 || d.getDay() > 5) return;
+    const off = schedItemsFor(localDateStr(d), worker).some(x => x.type === 'status' && NON_WORKING_STATUSES.includes(x.status));
+    if (!off) target += workerDailyHours(worker);
+  });
+  return target > 0 && logged >= target;
+}
+
+function svJobCard(it, ds, worker, dayHrs, jobTotals, clickAttr, weekDone) {
   const sj = schedSlotJob(it);
   const j = sj && !sj.recurring ? sj.job : null;
   const logged = dayHrs[ds + '|' + worker + '|' + String(it.jobId)] || 0;
@@ -6980,9 +7006,10 @@ function svJobCard(it, ds, worker, dayHrs, jobTotals, clickAttr) {
   }
   const main = sj && sj.property ? sj.property : (sj ? sj.id : it.jobId);
   const awaiting = j && jobPending(j), done = j && !j.open && !awaiting;
-  const state = done ? '<span class="sv-state done">✓ Completed</span>' : awaiting ? '<span class="sv-state awaiting">Awaiting sign-off</span>' : '';
+  const unclosed = !!weekDone && !!j && j.open;
+  const state = done ? '<span class="sv-state done">✓ Completed</span>' : awaiting ? '<span class="sv-state awaiting">Awaiting sign-off</span>' : unclosed ? '<span class="sv-state unclosed" title="This worker has completed their hours for the week but this WO is still open">Not closed</span>' : '';
   const sub = `${sj && sj.property ? `<span>${escWO(it.jobId)}</span>` : ''}${sj && sj.recurring ? '<span class="rj-tag">Recurring</span>' : ''}${j && j.priority ? `<span class="prio prio-${escWO(j.priority)}">${escWO(j.priority)}</span>` : ''}${state}`;
-  return `<div class="sched-item sv-card${it._pending ? ' sched-pending' : ''}${overCls}${done ? ' sv-done' : awaiting ? ' sv-awaiting' : ''}"${clickAttr || ''}>
+  return `<div class="sched-item sv-card${it._pending ? ' sched-pending' : ''}${overCls}${done ? ' sv-done' : awaiting ? ' sv-awaiting' : unclosed ? ' sv-unclosed' : ''}"${clickAttr || ''}>
     <div class="sv-top"><span class="sv-prop">${escWO(main)}</span>${logged ? `<span class="wk-logged-pill">${fmtHrs(logged)}h</span>` : '<span class="sv-nolog">—</span>'}</div>
     ${sub ? `<div class="wk-sub">${sub}</div>` : ''}
     ${sj && sj.description ? `<div class="sv-desc" title="${escWO(sj.description)}">${escWO(sj.description)}</div>` : ''}
@@ -6990,13 +7017,14 @@ function svJobCard(it, ds, worker, dayHrs, jobTotals, clickAttr) {
   </div>`;
 }
 
-function svRaisedCard(r, attrs) {
+function svRaisedCard(r, attrs, weekDone) {
   const sj = r.sj;
+  const unclosed = !!weekDone && sj && !sj.recurring && sj.job && sj.job.open;
   const main = r.absence ? r.absence : (r.property || r.jobId);
   const sub = r.absence ? '' : `${r.property ? `<span>${escWO(r.jobId)}</span>` : ''}${sj && sj.recurring ? '<span class="rj-tag">Recurring</span>' : ''}${sj && sj.priority ? `<span class="prio prio-${escWO(sj.priority)}">${escWO(sj.priority)}</span>` : ''}`;
-  return `<div class="sched-item sv-card sched-raised"${attrs || ' title="Logged by the worker but not on the schedule"'}>
+  return `<div class="sched-item sv-card sched-raised${unclosed ? ' sv-unclosed' : ''}"${attrs || ' title="Logged by the worker but not on the schedule"'}>
     <div class="sv-top"><span class="sv-prop">${escWO(main)}</span><span class="wk-logged-pill">${fmtHrs(r.hours)}h</span></div>
-    <div class="wk-sub">${sub}<span class="raised-tag">Off-Schedule Work</span></div>
+    <div class="wk-sub">${sub}<span class="raised-tag">Off-Schedule Work</span>${unclosed ? '<span class="sv-state unclosed" title="This worker has completed their hours for the week but this WO is still open">Not closed</span>' : ''}</div>
     ${sj && sj.description ? `<div class="sv-desc" title="${escWO(sj.description)}">${escWO(sj.description)}</div>` : ''}
   </div>`;
 }
@@ -7198,7 +7226,13 @@ function schedJobUnfinished(it) {
 function schedSetupMove(it) {
   const wrap = document.getElementById('sched-move-wrap');
   const show = schedJobUnfinished(it);
-  wrap.style.display = show ? '' : 'none';
+  const j = it && it.type === 'job' ? jobs.find(x => String(x.id) === String(it.jobId)) : null;
+  const closeBtn = document.getElementById('sched-close-job');
+  const canClose = !!j && (j.open || jobPending(j));
+  closeBtn.style.display = canClose ? '' : 'none';
+  closeBtn.textContent = j && jobPending(j) ? 'Confirm closed' : 'Close Job';
+  document.getElementById('sched-move-btn').style.display = show ? '' : 'none';
+  wrap.style.display = show || canClose ? '' : 'none';
   document.getElementById('sched-move-box').style.display = 'none';
   if (!show) return;
   const nextMon = addDaysLocal(mondayOf(new Date(it.date + 'T00:00:00')), 7);
@@ -7206,6 +7240,16 @@ function schedSetupMove(it) {
     const ds = localDateStr(d);
     return `<button type="button" class="wo-chip" title="${fmtUKDate(ds)}" onclick="schedMoveTo('${ds}')">${SCHED_DAY_NAMES[i].slice(0, 3)} ${d.getDate()}</button>`;
   }).join('');
+}
+
+async function schedCloseJob() {
+  const cur = schedModalState && schedule.find(x => x.id === schedModalState.id);
+  const j = cur ? jobs.find(x => String(x.id) === String(cur.jobId)) : null;
+  if (!j) return;
+  closeSchedModal();
+  if (jobPending(j)) await confirmJobClose(j.id);
+  else await toggleJobOpen(j.id, false, null);
+  renderScheduleGrid();
 }
 
 function schedMoveToggle() {
@@ -7599,7 +7643,7 @@ function renderWorkerWeek() {
           <td class="wk-desc">${sj ? escWO(sj.description || '') : ''}</td>
           <td class="wk-note">${schedMeetFlagHtml(it)}${escWO(it.note || '')}</td>
           <td class="wk-logged">${logged ? `<span class="wk-logged-pill">${fmtHrs(logged)}h</span>` : '—'}</td>
-          <td style="text-align:right;">${canLog ? `<button class="btn btn-sm" onclick="logTimeForJob('${escWO(it.jobId)}', '${ds}', ${escWO(JSON.stringify(sj && sj.recurring ? sj.property : ''))})">Log time</button>` : ''}</td>`;
+          <td class="wk-actions">${canLog ? `<button class="btn btn-sm" onclick="logTimeForJob('${escWO(it.jobId)}', '${ds}', ${escWO(JSON.stringify(sj && sj.recurring ? sj.property : ''))})">Log time</button>` : ''}${wkCloseBtn(j)}</td>`;
       }
       rows += `<tr class="day-row${k === 0 ? ' wk-day-start' : ''}${rowCls}">${k === 0 ? dayCell : ''}${cells}</tr>`;
     });
@@ -7614,7 +7658,7 @@ function renderWorkerWeek() {
           <td class="wk-desc">${sj ? escWO(sj.description || '') : ''}</td>
           <td class="wk-note"></td>
           <td class="wk-logged"><span class="wk-logged-pill">${fmtHrs(r.hours)}h</span></td>
-          <td style="text-align:right;">${canLog ? `<button class="btn btn-sm" onclick="logTimeForJob('${escWO(r.jobId)}', '${ds}', ${escWO(JSON.stringify(sj.recurring ? r.property : ''))})">Log time</button>` : ''}</td>
+          <td class="wk-actions">${canLog ? `<button class="btn btn-sm" onclick="logTimeForJob('${escWO(r.jobId)}', '${ds}', ${escWO(JSON.stringify(sj.recurring ? r.property : ''))})">Log time</button>` : ''}${wkCloseBtn(sj && !sj.recurring ? sj.job : null)}</td>
         </tr>`;
     });
     if (showTotal) {
@@ -7635,9 +7679,9 @@ function renderWorkerWeek() {
           <th style="width:110px;">Day</th>
           <th class="wk-c-job" style="width:220px;">Job</th>
           <th>Description</th>
-          <th class="wk-c-note" style="width:170px;">Note</th>
+          <th class="wk-c-note" style="width:140px;">Note</th>
           <th class="wk-c-log" style="width:96px;text-align:center;">Logged</th>
-          <th style="width:100px;"></th>
+          <th class="wk-c-act" style="width:190px;"></th>
         </tr></thead>
         <tbody>${rows}</tbody>
       </table>
@@ -7666,6 +7710,11 @@ function isJobLoggable(j) {
 }
 
 let isWorkerClosingJob = false;
+function wkCloseBtn(j) {
+  if (!j || !j.open) return '';
+  return `<button class="btn btn-sm btn-close-job" onclick="workerCloseJob('${escWO(j.id)}', this)">Close job</button>`;
+}
+
 async function workerCloseJob(id, btn) {
   if (isWorkerClosingJob) return;
   const job = jobs.find(j => j.id === id);
@@ -7688,6 +7737,7 @@ async function workerCloseJob(id, btn) {
     sel.value = keep;
     if (typeof ssSyncLabel === 'function') ssSyncLabel('job-select');
     renderWorkerJobs();
+    if (document.getElementById('worker-myweek-section').style.display !== 'none') renderWorkerWeek();
     setSyncStatus('worker', 'synced', id + ' closed');
   } catch (err) {
     unlock();
