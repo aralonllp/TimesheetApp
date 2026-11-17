@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-117 (Editing a time entry keeps its job; recurring jobs on the schedule are in the edit list) -->
+<!-- BUILD MARKER: NB-118 (Worker sign-in: no lock wait, slow/failed loads shown with retry) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -470,6 +470,8 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 .form-section { margin-bottom: 1.5rem; }
 .pin-input { letter-spacing: 4px; }
 .initials-input { text-transform: uppercase; }
+.load-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 12px; padding: 10px 14px; border-radius: var(--border-radius-md); background: #fdeeee; border: 1px solid #eab4b4; color: #a61b1b; font-size: 13px; font-weight: 600; }
+.load-banner.loading { background: var(--color-background-secondary); border-color: var(--color-border-tertiary); color: var(--color-text-secondary); font-weight: 500; }
 .login-note { margin: 0 0 4px; padding: 8px 12px; border-radius: var(--border-radius-md); background: var(--color-background-secondary); font-size: 13px; color: var(--color-text-secondary); }
 .initials-input::placeholder { text-transform: none; }
 .ou-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 0; border-top: 1px solid var(--color-border-tertiary, #eee); }
@@ -659,6 +661,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
         <span>Viewing <strong id="preview-name"></strong>'s screen — read-only</span>
         <button class="btn btn-sm" onclick="exitWorkerPreview()">Back to office</button>
       </div>
+      <div class="load-banner" id="worker-load-banner" style="display:none;"><span id="worker-load-text"></span><button class="btn btn-sm" id="worker-load-retry" onclick="retryWorkerLoad()">Try again</button></div>
       <div class="row-between form-section">
         <div>
           <p class="screen-title" id="worker-greeting">Hello</p>
@@ -1646,6 +1649,29 @@ setInterval(() => { if (currentWorker && !previewWorker && Date.now() - workerLa
 document.addEventListener('visibilitychange', () => { if (!document.hidden && currentWorker && !previewWorker && Date.now() - workerLastActive >= WORKER_IDLE_MS) workerLogout(); });
 
 const API_TIMEOUT_MS = 60000;
+let workerLastLoadOk = 0;
+const API_TIMEOUTS = { workerLogin: 30000, officeLogin: 30000 };
+
+// Worker screen banner: loading / could not load, with a retry
+function setWorkerLoadBanner(state, text) {
+  const el = document.getElementById('worker-load-banner');
+  if (!el) return;
+  el.style.display = state ? '' : 'none';
+  el.className = 'load-banner' + (state === 'loading' ? ' loading' : '');
+  document.getElementById('worker-load-text').textContent = text || '';
+  document.getElementById('worker-load-retry').style.display = state === 'error' ? '' : 'none';
+}
+function retryWorkerLoad() {
+  setWorkerLoadBanner('loading', 'Loading your jobs...');
+  if (!workerToken) { setWorkerLoadBanner('error', 'Not connected to the server. Sign out and back in once you have signal.'); return; }
+  pollJobs();
+}
+function serverProblemMessage(err) {
+  const m = String(err && err.message || err);
+  if (!navigator.onLine) return 'This tablet is offline.';
+  if (/took too long/i.test(m)) return 'The server is taking too long to answer.';
+  return 'Could not reach the server.';
+}
 
 function api(action, payload = {}, _attempt = 0) {
   if (!SCRIPT_URL) return Promise.reject(new Error('No SCRIPT_URL configured'));
@@ -1654,7 +1680,7 @@ function api(action, payload = {}, _attempt = 0) {
   const sentToken = payload.token || currentToken();
   // Never leave the screen on "Loading..." forever if Apps Script stalls
   const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
-  const timer = ctrl ? setTimeout(() => ctrl.abort(), API_TIMEOUT_MS) : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), API_TIMEOUTS[action] || API_TIMEOUT_MS) : null;
   return fetch(SCRIPT_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain' },
@@ -1923,6 +1949,8 @@ async function workerLogin() {
   const btn = document.getElementById('worker-login-btn');
   if (btn.disabled) return;
   btn.disabled = true; btn.textContent = 'Signing in...';
+  showLoginNote('worker-login-note', '');
+  const slow = setTimeout(() => { btn.textContent = 'Still signing in...'; showLoginNote('worker-login-note', 'The server is slow to respond. Hang on, this can take up to 30 seconds.'); }, 6000);
   try {
     if (!navigator.onLine || !SCRIPT_URL) throw new Error('NetworkError: offline');
     const res = await api('workerLogin', { initials, pin });
@@ -1936,15 +1964,25 @@ async function workerLogin() {
     saveWorkerToken(res.name, res.token);
     finishWorkerLogin(res.name);
   } catch (err) {
-    if (isNetworkError(err)) {
+    showLoginNote('worker-login-note', '');
+    const unreachable = isNetworkError(err) || /took too long/i.test(String(err && err.message || err));
+    if (unreachable) {
       const name = await offlinePinMatch(initials, pin);
-      if (name) { workerToken = readWorkerTokens()[name] || ''; finishWorkerLogin(name); return; }
-      alert(name === false ? 'Initials or PIN not recognised.' : 'No connection. Sign in once while online on this tablet, then it will work offline too.');
+      if (name) {
+        workerToken = readWorkerTokens()[name] || '';
+        finishWorkerLogin(name);
+        setWorkerLoadBanner('error', serverProblemMessage(err) + ' You are signed in offline: time you log is saved on this tablet and sent when the server is back.');
+        setSyncStatus('worker', 'error', 'Offline');
+        return;
+      }
+      if (name === false) { alert('Initials or PIN not recognised.'); document.getElementById('worker-pin').value = ''; return; }
+      alert(navigator.onLine ? serverProblemMessage(err) + ' Please try again in a minute.' : 'No connection. Sign in once while online on this tablet, then it will work offline too.');
       return;
     }
     alert(err.message || err);
     document.getElementById('worker-pin').value = '';
   } finally {
+    clearTimeout(slow);
     btn.disabled = false; btn.textContent = 'Sign in';
   }
 }
@@ -2057,8 +2095,14 @@ function finishWorkerLogin(name) {
   document.getElementById('wjobs-search').value = '';
   switchWorkerTab('log');
   updateNotifBadge();
-  setSyncStatus('worker', syncQueue.length ? 'pending' : 'synced',
-    syncQueue.length ? syncQueue.length + ' entries pending sync' : 'Synced');
+  setWorkerLoadBanner('', '');
+  workerLastLoadOk = 0;
+  if (workerToken) {
+    setSyncStatus('worker', 'pending', 'Loading...');
+    setWorkerLoadBanner('loading', 'Loading your jobs...');
+  } else {
+    setSyncStatus('worker', syncQueue.length ? 'pending' : 'synced', syncQueue.length ? syncQueue.length + ' entries pending sync' : 'Synced');
+  }
     if (pollTimer) clearInterval(pollTimer);
   	pollTimer = setInterval(pollJobs, POLL_INTERVAL_MS);
     if (workerToken) pollJobs();
@@ -2069,6 +2113,8 @@ function workerLogout() {
   if (previewWorker) { exitWorkerPreview(); return; }
   currentWorker = null;
   workerToken = '';
+  setWorkerLoadBanner('', '');
+  workerLastLoadOk = 0;
   closeNotifications();
   updateNotifBadge();
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
@@ -2147,6 +2193,8 @@ async function pollJobs(preloaded) {
     const photoBusy = photoUploading || (document.activeElement && document.activeElement.closest && document.activeElement.closest('.job-photos'));
     if (!photoBusy && document.getElementById('worker-myjobs-section').style.display !== 'none') renderWorkerJobs();
     if (document.getElementById('worker-myweek-section').style.display !== 'none') renderWorkerWeek();
+    setWorkerLoadBanner('', '');
+    workerLastLoadOk = Date.now();
     if (previewWorker) { setSyncStatus('worker', 'synced', 'Read-only view'); return; }
     await flushQueue();
     if (syncQueue.length) {
@@ -2154,7 +2202,11 @@ async function pollJobs(preloaded) {
     } else {
       setSyncStatus('worker', 'synced', 'Updated ' + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }));
     }
-  } catch (e) { setSyncStatus('worker', 'error', 'Could not refresh'); }
+  } catch (e) {
+    setSyncStatus('worker', 'error', 'Could not refresh');
+    // One missed background refresh is not worth a warning; a failed first load or a long gap is
+    if ((!e || !e.authError) && (!workerLastLoadOk || Date.now() - workerLastLoadOk > 3 * 60000)) setWorkerLoadBanner('error', serverProblemMessage(e) + ' Your jobs may be out of date. It will keep trying every minute.');
+  }
   finally { if (!preloaded) workerPollRunning = false; }
 }
 
