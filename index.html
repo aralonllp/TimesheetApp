@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-106 (Recurring Jobs tab: newest RWO first) -->
+<!-- BUILD MARKER: NB-108 (Notifications tab: per-worker "Office messages" switch on the Workers tab) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -785,10 +785,10 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
         <button onclick="switchOfficeTab('jobs')" id="otab-jobs">Jobs</button>
         <button onclick="switchOfficeTab('schedule')" id="otab-schedule">Schedule Creation</button>
         <button onclick="switchOfficeTab('weekendcover')" id="otab-weekendcover">Weekend Cover</button>
-        <button onclick="switchOfficeTab('notifs')" id="otab-notifs">Notifications</button>
         <button onclick="switchOfficeTab('viewas')" id="otab-viewas" style="display:none;">View as Worker</button>
         <button onclick="switchOfficeTab('overtime')" id="otab-overtime">Overtime</button>
         <button onclick="switchOfficeTab('weekapprovals')" id="otab-weekapprovals">Weekly Approvals</button>
+        <button onclick="switchOfficeTab('notifs')" id="otab-notifs">Notifications</button>
         <button onclick="switchOfficeTab('recurring')" id="otab-recurring">Recurring Jobs</button>
         <button onclick="switchOfficeTab('workers')" id="otab-workers">Workers</button>
         <button onclick="switchOfficeTab('locations')" id="otab-locations">Locations</button>
@@ -5414,6 +5414,7 @@ function renderWorkersList() {
         <button class="btn btn-sm" onclick="resetPin('${w.name.replace(/'/g, "\\'")}', this)">Reset PIN</button>
         <button class="btn btn-sm" onclick="toggleWorkerOnSchedule('${w.name.replace(/'/g, "\\'")}')">${isOnSchedule(w) ? 'On schedule ✓' : 'Off schedule'}</button>
         <button class="btn btn-sm" onclick="toggleWorkerWeekendCover('${w.name.replace(/'/g, "\\'")}')">${isWeekendCoverWorker(w) ? 'Weekend rota ✓' : 'Not on weekend rota'}</button>
+        <button class="btn btn-sm" title="Whether office users can pick them on the Notifications tab" onclick="toggleWorkerOfficeNotify('${w.name.replace(/'/g, "\\'")}')">${takesOfficeMessages(w) ? 'Office messages ✓' : 'No office messages'}</button>
         <button class="btn btn-sm" onclick="toggleWorker('${w.name.replace(/'/g, "\\'")}', ${active})">${active ? 'Deactivate' : 'Reactivate'}</button>
       </div>
     </div>`;
@@ -6473,7 +6474,8 @@ let sentNotifications = null;
 let nfKind = 'all';
 let nfAllowance = null;
 
-function nfWorkers() { return workers.filter(w => w.active !== false && w.active !== 'FALSE').slice().sort((a, b) => a.name.localeCompare(b.name)); }
+function takesOfficeMessages(w) { return !(w.officeNotify === false || String(w.officeNotify).toUpperCase() === 'FALSE'); }
+function nfWorkers() { return workers.filter(w => w.active !== false && w.active !== 'FALSE' && takesOfficeMessages(w)).slice().sort((a, b) => a.name.localeCompare(b.name)); }
 
 function renderNotificationsTab() {
   const box = document.getElementById('nf-workers');
@@ -7794,6 +7796,26 @@ async function setWorkerDailyHoursUI(name, input) {
     input.disabled = false;
   }
 }
+async function toggleWorkerOfficeNotify(name) {
+  const w = workers.find(x => x.name === name);
+  if (!w) return;
+  const next = !takesOfficeMessages(w);
+  if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to change this'); return; }
+  const prev = w.officeNotify;
+  w.officeNotify = next;
+  renderWorkersList();
+  try {
+    const res = await api('setWorkerOfficeNotify', { name, officeNotify: next, performedBy: officeUserName() });
+    if (!res || !res.success) throw new Error('The Apps Script is still running the previous version — publish a new deployment version.');
+    localStorage.setItem('workers', JSON.stringify(workers));
+    setSyncStatus('office', 'synced', name + (next ? ' can now be sent' : ' will no longer be offered') + ' office messages');
+  } catch (err) {
+    w.officeNotify = prev;
+    renderWorkersList();
+    alert('Could not update ' + name + ': ' + (err.message || err));
+  }
+}
+
 async function toggleWorkerOnSchedule(name) {
   const w = workers.find(x => x.name === name);
   if (!w) return;
