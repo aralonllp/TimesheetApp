@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-110 (One Schedule tab: editable cards with totals; off-schedule work; move to next week) -->
+<!-- BUILD MARKER: NB-111 (Schedule cards: no red over-estimate border; clear completed / awaiting sign-off styling) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -391,7 +391,12 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 .sched-grid tfoot .sv-daytotal { font-size: 13px; }
 .sv-week-total strong { font-size: 13px; }
 .sched-grid tfoot th { text-align: left; }
-.sched-item.sv-is-over { box-shadow: inset 3px 0 0 #a61b1b; }
+.sched-rich .sv-card.sv-done { background: #eef8f1; border-color: #a9d8b8; box-shadow: inset 4px 0 0 #2e9e5b; }
+.sched-rich .sv-card.sv-done .sv-prop, .sched-rich .sv-card.sv-done .sv-desc { color: #1e6b34; }
+.sched-rich .sv-card.sv-awaiting { background: #fff8ec; border-color: #f0c890; box-shadow: inset 4px 0 0 #e0a030; }
+.sv-state { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 700; padding: 1px 8px; border-radius: 20px; white-space: nowrap; }
+.sv-state.done { background: #2e9e5b; color: #fff; }
+.sv-state.awaiting { background: #e0a030; color: #fff; }
 .sched-item.sched-pending { opacity: 0.55; outline: 1px dashed var(--color-border-primary); }
 .sched-add { font-size: 11px; border: 1px dashed #bbb; background: transparent; border-radius: 6px; width: 100%; padding: 4px; cursor: pointer; color: var(--color-text-secondary); font-family: inherit; }
 .sched-add:hover { border-color: var(--color-text-primary); color: var(--color-text-primary); }
@@ -6947,8 +6952,10 @@ function svJobCard(it, ds, worker, dayHrs, jobTotals, clickAttr) {
     if (total || (est != null && !isNaN(est))) jobLine = `<div class="sv-hours"><span>Job <strong${over ? ' class="sv-over"' : ''}>${fmtHrs(total)}h${est != null && !isNaN(est) ? ' / ' + fmtHrs(est) + 'h est' : ''}</strong></span>${over ? `<span class="over-flag" style="margin-left:0;">Over by ${fmtHrs(total - est)}h</span>` : ''}</div>`;
   }
   const main = sj && sj.property ? sj.property : (sj ? sj.id : it.jobId);
-  const sub = `${sj && sj.property ? `<span>${escWO(it.jobId)}</span>` : ''}${sj && sj.recurring ? '<span class="rj-tag">Recurring</span>' : ''}${j && j.priority ? `<span class="prio prio-${escWO(j.priority)}">${escWO(j.priority)}</span>` : ''}${j && !j.open ? '<span class="done-tag">Job Completed</span>' : ''}`;
-  return `<div class="sched-item sv-card${it._pending ? ' sched-pending' : ''}${overCls}"${clickAttr || ''}>
+  const awaiting = j && jobPending(j), done = j && !j.open && !awaiting;
+  const state = done ? '<span class="sv-state done">✓ Completed</span>' : awaiting ? '<span class="sv-state awaiting">Awaiting sign-off</span>' : '';
+  const sub = `${sj && sj.property ? `<span>${escWO(it.jobId)}</span>` : ''}${sj && sj.recurring ? '<span class="rj-tag">Recurring</span>' : ''}${j && j.priority ? `<span class="prio prio-${escWO(j.priority)}">${escWO(j.priority)}</span>` : ''}${state}`;
+  return `<div class="sched-item sv-card${it._pending ? ' sched-pending' : ''}${overCls}${done ? ' sv-done' : awaiting ? ' sv-awaiting' : ''}"${clickAttr || ''}>
     <div class="sv-top"><span class="sv-prop">${escWO(main)}</span>${logged ? `<span class="wk-logged-pill">${fmtHrs(logged)}h</span>` : '<span class="sv-nolog">—</span>'}</div>
     ${sub ? `<div class="wk-sub">${sub}</div>` : ''}
     ${sj && sj.description ? `<div class="sv-desc" title="${escWO(sj.description)}">${escWO(sj.description)}</div>` : ''}
