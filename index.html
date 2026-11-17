@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-102 (Office users card moved inside the Workers tab) -->
+<!-- BUILD MARKER: NB-103 (Admin: read-only "View as worker" tab) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -152,6 +152,12 @@ textarea { height: 60px; resize: none; }
 .wo-atp-num { max-width: 280px; margin-top: 2px; }
 .entry-row.row-busy { opacity: 0.6; transition: opacity 0.15s; }
 .entry-row.row-busy button { cursor: progress; }
+.viewas-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; margin-top: 14px; }
+.viewas-btn { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border: 0.5px solid var(--color-border-secondary, #ccc); border-radius: var(--border-radius-md); background: var(--color-background-primary, #fff); cursor: pointer; font-size: 13px; text-align: left; }
+.viewas-btn:hover { background: var(--color-background-secondary); }
+.viewas-btn .text-muted { font-size: 12px; }
+#timesheet-screen.is-preview button[onclick="workerLogout()"] { display: none; }
+.preview-banner { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; padding: 10px 14px; border-radius: var(--border-radius-md); background: #fff4d6; border: 1px solid #f0c890; font-size: 13px; color: #6b4700; }
 .hold-tag { font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 700; margin-left: 6px; background: #ffe8cc; color: #8a4b00; white-space: nowrap; }
 .entry-row.hold-row { border-left: 3px solid #f0a040; background: #fffaf3; }
 .hold-raise { background: none; border: none; padding: 0; margin-top: 8px; font-size: 12px; color: var(--color-text-info, #185fa5); text-decoration: underline; cursor: pointer; }
@@ -635,6 +641,10 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
     </div>
 
     <div id="timesheet-screen" style="display:none;">
+      <div class="preview-banner" id="preview-banner" style="display:none;">
+        <span>Viewing <strong id="preview-name"></strong>'s screen — read-only</span>
+        <button class="btn btn-sm" onclick="exitWorkerPreview()">Back to office</button>
+      </div>
       <div class="row-between form-section">
         <div>
           <p class="screen-title" id="worker-greeting">Hello</p>
@@ -776,6 +786,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
         <button onclick="switchOfficeTab('schedule')" id="otab-schedule">Schedule Creation</button>
         <button onclick="switchOfficeTab('weekendcover')" id="otab-weekendcover">Weekend Cover</button>
         <button onclick="switchOfficeTab('notifs')" id="otab-notifs">Notifications</button>
+        <button onclick="switchOfficeTab('viewas')" id="otab-viewas" style="display:none;">View as Worker</button>
         <button onclick="switchOfficeTab('overtime')" id="otab-overtime">Overtime</button>
         <button onclick="switchOfficeTab('weekapprovals')" id="otab-weekapprovals">Weekly Approvals</button>
         <button onclick="switchOfficeTab('recurring')" id="otab-recurring">Recurring Jobs</button>
@@ -1227,6 +1238,15 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
       </div>
 
       <!-- Workers tab -->
+      <!-- View as worker (admin only) -->
+      <div id="office-tab-viewas" style="display:none;">
+        <div class="card">
+          <p class="section-heading">View as worker <span class="text-muted" style="font-weight:400;font-size:12px;">admin only</span></p>
+          <p class="text-muted" style="font-size:13px;margin-top:4px;">Opens a worker's screen exactly as they see it: their jobs, week, entries and notifications. It's read-only, so nothing can be logged or changed while you're looking, and each view is noted in the activity log.</p>
+          <div class="viewas-grid" id="viewas-list"></div>
+        </div>
+      </div>
+
       <!-- Notifications tab -->
       <div id="office-tab-notifs" style="display:none;">
         <div class="nf-grid">
@@ -1657,11 +1677,12 @@ function showLoginNote(id, text) {
 const WORKER_IDLE_MS = 30 * 60 * 1000;
 let workerLastActive = Date.now();
 ['pointerdown', 'keydown', 'touchstart', 'wheel'].forEach(ev => document.addEventListener(ev, () => { workerLastActive = Date.now(); }, { passive: true, capture: true }));
-setInterval(() => { if (currentWorker && Date.now() - workerLastActive >= WORKER_IDLE_MS) workerLogout(); }, 60000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden && currentWorker && Date.now() - workerLastActive >= WORKER_IDLE_MS) workerLogout(); });
+setInterval(() => { if (currentWorker && !previewWorker && Date.now() - workerLastActive >= WORKER_IDLE_MS) workerLogout(); }, 60000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && currentWorker && !previewWorker && Date.now() - workerLastActive >= WORKER_IDLE_MS) workerLogout(); });
 
 function api(action, payload = {}, _attempt = 0) {
   if (!SCRIPT_URL) return Promise.reject(new Error('No SCRIPT_URL configured'));
+  if (previewWorker && !PREVIEW_ALLOWED.includes(action)) return Promise.reject(new Error("This is a read-only view of " + previewWorker + "'s screen — nothing can be changed here"));
   const MAX_ATTEMPTS = 3; // 1 initial try + 2 retries
   const sentToken = payload.token || currentToken();
   return fetch(SCRIPT_URL, {
@@ -1825,6 +1846,7 @@ async function flushQueue() {
 }
 
 function queueOrSend(action, payload) {
+  if (previewWorker) { alert("This is a read-only view of " + previewWorker + "'s screen — nothing can be saved here."); return Promise.resolve({ synced: false, blocked: true }); }
   return new Promise(async (resolve) => {
     if (SCRIPT_URL && navigator.onLine) {
       try {
@@ -1853,6 +1875,7 @@ function setSyncStatus(scope, state, text) {
 // ── Navigation ────────────────────────────────────────────────────
 
 function switchTab(tab) {
+  if (tab === 'office' && previewWorker) { exitWorkerPreview(); return; }
   document.querySelectorAll('.nav button').forEach((b, i) =>
     b.classList.toggle('active', (tab === 'worker' && i === 0) || (tab === 'office' && i === 1))
   );
@@ -2064,6 +2087,7 @@ function finishWorkerLogin(name) {
 }
 
 function workerLogout() {
+  if (previewWorker) { exitWorkerPreview(); return; }
   currentWorker = null;
   workerToken = '';
   closeNotifications();
@@ -2075,10 +2099,11 @@ function workerLogout() {
   document.getElementById('worker-initials').value = '';
 }
 
-async function pollJobs() {
-  if (!SCRIPT_URL || !navigator.onLine) return;
+async function pollJobs(preloaded) {
+  if (previewWorker && !preloaded) return;
+  if (!preloaded && (!SCRIPT_URL || !navigator.onLine)) return;
   try {
-    const data = await api('getData');
+    const data = preloaded || await api('getData');
     jobs = data.jobs || [];
     workers = (data.workers || workers).map(w => ({ ...w, name: String(w.name || '').trim().replace(/\s+/g, ' ') }));
     if (Array.isArray(data.bankHolidays) && data.bankHolidays.length) {
@@ -2138,6 +2163,7 @@ async function pollJobs() {
     const photoBusy = photoUploading || (document.activeElement && document.activeElement.closest && document.activeElement.closest('.job-photos'));
     if (!photoBusy && document.getElementById('worker-myjobs-section').style.display !== 'none') renderWorkerJobs();
     if (document.getElementById('worker-myweek-section').style.display !== 'none') renderWorkerWeek();
+    if (previewWorker) { setSyncStatus('worker', 'synced', 'Read-only view'); return; }
     await flushQueue();
     if (syncQueue.length) {
       setSyncStatus('worker', 'pending', syncQueue.length + ' entries pending sync');
@@ -3139,6 +3165,7 @@ function enterOffice() {
   document.querySelector('.app').classList.add('office-wide');
   document.getElementById('office-user-display').textContent = officeUser.name;
   document.getElementById('office-users-card').style.display = officeUser.role === 'admin' ? '' : 'none';
+  document.getElementById('otab-viewas').style.display = officeUser.role === 'admin' ? '' : 'none';
   document.getElementById('office-pin').value = '';
   showLoginNote('office-login-note', '');
   refreshOffice();
@@ -3183,6 +3210,15 @@ async function submitNewPassword() {
 }
 
 function officeLogout() {
+  if (previewWorker) {
+    previewWorker = null;
+    currentWorker = null;
+    document.getElementById('preview-banner').style.display = 'none';
+    document.getElementById('timesheet-screen').classList.remove('is-preview');
+    document.getElementById('timesheet-screen').style.display = 'none';
+    document.getElementById('login-screen').style.display = 'block';
+    switchTab('office');
+  }
   currentOfficeUser = null;
   officeUser = null;
   officeToken = '';
@@ -5280,7 +5316,7 @@ async function officeReviewOvertime(id, status) {
 }
 
 function switchOfficeTab(tab) {
-  const tabs = ['daily','wocreate','jobs','schedule','weekendcover','notifs','schedview','entries','absences','workers','locations','recurring','overtime','weekapprovals'];
+  const tabs = ['daily','wocreate','jobs','schedule','weekendcover','notifs','viewas','schedview','entries','absences','workers','locations','recurring','overtime','weekapprovals'];
   tabs.forEach(t => {
     const el = document.getElementById('office-tab-' + t);
     const btn = document.getElementById('otab-' + t);
@@ -5300,6 +5336,56 @@ function switchOfficeTab(tab) {
   if (tab === 'weekendcover') renderWeekendCover();
   if (tab === 'notifs') renderNotificationsTab();
   if (tab === 'workers') loadOfficeUsers();
+  if (tab === 'viewas') renderViewAsList();
+}
+
+// ── Admin: view a worker's screen (read-only) ────────────────────
+let previewWorker = null;
+const PREVIEW_ALLOWED = ['getWorkerView', 'getJobPhotos', 'getJobPhoto'];
+
+function renderViewAsList() {
+  const el = document.getElementById('viewas-list');
+  const list = workers.filter(w => w.active !== false && w.active !== 'FALSE').slice().sort((a, b) => a.name.localeCompare(b.name));
+  el.innerHTML = list.map(w => `<button class="viewas-btn" onclick="startWorkerPreview(${escWO(JSON.stringify(w.name))}, this)"><span>${escWO(w.name)}</span><span class="text-muted">${escWO(workerInitials(w.name))}</span></button>`).join('') || '<p class="text-muted">No active workers.</p>';
+}
+
+async function startWorkerPreview(name, btn) {
+  if (!officeUser || officeUser.role !== 'admin') return;
+  if (btn) { btn.disabled = true; btn.querySelector('.text-muted').textContent = 'Opening…'; }
+  try {
+    const data = await api('getWorkerView', { name });
+    if (!data || !Array.isArray(data.jobs)) throw new Error('The Apps Script is still running the previous version — publish a new deployment version.');
+    previewWorker = name;
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    switchTab('worker');
+    finishWorkerLogin(name);
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    document.getElementById('preview-name').textContent = name;
+    document.getElementById('preview-banner').style.display = '';
+    document.getElementById('timesheet-screen').classList.add('is-preview');
+    await pollJobs(data);
+    switchWorkerTab('myweek');
+  } catch (err) {
+    alert('Could not open ' + name + "'s view: " + (err.message || err));
+    if (previewWorker) exitWorkerPreview();
+  } finally {
+    if (btn) { btn.disabled = false; btn.querySelector('.text-muted').textContent = workerInitials(name); }
+  }
+}
+
+function exitWorkerPreview() {
+  if (!previewWorker) return;
+  previewWorker = null;
+  currentWorker = null;
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  closeNotifications();
+  document.getElementById('preview-banner').style.display = 'none';
+  document.getElementById('timesheet-screen').classList.remove('is-preview');
+  document.getElementById('timesheet-screen').style.display = 'none';
+  document.getElementById('login-screen').style.display = 'block';
+  switchTab('office');
+  switchOfficeTab('viewas');
+  refreshOffice();
 }
 
 // ── Workers management ───────────────────────────────────────────
