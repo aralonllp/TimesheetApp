@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-104 (Holding WOs can be linked to a recurring job) -->
+<!-- BUILD MARKER: NB-105 (Holding WO link list: same property, all WOs, then recurring jobs) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -8898,8 +8898,8 @@ function openHoldLinkModal(id) {
   const sel = document.getElementById('hold-link-select');
   sel.innerHTML = '<option value="">Select a work order or recurring job...</option>' +
     (same.length ? `<optgroup label="Same property">${same.map(opt).join('')}</optgroup>` : '') +
-    (rwo.length ? `<optgroup label="Recurring jobs">${rwo.map(j => `<option value="${escWO(j.id)}">${escWO(j.id)} · ${escWO(String(j.description || '').slice(0, 60))}</option>`).join('')}</optgroup>` : '') +
-    `<optgroup label="All work orders">${real.filter(j => j.property !== hold.property).map(opt).join('')}</optgroup>`;
+    `<optgroup label="All work orders">${real.filter(j => j.property !== hold.property).map(opt).join('')}</optgroup>` +
+    (rwo.length ? `<optgroup label="Recurring jobs">${rwo.map(j => `<option value="${escWO(j.id)}">${escWO(j.id)} · ${escWO(String(j.description || '').slice(0, 60))}</option>`).join('')}</optgroup>` : '');
   if (!sel._ssAttached) ssAttach('hold-link-select', 'Search WO, RWO, property, description...'); else ssRefresh('hold-link-select');
   const btn = document.getElementById('hold-link-confirm');
   btn.disabled = false; btn.textContent = 'Link';
