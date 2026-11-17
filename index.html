@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-118 (Worker sign-in: no lock wait, slow/failed loads shown with retry) -->
+<!-- BUILD MARKER: NB-119 (Switching workers: a previous worker's load is never applied to the next) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -1650,6 +1650,19 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden && cu
 
 const API_TIMEOUT_MS = 60000;
 let workerLastLoadOk = 0;
+// Bumped on every worker sign-in/out, so a load started for one worker is never applied to the next
+let workerSession = 0;
+function startWorkerSession(name) {
+  workerSession++;
+  workerPollRunning = false;
+  historyLoading = null;
+  histEntriesFrom = ''; histScheduleFrom = '';
+  historyJobsLoaded.clear();
+  preWindowHours = {}; preWindowMine = {};
+  const n = String(name || '');
+  entries = n ? entries.filter(e => String(e.worker || '').trim() === n) : [];
+  schedule = n ? schedule.filter(x => String(x.worker || '').trim() === n) : [];
+}
 const API_TIMEOUTS = { workerLogin: 30000, officeLogin: 30000 };
 
 // Worker screen banner: loading / could not load, with a retry
@@ -2081,6 +2094,7 @@ function finishWorkerLogin(name) {
   workerLastActive = Date.now();
   showLoginNote('worker-login-note', '');
   document.getElementById('worker-pin').value = '';
+  if (!previewWorker) startWorkerSession(w);
   currentWorker = w;
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('timesheet-screen').style.display = 'block';
@@ -2113,6 +2127,7 @@ function workerLogout() {
   if (previewWorker) { exitWorkerPreview(); return; }
   currentWorker = null;
   workerToken = '';
+  startWorkerSession('');
   setWorkerLoadBanner('', '');
   workerLastLoadOk = 0;
   closeNotifications();
@@ -2130,8 +2145,10 @@ async function pollJobs(preloaded) {
   if (!preloaded && (!SCRIPT_URL || !navigator.onLine)) return;
   if (!preloaded && workerPollRunning) return;
   if (!preloaded) workerPollRunning = true;
+  const mySession = workerSession;
   try {
     const data = preloaded || await api('getData');
+    if (mySession !== workerSession) return;   // signed out (or someone else signed in) while this was loading
     jobs = data.jobs || [];
     workers = (data.workers || workers).map(w => ({ ...w, name: String(w.name || '').trim().replace(/\s+/g, ' ') }));
     if (Array.isArray(data.bankHolidays) && data.bankHolidays.length) {
@@ -2203,11 +2220,12 @@ async function pollJobs(preloaded) {
       setSyncStatus('worker', 'synced', 'Updated ' + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }));
     }
   } catch (e) {
+    if (mySession !== workerSession) return;
     setSyncStatus('worker', 'error', 'Could not refresh');
     // One missed background refresh is not worth a warning; a failed first load or a long gap is
     if ((!e || !e.authError) && (!workerLastLoadOk || Date.now() - workerLastLoadOk > 3 * 60000)) setWorkerLoadBanner('error', serverProblemMessage(e) + ' Your jobs may be out of date. It will keep trying every minute.');
   }
-  finally { if (!preloaded) workerPollRunning = false; }
+  finally { if (!preloaded && mySession === workerSession) workerPollRunning = false; }
 }
 
 function expandAssignedTo(assignedTo) {
@@ -8353,12 +8371,13 @@ function loadHistory(from, withSchedule, after) {
   if (!historyNeeded(from, withSchedule)) return false;
   if (Date.now() - historyFailedAt < 30000 && !historyLoading) return false;
   if (historyLoading) { historyLoading.then(() => { if (historyNeeded(from, withSchedule)) loadHistory(from, withSchedule, after); else if (after) after(); }); return true; }
-  const eTo = histEntriesFrom, sTo = histScheduleFrom;
+  const eTo = histEntriesFrom, sTo = histScheduleFrom, hSession = workerSession;
   const lowest = [eTo, withSchedule ? sTo : ''].filter(Boolean).sort().pop();
   const td = new Date(lowest + 'T12:00:00'); td.setDate(td.getDate() - 1);
   const to = localDateStr(td);
   historyLoading = api('getHistory', { from: from, to: to, schedule: !!withSchedule })
     .then(data => {
+      if (hSession !== workerSession) return;
       if (!data || !data.success) historyFailedAt = Date.now();
       if (data && data.success) {
         mergeHistory_(data);
@@ -8370,7 +8389,7 @@ function loadHistory(from, withSchedule, after) {
       }
     })
     .catch(err => { historyFailedAt = Date.now(); console.warn('Could not load older weeks', err); })
-    .then(() => { historyLoading = null; if (after) after(); });
+    .then(() => { if (hSession !== workerSession) return; historyLoading = null; if (after) after(); });
   return true;
 }
 
@@ -8379,7 +8398,8 @@ function loadJobHistory(id, after) {
   id = String(id);
   if (!histEntriesFrom || historyJobsLoaded.has(id) || previewWorker) return false;
   historyJobsLoaded.add(id);
-  api('getHistory', { jobId: id }).then(data => { if (data && data.success) mergeHistory_(data); if (after) after(); })
+  const hSession = workerSession;
+  api('getHistory', { jobId: id }).then(data => { if (hSession !== workerSession) return; if (data && data.success) mergeHistory_(data); if (after) after(); })
     .catch(err => { historyJobsLoaded.delete(id); console.warn('Could not load job history', err); });
   return true;
 }
