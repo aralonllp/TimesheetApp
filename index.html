@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-111 (Schedule cards: no red over-estimate border; clear completed / awaiting sign-off styling) -->
+<!-- BUILD MARKER: NB-112 (Speed: requests time out instead of hanging; overlapping refreshes merged) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -1632,15 +1632,26 @@ let workerLastActive = Date.now();
 setInterval(() => { if (currentWorker && !previewWorker && Date.now() - workerLastActive >= WORKER_IDLE_MS) workerLogout(); }, 60000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden && currentWorker && !previewWorker && Date.now() - workerLastActive >= WORKER_IDLE_MS) workerLogout(); });
 
+const API_TIMEOUT_MS = 60000;
+
 function api(action, payload = {}, _attempt = 0) {
   if (!SCRIPT_URL) return Promise.reject(new Error('No SCRIPT_URL configured'));
   if (previewWorker && !PREVIEW_ALLOWED.includes(action)) return Promise.reject(new Error("This is a read-only view of " + previewWorker + "'s screen — nothing can be changed here"));
   const MAX_ATTEMPTS = 3; // 1 initial try + 2 retries
   const sentToken = payload.token || currentToken();
+  // Never leave the screen on "Loading..." forever if Apps Script stalls
+  const ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = ctrl ? setTimeout(() => ctrl.abort(), API_TIMEOUT_MS) : null;
   return fetch(SCRIPT_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain' },
-    body: JSON.stringify({ action, ...payload, token: sentToken })
+    body: JSON.stringify({ action, ...payload, token: sentToken }),
+    signal: ctrl ? ctrl.signal : undefined
+  })
+  .finally(function() { if (timer) clearTimeout(timer); })
+  .catch(function(err) {
+    if (err && err.name === 'AbortError') throw new Error('The server took too long to answer — please try again');
+    throw err;
   })
   .then(function(r) {
     if (!r.ok) throw new Error('HTTP ' + r.status); // transient — worth retrying
@@ -2052,9 +2063,12 @@ function workerLogout() {
   document.getElementById('worker-initials').value = '';
 }
 
+let workerPollRunning = false;
 async function pollJobs(preloaded) {
   if (previewWorker && !preloaded) return;
   if (!preloaded && (!SCRIPT_URL || !navigator.onLine)) return;
+  if (!preloaded && workerPollRunning) return;
+  if (!preloaded) workerPollRunning = true;
   try {
     const data = preloaded || await api('getData');
     jobs = data.jobs || [];
@@ -2124,6 +2138,7 @@ async function pollJobs(preloaded) {
       setSyncStatus('worker', 'synced', 'Updated ' + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }));
     }
   } catch (e) { setSyncStatus('worker', 'error', 'Could not refresh'); }
+  finally { if (!preloaded) workerPollRunning = false; }
 }
 
 function expandAssignedTo(assignedTo) {
@@ -3122,7 +3137,19 @@ function officeLogout() {
   document.getElementById('office-username').value = '';
 }
 
-async function refreshOffice() {
+// Overlapping refreshes (tab switch + save + resume at once) share one request,
+// and a refresh asked for mid-flight runs once more afterwards so it sees the latest.
+let officeRefreshRunning = null, officeRefreshQueued = null;
+function refreshOffice() {
+  if (!officeRefreshRunning) {
+    officeRefreshRunning = refreshOfficeNow().finally(() => { officeRefreshRunning = null; });
+    return officeRefreshRunning;
+  }
+  if (!officeRefreshQueued) officeRefreshQueued = officeRefreshRunning.then(() => { officeRefreshQueued = null; return refreshOffice(); });
+  return officeRefreshQueued;
+}
+
+async function refreshOfficeNow() {
   setSyncStatus('office', 'pending', 'Loading...');
   if (SCRIPT_URL && navigator.onLine) {
     try {
