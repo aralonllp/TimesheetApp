@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-98 (PIN reset code sent at urgent priority) -->
+<!-- BUILD MARKER: NB-99 (Schedule view: My Week style cards, daily and weekly totals) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -362,6 +362,25 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 .sv-hours { margin-top: 5px; padding-top: 4px; border-top: 0.5px solid var(--color-border-tertiary); font-size: 11px; color: var(--color-text-secondary); display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
 .sv-hours strong { color: var(--color-text-primary); font-weight: 600; }
 .sv-hours .sv-over { color: #a61b1b; }
+.sched-ro .sv-card { cursor: default; background: #fff; border: 0.5px solid var(--color-border-tertiary); padding: 6px 8px; }
+.sched-ro .sv-card:hover { outline: none; }
+.sv-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 6px; }
+.sv-prop { font-weight: 600; font-size: 12px; }
+.sv-desc { font-size: 11px; color: var(--color-text-secondary); margin-top: 3px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.sv-card .wk-sub { margin-top: 2px; }
+.sv-card .wk-logged-pill { display: inline-block; padding: 1px 8px; border-radius: 20px; background: var(--color-background-success); color: var(--color-text-success); font-weight: 700; }
+.sv-card .wk-logged-pill, .sv-nolog { flex-shrink: 0; font-size: 11px; }
+.sv-card .wk-sub { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; font-size: 11px; color: var(--color-text-secondary); }
+.sv-card .wk-sub .prio, .sv-card .wk-sub .rj-tag, .sv-card .wk-sub .done-tag { margin-left: 0; font-size: 10px; padding: 1px 7px; }
+.sv-nolog { color: var(--color-text-secondary); padding: 2px 4px; }
+.sv-card .sv-hours { border-top: none; padding-top: 0; margin-top: 4px; }
+.sched-ro .sv-card.sched-raised { background: #faf7fe; border: 1px dashed #b9a2dc; }
+.sv-daytotal { margin-top: 6px; padding: 4px 8px; border-radius: 6px; background: var(--color-background-secondary); font-size: 11px; display: flex; justify-content: space-between; color: var(--color-text-secondary); }
+.sv-daytotal strong { color: var(--color-text-primary); }
+.sv-daytotal.wk-met strong { color: var(--color-text-success); }
+.sv-daytotal.wk-short strong { color: var(--color-text-warning); }
+.sched-grid tfoot th, .sched-grid tfoot td { background: var(--color-background-secondary); font-size: 12px; padding: 8px; }
+.sv-week-total strong { font-size: 13px; }
 .sched-item.sv-is-over { box-shadow: inset 3px 0 0 #a61b1b; }
 .sched-item.sched-pending { opacity: 0.55; outline: 1px dashed var(--color-border-primary); }
 .sched-add { font-size: 11px; border: 1px dashed #bbb; background: transparent; border-radius: 6px; width: 100%; padding: 4px; cursor: pointer; color: var(--color-text-secondary); font-family: inherit; }
@@ -751,9 +770,9 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
         <button onclick="switchOfficeTab('jobs')" id="otab-jobs">Jobs</button>
         <button onclick="switchOfficeTab('schedule')" id="otab-schedule">Schedule Creation</button>
         <button onclick="switchOfficeTab('weekendcover')" id="otab-weekendcover">Weekend Cover</button>
+        <button onclick="switchOfficeTab('notifs')" id="otab-notifs">Notifications</button>
         <button onclick="switchOfficeTab('overtime')" id="otab-overtime">Overtime</button>
         <button onclick="switchOfficeTab('weekapprovals')" id="otab-weekapprovals">Weekly Approvals</button>
-        <button onclick="switchOfficeTab('notifs')" id="otab-notifs">Notifications</button>        
         <button onclick="switchOfficeTab('recurring')" id="otab-recurring">Recurring Jobs</button>
         <button onclick="switchOfficeTab('workers')" id="otab-workers">Workers</button>
         <button onclick="switchOfficeTab('locations')" id="otab-locations">Locations</button>
@@ -7111,7 +7130,7 @@ function renderScheduleInto(o) {
   const ops = scheduleOps();
   if (!ops.length) { document.getElementById(o.gridId).innerHTML = '<tr><td style="padding:12px;">No active workers.</td></tr>'; return; }
 
-  const dayHrs = {}, jobTotals = {};
+  const dayHrs = {}, jobTotals = {}, weekTotals = {};
   if (o.readOnly) {
     entries.forEach(e => {
       const h = parseFloat(e.hours) || 0, jid = String(e.jobId);
@@ -7139,6 +7158,7 @@ function renderScheduleInto(o) {
           const locked = it.status === WEEKEND_COVER_STATUS;
           return `<div class="sched-item sched-status${it._pending ? ' sched-pending' : ''}${locked && !o.readOnly ? ' sched-locked' : ''}" style="background:${escWO(c)};color:${textOn(c)};"${locked ? (o.readOnly ? '' : ' title="Change this on the Weekend Cover tab"') : click(it.id)}>${escWO(it.status)}${it.note ? `<div style="font-weight:400;font-style:italic;">${escWO(it.note)}</div>` : ''}</div>`;
         }
+        if (it.type === 'job' && o.readOnly) return svJobCard(it, ds, w.name, dayHrs, jobTotals);
         if (it.type === 'job') {
           const j = jobs.find(x => String(x.id) === String(it.jobId));
           let hrsHtml = '', overCls = '';
@@ -7164,8 +7184,10 @@ function renderScheduleInto(o) {
       html += schedRaisedFor(ds, w.name).map(r => {
         const canAdd = !o.readOnly && !r.absence && r.sj;
         const act = canAdd ? ` onclick="addRaisedToSchedule('${ds}', ${escWO(JSON.stringify(w.name))}, ${escWO(JSON.stringify(r.jobId))}, ${escWO(JSON.stringify(r.property || ''))})" title="Logged by the worker but not on the schedule. Click to add it to the schedule."` : ' title="Logged by the worker but not on the schedule"';
+        if (o.readOnly) return svRaisedCard(r);
         return `<div class="sched-item sched-raised${canAdd ? '' : ' sched-raised-static'}"${act}><div class="raised-tag">Worker raised · ${fmtHrs(r.hours)}h</div>${schedRaisedText(r)}</div>`;
       }).join('');
+      if (o.readOnly) html += svDayTotal(d, ds, w.name, items, today, weekTotals);
       if (!o.readOnly && d.getDay() !== 0 && d.getDay() !== 6) {
         const addStyle = bg ? ` style="color:${textOn(bg)};border-color:${textOn(bg) === '#fff' ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.4)'};"` : '';
         html += `<button class="sched-add"${addStyle} onclick="openSchedModal(null, '${ds}', '${escWO(w.name).replace(/'/g, "\\'")}')">+ Add</button>`;
@@ -7175,7 +7197,64 @@ function renderScheduleInto(o) {
     html += '</tr>';
   });
   html += '</tbody>';
+  if (o.readOnly) {
+    html += `<tfoot><tr><th>Week total</th>${ops.map(w => {
+      const t = weekTotals[w.name] || { logged: 0, target: 0 };
+      const cls = t.target ? (t.logged >= t.target ? ' wk-met' : '') : '';
+      return `<td class="sv-week-total"><div class="sv-daytotal${cls}" style="margin:0;"><span>Logged</span><strong>${fmtHrs(t.logged)}h${t.target ? ` <span style="font-weight:400;color:var(--color-text-secondary);">/ ${fmtHrs(t.target)}h</span>` : ''}</strong></div></td>`;
+    }).join('')}</tr></tfoot>`;
+  }
   document.getElementById(o.gridId).innerHTML = html;
+}
+
+// ── Read-only schedule view: cards in the same style as the worker's My Week ──
+function svJobCard(it, ds, worker, dayHrs, jobTotals) {
+  const sj = schedSlotJob(it);
+  const j = sj && !sj.recurring ? sj.job : null;
+  const logged = dayHrs[ds + '|' + worker + '|' + String(it.jobId)] || 0;
+  let jobLine = '', overCls = '';
+  if (j) {
+    const total = jobTotals[String(it.jobId)] || 0;
+    const est = j.estHours !== '' && j.estHours != null ? parseFloat(j.estHours) : null;
+    const over = est != null && !isNaN(est) && total > est;
+    if (over) overCls = ' sv-is-over';
+    if (total || (est != null && !isNaN(est))) jobLine = `<div class="sv-hours"><span>Job <strong${over ? ' class="sv-over"' : ''}>${fmtHrs(total)}h${est != null && !isNaN(est) ? ' / ' + fmtHrs(est) + 'h est' : ''}</strong></span>${over ? `<span class="over-flag" style="margin-left:0;">Over by ${fmtHrs(total - est)}h</span>` : ''}</div>`;
+  }
+  const main = sj && sj.property ? sj.property : (sj ? sj.id : it.jobId);
+  const sub = `${sj && sj.property ? `<span>${escWO(it.jobId)}</span>` : ''}${sj && sj.recurring ? '<span class="rj-tag">Recurring</span>' : ''}${j && j.priority ? `<span class="prio prio-${escWO(j.priority)}">${escWO(j.priority)}</span>` : ''}${j && !j.open ? '<span class="done-tag">Job Completed</span>' : ''}`;
+  return `<div class="sched-item sv-card${it._pending ? ' sched-pending' : ''}${overCls}">
+    <div class="sv-top"><span class="sv-prop">${escWO(main)}</span>${logged ? `<span class="wk-logged-pill">${fmtHrs(logged)}h</span>` : '<span class="sv-nolog">—</span>'}</div>
+    ${sub ? `<div class="wk-sub">${sub}</div>` : ''}
+    ${sj && sj.description ? `<div class="sv-desc" title="${escWO(sj.description)}">${escWO(sj.description)}</div>` : ''}
+    ${schedMeetFlagHtml(it)}${it.note ? `<div class="sched-note">${escWO(it.note)}</div>` : ''}${jobLine}
+  </div>`;
+}
+
+function svRaisedCard(r) {
+  const sj = r.sj;
+  const main = r.absence ? r.absence : (r.property || r.jobId);
+  const sub = r.absence ? '' : `${r.property ? `<span>${escWO(r.jobId)}</span>` : ''}${sj && sj.recurring ? '<span class="rj-tag">Recurring</span>' : ''}${sj && sj.priority ? `<span class="prio prio-${escWO(sj.priority)}">${escWO(sj.priority)}</span>` : ''}`;
+  return `<div class="sched-item sv-card sched-raised" title="Logged by the worker but not on the schedule">
+    <div class="sv-top"><span class="sv-prop">${escWO(main)}</span><span class="wk-logged-pill">${fmtHrs(r.hours)}h</span></div>
+    <div class="wk-sub">${sub}<span class="raised-tag">Worker raised</span></div>
+    ${sj && sj.description ? `<div class="sv-desc" title="${escWO(sj.description)}">${escWO(sj.description)}</div>` : ''}
+  </div>`;
+}
+
+// Day total for one worker, matched to their daily hours the same way as My Week
+function svDayTotal(d, ds, worker, items, today, weekTotals) {
+  const logged = entries.filter(e => String(e.worker || '').trim() === worker && normaliseDate(e.date) === ds).reduce((t, e) => t + (parseFloat(e.hours) || 0), 0);
+  const weekday = d.getDay() >= 1 && d.getDay() <= 5;
+  const offDay = items.some(x => x.type === 'status' && NON_WORKING_STATUSES.includes(x.status));
+  const useTarget = weekday && !offDay;
+  const target = useTarget ? workerDailyHours(worker) : 0;
+  const wt = weekTotals[worker] || (weekTotals[worker] = { logged: 0, target: 0 });
+  wt.logged += logged;
+  wt.target += target;
+  const hasWork = items.some(x => x.type === 'job');
+  if (!hasWork && !logged) return '';
+  const cls = !useTarget || ds > today ? '' : logged >= target ? ' wk-met' : (ds < today ? ' wk-short' : '');
+  return `<div class="sv-daytotal${cls}"><span>Day total</span><strong>${fmtHrs(logged)}h${useTarget ? ` <span style="font-weight:400;color:var(--color-text-secondary);">/ ${fmtHrs(target)}h</span>` : ''}</strong></div>`;
 }
 
 function fillSchedItemSelect(worker) {
