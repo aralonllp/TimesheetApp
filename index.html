@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-115 (Load recent entries and schedule only; older weeks fetched on demand) -->
+<!-- BUILD MARKER: NB-116 (Schedule: recurring jobs turn blue once a worker has completed their week) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -399,6 +399,9 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 .sv-state.awaiting { background: #e0a030; color: #fff; }
 .sched-rich .sv-card.sv-unclosed, .sched-rich .sv-card.sched-raised.sv-unclosed { background: #fdeeee; border-color: #eab4b4; box-shadow: inset 4px 0 0 #c62828; }
 .sched-rich .sv-card.sv-unclosed .sv-prop { color: #a61b1b; }
+.sched-rich .sv-card.sv-rdone, .sched-rich .sv-card.sched-raised.sv-rdone { background: #eaf2fd; border-color: #a9c6ee; box-shadow: inset 4px 0 0 #1e66c8; }
+.sched-rich .sv-card.sv-rdone .sv-prop, .sched-rich .sv-card.sv-rdone .sv-desc { color: #174f9c; }
+.sv-state.rdone { background: #1e66c8; color: #fff; }
 .sv-state.unclosed { background: #c62828; color: #fff; }
 .sched-item.sched-pending { opacity: 0.55; outline: 1px dashed var(--color-border-primary); }
 .sched-add { font-size: 11px; border: 1px dashed #bbb; background: transparent; border-radius: 6px; width: 100%; padding: 4px; cursor: pointer; color: var(--color-text-secondary); font-family: inherit; }
@@ -7030,9 +7033,10 @@ function svJobCard(it, ds, worker, dayHrs, jobTotals, clickAttr, weekDone) {
   const main = sj && sj.property ? sj.property : (sj ? sj.id : it.jobId);
   const awaiting = j && jobPending(j), done = j && !j.open && !awaiting;
   const unclosed = !!weekDone && !!j && j.open;
-  const state = done ? '<span class="sv-state done">✓ Completed</span>' : awaiting ? '<span class="sv-state awaiting">Awaiting sign-off</span>' : unclosed ? '<span class="sv-state unclosed" title="This worker has completed their hours for the week but this WO is still open">Not closed</span>' : '';
+  const rDone = !!weekDone && !!sj && !!sj.recurring;
+  const state = done ? '<span class="sv-state done">✓ Completed</span>' : awaiting ? '<span class="sv-state awaiting">Awaiting sign-off</span>' : unclosed ? '<span class="sv-state unclosed" title="This worker has completed their hours for the week but this WO is still open">Not closed</span>' : rDone ? '<span class="sv-state rdone" title="This worker has completed their hours for the week">Week done</span>' : '';
   const sub = `${sj && sj.property ? `<span>${escWO(it.jobId)}</span>` : ''}${sj && sj.recurring ? '<span class="rj-tag">Recurring</span>' : ''}${j && j.priority ? `<span class="prio prio-${escWO(j.priority)}">${escWO(j.priority)}</span>` : ''}${state}`;
-  return `<div class="sched-item sv-card${it._pending ? ' sched-pending' : ''}${overCls}${done ? ' sv-done' : awaiting ? ' sv-awaiting' : unclosed ? ' sv-unclosed' : ''}"${clickAttr || ''}>
+  return `<div class="sched-item sv-card${it._pending ? ' sched-pending' : ''}${overCls}${done ? ' sv-done' : awaiting ? ' sv-awaiting' : unclosed ? ' sv-unclosed' : rDone ? ' sv-rdone' : ''}"${clickAttr || ''}>
     <div class="sv-top"><span class="sv-prop">${escWO(main)}</span>${logged ? `<span class="wk-logged-pill">${fmtHrs(logged)}h</span>` : '<span class="sv-nolog">—</span>'}</div>
     ${sub ? `<div class="wk-sub">${sub}</div>` : ''}
     ${sj && sj.description ? `<div class="sv-desc" title="${escWO(sj.description)}">${escWO(sj.description)}</div>` : ''}
@@ -7043,9 +7047,10 @@ function svJobCard(it, ds, worker, dayHrs, jobTotals, clickAttr, weekDone) {
 function svRaisedCard(r, attrs, weekDone) {
   const sj = r.sj;
   const unclosed = !!weekDone && sj && !sj.recurring && sj.job && sj.job.open;
+  const rDone = !!weekDone && sj && sj.recurring;
   const main = r.absence ? r.absence : (r.property || r.jobId);
   const sub = r.absence ? '' : `${r.property ? `<span>${escWO(r.jobId)}</span>` : ''}${sj && sj.recurring ? '<span class="rj-tag">Recurring</span>' : ''}${sj && sj.priority ? `<span class="prio prio-${escWO(sj.priority)}">${escWO(sj.priority)}</span>` : ''}`;
-  return `<div class="sched-item sv-card sched-raised${unclosed ? ' sv-unclosed' : ''}"${attrs || ' title="Logged by the worker but not on the schedule"'}>
+  return `<div class="sched-item sv-card sched-raised${unclosed ? ' sv-unclosed' : rDone ? ' sv-rdone' : ''}"${attrs || ' title="Logged by the worker but not on the schedule"'}>
     <div class="sv-top"><span class="sv-prop">${escWO(main)}</span><span class="wk-logged-pill">${fmtHrs(r.hours)}h</span></div>
     <div class="wk-sub">${sub}<span class="raised-tag">Off-Schedule Work</span>${unclosed ? '<span class="sv-state unclosed" title="This worker has completed their hours for the week but this WO is still open">Not closed</span>' : ''}</div>
     ${sj && sj.description ? `<div class="sv-desc" title="${escWO(sj.description)}">${escWO(sj.description)}</div>` : ''}
