@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-99 (Schedule view: My Week style cards, daily and weekly totals) -->
+<!-- BUILD MARKER: NB-100 (Schedule view: day totals in their own row under each day) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -375,12 +375,16 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 .sv-nolog { color: var(--color-text-secondary); padding: 2px 4px; }
 .sv-card .sv-hours { border-top: none; padding-top: 0; margin-top: 4px; }
 .sched-ro .sv-card.sched-raised { background: #faf7fe; border: 1px dashed #b9a2dc; }
-.sv-daytotal { margin-top: 6px; padding: 4px 8px; border-radius: 6px; background: var(--color-background-secondary); font-size: 11px; display: flex; justify-content: space-between; color: var(--color-text-secondary); }
+.sv-daytotal { font-size: 12px; text-align: right; color: var(--color-text-secondary); }
+.sched-grid tr.sv-total-row th, .sched-grid tr.sv-total-row td { background: var(--color-background-secondary); font-size: 12px; padding: 6px 10px; vertical-align: middle; }
+.sched-grid tr.sv-total-row th { font-weight: 600; color: var(--color-text-secondary); }
 .sv-daytotal strong { color: var(--color-text-primary); }
 .sv-daytotal.wk-met strong { color: var(--color-text-success); }
 .sv-daytotal.wk-short strong { color: var(--color-text-warning); }
-.sched-grid tfoot th, .sched-grid tfoot td { background: var(--color-background-secondary); font-size: 12px; padding: 8px; }
+.sched-grid tfoot th, .sched-grid tfoot td { background: #dce6f2; font-size: 12px; padding: 8px 10px; vertical-align: middle; border-top: 2px solid var(--color-border-secondary, #c9ced6); }
+.sched-grid tfoot .sv-daytotal { font-size: 13px; }
 .sv-week-total strong { font-size: 13px; }
+.sched-grid tfoot th { text-align: left; }
 .sched-item.sv-is-over { box-shadow: inset 3px 0 0 #a61b1b; }
 .sched-item.sched-pending { opacity: 0.55; outline: 1px dashed var(--color-border-primary); }
 .sched-add { font-size: 11px; border: 1px dashed #bbb; background: transparent; border-radius: 6px; width: 100%; padding: 4px; cursor: pointer; color: var(--color-text-secondary); font-family: inherit; }
@@ -7147,6 +7151,7 @@ function renderScheduleInto(o) {
     const ds = localDateStr(d);
     const isToday = ds === today;
     html += `<tr><th class="${isToday ? 'sched-today' : ''}">${schedDayName(d)} ${ordinal(d.getDate())}</th>`;
+    const dayTotalCells = [];
     ops.forEach(w => {
       const items = schedItemsFor(ds, w.name);
       const statusItem = items.find(x => x.type === 'status');
@@ -7187,7 +7192,7 @@ function renderScheduleInto(o) {
         if (o.readOnly) return svRaisedCard(r);
         return `<div class="sched-item sched-raised${canAdd ? '' : ' sched-raised-static'}"${act}><div class="raised-tag">Worker raised · ${fmtHrs(r.hours)}h</div>${schedRaisedText(r)}</div>`;
       }).join('');
-      if (o.readOnly) html += svDayTotal(d, ds, w.name, items, today, weekTotals);
+      if (o.readOnly) dayTotalCells.push(svDayTotal(d, ds, w.name, items, today, weekTotals));
       if (!o.readOnly && d.getDay() !== 0 && d.getDay() !== 6) {
         const addStyle = bg ? ` style="color:${textOn(bg)};border-color:${textOn(bg) === '#fff' ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.4)'};"` : '';
         html += `<button class="sched-add"${addStyle} onclick="openSchedModal(null, '${ds}', '${escWO(w.name).replace(/'/g, "\\'")}')">+ Add</button>`;
@@ -7195,13 +7200,16 @@ function renderScheduleInto(o) {
       html += '</div></td>';
     });
     html += '</tr>';
+    if (o.readOnly && dayTotalCells.some(Boolean)) {
+      html += `<tr class="sv-total-row"><th>Day total</th>${dayTotalCells.map(c => `<td>${c}</td>`).join('')}</tr>`;
+    }
   });
   html += '</tbody>';
   if (o.readOnly) {
     html += `<tfoot><tr><th>Week total</th>${ops.map(w => {
       const t = weekTotals[w.name] || { logged: 0, target: 0 };
       const cls = t.target ? (t.logged >= t.target ? ' wk-met' : '') : '';
-      return `<td class="sv-week-total"><div class="sv-daytotal${cls}" style="margin:0;"><span>Logged</span><strong>${fmtHrs(t.logged)}h${t.target ? ` <span style="font-weight:400;color:var(--color-text-secondary);">/ ${fmtHrs(t.target)}h</span>` : ''}</strong></div></td>`;
+      return `<td class="sv-week-total"><div class="sv-daytotal${cls}"><strong>${fmtHrs(t.logged)}h${t.target ? ` <span style="font-weight:400;color:var(--color-text-secondary);">/ ${fmtHrs(t.target)}h</span>` : ''}</strong></div></td>`;
     }).join('')}</tr></tfoot>`;
   }
   document.getElementById(o.gridId).innerHTML = html;
@@ -7254,7 +7262,7 @@ function svDayTotal(d, ds, worker, items, today, weekTotals) {
   const hasWork = items.some(x => x.type === 'job');
   if (!hasWork && !logged) return '';
   const cls = !useTarget || ds > today ? '' : logged >= target ? ' wk-met' : (ds < today ? ' wk-short' : '');
-  return `<div class="sv-daytotal${cls}"><span>Day total</span><strong>${fmtHrs(logged)}h${useTarget ? ` <span style="font-weight:400;color:var(--color-text-secondary);">/ ${fmtHrs(target)}h</span>` : ''}</strong></div>`;
+  return `<div class="sv-daytotal${cls}"><strong>${fmtHrs(logged)}h${useTarget ? ` <span style="font-weight:400;color:var(--color-text-secondary);">/ ${fmtHrs(target)}h</span>` : ''}</strong></div>`;
 }
 
 function fillSchedItemSelect(worker) {
