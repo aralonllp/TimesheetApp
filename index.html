@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-109 (Daily View tab removed; Schedule is the opening tab) -->
+<!-- BUILD MARKER: NB-110 (One Schedule tab: editable cards with totals; off-schedule work; move to next week) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -368,8 +368,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 .sv-hours { margin-top: 5px; padding-top: 4px; border-top: 0.5px solid var(--color-border-tertiary); font-size: 11px; color: var(--color-text-secondary); display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
 .sv-hours strong { color: var(--color-text-primary); font-weight: 600; }
 .sv-hours .sv-over { color: #a61b1b; }
-.sched-ro .sv-card { cursor: default; background: #fff; border: 0.5px solid var(--color-border-tertiary); padding: 6px 8px; }
-.sched-ro .sv-card:hover { outline: none; }
+.sched-rich .sv-card { background: #fff; border: 0.5px solid var(--color-border-tertiary); padding: 6px 8px; }
 .sv-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 6px; }
 .sv-prop { font-weight: 600; font-size: 12px; }
 .sv-desc { font-size: 11px; color: var(--color-text-secondary); margin-top: 3px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -380,7 +379,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 .sv-card .wk-sub .prio, .sv-card .wk-sub .rj-tag, .sv-card .wk-sub .done-tag { margin-left: 0; font-size: 10px; padding: 1px 7px; }
 .sv-nolog { color: var(--color-text-secondary); padding: 2px 4px; }
 .sv-card .sv-hours { border-top: none; padding-top: 0; margin-top: 4px; }
-.sched-ro .sv-card.sched-raised { background: #faf7fe; border: 1px dashed #b9a2dc; }
+.sched-rich .sv-card.sched-raised { background: #faf7fe; border: 1px dashed #b9a2dc; }
 .sv-daytotal { font-size: 12px; text-align: right; color: var(--color-text-secondary); }
 .sched-grid tr.sv-total-row th, .sched-grid tr.sv-total-row td { background: var(--color-background-secondary); font-size: 12px; padding: 6px 10px; vertical-align: middle; }
 .sched-grid tr.sv-total-row th { font-weight: 700; color: var(--color-text-primary); }
@@ -778,11 +777,10 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 
       <!-- Office sub-navigation -->
       <div class="office-subnav">
-        <button class="active" onclick="switchOfficeTab('schedview')" id="otab-schedview">Schedule</button>
+        <button class="active" onclick="switchOfficeTab('schedule')" id="otab-schedule">Schedule</button>
         <button onclick="switchOfficeTab('entries')" id="otab-entries">Time Entries</button>
         <button onclick="switchOfficeTab('wocreate')" id="otab-wocreate">WO Creation</button>       
         <button onclick="switchOfficeTab('jobs')" id="otab-jobs">Jobs</button>
-        <button onclick="switchOfficeTab('schedule')" id="otab-schedule">Schedule Creation</button>
         <button onclick="switchOfficeTab('weekendcover')" id="otab-weekendcover">Weekend Cover</button>
         <button onclick="switchOfficeTab('viewas')" id="otab-viewas" style="display:none;">View as Worker</button>
         <button onclick="switchOfficeTab('overtime')" id="otab-overtime">Overtime</button>
@@ -875,7 +873,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
       </div>
 
       <!-- Schedule tab -->
-      <div id="office-tab-schedule" style="display:none;">
+      <div id="office-tab-schedule">
         <div class="card">
           <div class="row-between card-header" style="flex-wrap:wrap;gap:10px;">
             <div class="sched-head">
@@ -894,27 +892,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
             </div>
           </div>
           <div class="sched-legend" id="sched-legend"></div>
-          <div class="sched-scroll"><table class="sched-grid" id="sched-grid"></table></div>
-        </div>
-      </div>
-
-      <!-- Schedule View tab -->
-      <div id="office-tab-schedview">
-        <div class="card">
-          <div class="row-between card-header" style="flex-wrap:wrap;gap:10px;">
-            <div class="sched-head">
-              <button class="btn btn-sm" onclick="svShiftWeek(-1)">◀</button>
-              <div>
-                <div class="sched-week-title" id="sv-week-title">—</div>
-                <div class="sched-week-range" id="sv-week-range"></div>
-              </div>
-              <button class="btn btn-sm" onclick="svShiftWeek(1)">▶</button>
-              <button class="btn btn-sm" onclick="svGoToday()">This week</button>
-            </div>
-            <button class="btn btn-sm" onclick="refreshOffice()">↻ Refresh</button>
-          </div>
-          <div class="sched-legend" id="sv-legend"></div>
-          <div class="sched-scroll sched-ro"><table class="sched-grid" id="sv-grid"></table></div>
+          <div class="sched-scroll sched-rich"><table class="sched-grid" id="sched-grid"></table></div>
         </div>
       </div>
 
@@ -974,6 +952,13 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
           <div id="sched-multi">
             <label>Days</label>
             <div class="wo-chips" id="sched-days"></div>
+          </div>
+          <div id="sched-move-wrap" style="display:none;margin-top:14px;padding-top:12px;border-top:0.5px solid var(--color-border-tertiary);">
+            <button type="button" class="btn btn-sm" id="sched-move-btn" onclick="schedMoveToggle()">Move to next week</button>
+            <div id="sched-move-box" style="display:none;margin-top:8px;">
+              <p class="wo-hint" style="margin-top:0;">Which day next week?</p>
+              <div class="wo-chips" id="sched-move-days"></div>
+            </div>
           </div>
           <div class="form-footer" style="display:flex;gap:8px;justify-content:space-between;margin-top:1.25rem;">
             <button class="btn" id="sched-delete-btn" onclick="deleteSchedItem()" style="color:var(--color-text-error);">Delete</button>
@@ -1591,6 +1576,17 @@ function saveWorkerToken(name, token) {
   const t = readWorkerTokens(); t[name] = token;
   try { localStorage.setItem('workerTokens', JSON.stringify(t)); } catch (e) {}
 }
+// The server moved a schedule slot to the day hours were actually logged
+function applyMovedSlot(m) {
+  const it = schedule.find(x => x.id === m.id);
+  if (!it) return;
+  it.date = m.to;
+  const ws = document.getElementById('worker-myweek-section');
+  if (ws && ws.style.display !== 'none' && currentWorker) renderWorkerWeek();
+  const os = document.getElementById('office-tab-schedule');
+  if (os && os.style.display === 'block' && currentOfficeUser) renderScheduleGrid();
+}
+
 // The server hands back a fresh token while someone keeps using the site
 function takeRenewedToken(sent, fresh) {
   if (sent && sent === officeToken) officeToken = fresh;
@@ -1647,6 +1643,7 @@ function api(action, payload = {}, _attempt = 0) {
   })
   .then(function(data) {
     if (data.newToken) takeRenewedToken(sentToken, data.newToken);
+    if (data.movedSlot) applyMovedSlot(data.movedSlot);
     if (data.authError) { handleAuthExpired(); const e = new Error(data.error); e.authError = true; throw e; }
     if (data.error) throw new Error(data.error); // real app-level error — not retried
     return data;
@@ -3058,7 +3055,7 @@ function enterOffice() {
   document.getElementById('otab-viewas').style.display = officeUser.role === 'admin' ? '' : 'none';
   document.getElementById('office-pin').value = '';
   showLoginNote('office-login-note', '');
-  switchOfficeTab(officeResumeTab || 'schedview');
+  switchOfficeTab(officeResumeTab === 'schedview' ? 'schedule' : (officeResumeTab || 'schedule'));
   officeResumeTab = '';
   refreshOffice();
 }
@@ -3691,7 +3688,6 @@ function renderOfficeDashboard() {
   renderWorkersList();
   if (document.getElementById('office-tab-wocreate').style.display === 'block') initWOForm();
   if (document.getElementById('office-tab-schedule').style.display === 'block') renderScheduleGrid();
-  if (document.getElementById('office-tab-schedview').style.display === 'block') renderScheduleView();
   renderRecurringJobsList();
   renderAbsenceTypesList();
   const awSel = document.getElementById('absence-worker-select');
@@ -4960,7 +4956,8 @@ async function officeReviewOvertime(id, status) {
 }
 
 function switchOfficeTab(tab) {
-  const tabs = ['wocreate','jobs','schedule','weekendcover','notifs','viewas','schedview','entries','absences','workers','locations','recurring','overtime','weekapprovals'];
+  if (tab === 'schedview') tab = 'schedule';
+  const tabs = ['wocreate','jobs','schedule','weekendcover','notifs','viewas','entries','absences','workers','locations','recurring','overtime','weekapprovals'];
   tabs.forEach(t => {
     const el = document.getElementById('office-tab-' + t);
     const btn = document.getElementById('otab-' + t);
@@ -4974,7 +4971,6 @@ function switchOfficeTab(tab) {
   if (tab === 'weekapprovals') renderWeekApprovalsTab();
   if (tab === 'wocreate') initWOForm();
   if (tab === 'schedule') renderScheduleGrid();
-  if (tab === 'schedview') renderScheduleView();
   if (tab === 'locations') renderLocationsList();
   if (tab === 'weekendcover') renderWeekendCover();
   if (tab === 'notifs') renderNotificationsTab();
@@ -6581,7 +6577,6 @@ async function saveWeekendCover(weekStart, fields, sel) {
     applyWeekendCoverResult(res);
     renderWeekendCover();
     if (document.getElementById('office-tab-schedule').style.display === 'block') renderScheduleGrid();
-    if (document.getElementById('office-tab-schedview').style.display === 'block') renderScheduleView();
     const now = wcFor(weekStart);
     const txt = now && now.split ? 'Sat ' + (now.satWorker || '—') + ', Sun ' + (now.sunWorker || '—') : (now && now.worker) || 'cleared';
     setSyncStatus('office', 'synced', 'Week ' + isoWeekNumber(new Date(weekStart + 'T00:00:00')) + ' weekend cover: ' + txt);
@@ -6844,13 +6839,7 @@ function renderScheduleGrid() {
   renderScheduleInto({ start: schedWeekStart, gridId: 'sched-grid', titleId: 'sched-week-title', rangeId: 'sched-week-range', legendId: 'sched-legend', readOnly: false });
 }
 
-let svWeekStart = null;
-function svShiftWeek(n) { svWeekStart = addDaysLocal(svWeekStart || mondayOf(new Date()), 7 * n); renderScheduleView(); }
-function svGoToday() { svWeekStart = mondayOf(new Date()); renderScheduleView(); }
-function renderScheduleView() {
-  if (!svWeekStart) svWeekStart = mondayOf(new Date());
-  renderScheduleInto({ start: svWeekStart, gridId: 'sv-grid', titleId: 'sv-week-title', rangeId: 'sv-week-range', legendId: 'sv-legend', readOnly: true });
-}
+function renderScheduleView() { renderScheduleGrid(); }
 
 function renderScheduleInto(o) {
   const start = o.start;
@@ -6865,7 +6854,7 @@ function renderScheduleInto(o) {
   if (!ops.length) { document.getElementById(o.gridId).innerHTML = '<tr><td style="padding:12px;">No active workers.</td></tr>'; return; }
 
   const dayHrs = {}, jobTotals = {}, weekTotals = {};
-  if (o.readOnly) {
+  {
     entries.forEach(e => {
       const h = parseFloat(e.hours) || 0, jid = String(e.jobId);
       jobTotals[jid] = (jobTotals[jid] || 0) + h;
@@ -6893,7 +6882,7 @@ function renderScheduleInto(o) {
           const locked = it.status === WEEKEND_COVER_STATUS;
           return `<div class="sched-item sched-status${it._pending ? ' sched-pending' : ''}${locked && !o.readOnly ? ' sched-locked' : ''}" style="background:${escWO(c)};color:${textOn(c)};"${locked ? (o.readOnly ? '' : ' title="Change this on the Weekend Cover tab"') : click(it.id)}>${escWO(it.status)}${it.note ? `<div style="font-weight:400;font-style:italic;">${escWO(it.note)}</div>` : ''}</div>`;
         }
-        if (it.type === 'job' && o.readOnly) return svJobCard(it, ds, w.name, dayHrs, jobTotals);
+        if (it.type === 'job') return svJobCard(it, ds, w.name, dayHrs, jobTotals, click(it.id));
         if (it.type === 'job') {
           const j = jobs.find(x => String(x.id) === String(it.jobId));
           let hrsHtml = '', overCls = '';
@@ -6918,11 +6907,10 @@ function renderScheduleInto(o) {
       }).join('');
       html += schedRaisedFor(ds, w.name).map(r => {
         const canAdd = !o.readOnly && !r.absence && r.sj;
-        const act = canAdd ? ` onclick="addRaisedToSchedule('${ds}', ${escWO(JSON.stringify(w.name))}, ${escWO(JSON.stringify(r.jobId))}, ${escWO(JSON.stringify(r.property || ''))})" title="Logged by the worker but not on the schedule. Click to add it to the schedule."` : ' title="Logged by the worker but not on the schedule"';
-        if (o.readOnly) return svRaisedCard(r);
-        return `<div class="sched-item sched-raised${canAdd ? '' : ' sched-raised-static'}"${act}><div class="raised-tag">Worker raised · ${fmtHrs(r.hours)}h</div>${schedRaisedText(r)}</div>`;
+        const act = ` onclick="addRaisedToSchedule('${ds}', ${escWO(JSON.stringify(w.name))}, ${escWO(JSON.stringify(r.jobId))}, ${escWO(JSON.stringify(r.property || ''))})" title="Logged by the worker but not on the schedule. Click to add it to the schedule."`;
+        return svRaisedCard(r, canAdd ? act : ' title="Logged by the worker but not on the schedule"');
       }).join('');
-      if (o.readOnly) dayTotalCells.push(svDayTotal(d, ds, w.name, items, today, weekTotals));
+      dayTotalCells.push(svDayTotal(d, ds, w.name, items, today, weekTotals));
       if (!o.readOnly && d.getDay() !== 0 && d.getDay() !== 6) {
         const addStyle = bg ? ` style="color:${textOn(bg)};border-color:${textOn(bg) === '#fff' ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.4)'};"` : '';
         html += `<button class="sched-add"${addStyle} onclick="openSchedModal(null, '${ds}', '${escWO(w.name).replace(/'/g, "\\'")}')">+ Add</button>`;
@@ -6930,12 +6918,12 @@ function renderScheduleInto(o) {
       html += '</div></td>';
     });
     html += '</tr>';
-    if (o.readOnly && dayTotalCells.some(Boolean)) {
+    if (dayTotalCells.some(Boolean)) {
       html += `<tr class="sv-total-row"><th>Day total</th>${dayTotalCells.map(c => `<td>${c}</td>`).join('')}</tr>`;
     }
   });
   html += '</tbody>';
-  if (o.readOnly) {
+  {
     html += `<tfoot><tr><th>Week total</th>${ops.map(w => {
       const t = weekTotals[w.name] || { logged: 0, target: 0 };
       const cls = t.target ? (t.logged >= t.target ? ' wk-met' : '') : '';
@@ -6946,7 +6934,7 @@ function renderScheduleInto(o) {
 }
 
 // ── Read-only schedule view: cards in the same style as the worker's My Week ──
-function svJobCard(it, ds, worker, dayHrs, jobTotals) {
+function svJobCard(it, ds, worker, dayHrs, jobTotals, clickAttr) {
   const sj = schedSlotJob(it);
   const j = sj && !sj.recurring ? sj.job : null;
   const logged = dayHrs[ds + '|' + worker + '|' + String(it.jobId)] || 0;
@@ -6960,7 +6948,7 @@ function svJobCard(it, ds, worker, dayHrs, jobTotals) {
   }
   const main = sj && sj.property ? sj.property : (sj ? sj.id : it.jobId);
   const sub = `${sj && sj.property ? `<span>${escWO(it.jobId)}</span>` : ''}${sj && sj.recurring ? '<span class="rj-tag">Recurring</span>' : ''}${j && j.priority ? `<span class="prio prio-${escWO(j.priority)}">${escWO(j.priority)}</span>` : ''}${j && !j.open ? '<span class="done-tag">Job Completed</span>' : ''}`;
-  return `<div class="sched-item sv-card${it._pending ? ' sched-pending' : ''}${overCls}">
+  return `<div class="sched-item sv-card${it._pending ? ' sched-pending' : ''}${overCls}"${clickAttr || ''}>
     <div class="sv-top"><span class="sv-prop">${escWO(main)}</span>${logged ? `<span class="wk-logged-pill">${fmtHrs(logged)}h</span>` : '<span class="sv-nolog">—</span>'}</div>
     ${sub ? `<div class="wk-sub">${sub}</div>` : ''}
     ${sj && sj.description ? `<div class="sv-desc" title="${escWO(sj.description)}">${escWO(sj.description)}</div>` : ''}
@@ -6968,13 +6956,13 @@ function svJobCard(it, ds, worker, dayHrs, jobTotals) {
   </div>`;
 }
 
-function svRaisedCard(r) {
+function svRaisedCard(r, attrs) {
   const sj = r.sj;
   const main = r.absence ? r.absence : (r.property || r.jobId);
   const sub = r.absence ? '' : `${r.property ? `<span>${escWO(r.jobId)}</span>` : ''}${sj && sj.recurring ? '<span class="rj-tag">Recurring</span>' : ''}${sj && sj.priority ? `<span class="prio prio-${escWO(sj.priority)}">${escWO(sj.priority)}</span>` : ''}`;
-  return `<div class="sched-item sv-card sched-raised" title="Logged by the worker but not on the schedule">
+  return `<div class="sched-item sv-card sched-raised"${attrs || ' title="Logged by the worker but not on the schedule"'}>
     <div class="sv-top"><span class="sv-prop">${escWO(main)}</span><span class="wk-logged-pill">${fmtHrs(r.hours)}h</span></div>
-    <div class="wk-sub">${sub}<span class="raised-tag">Worker raised</span></div>
+    <div class="wk-sub">${sub}<span class="raised-tag">Off-Schedule Work</span></div>
     ${sj && sj.description ? `<div class="sv-desc" title="${escWO(sj.description)}">${escWO(sj.description)}</div>` : ''}
   </div>`;
 }
@@ -7132,6 +7120,7 @@ function openSchedModal(itemId, date, worker) {
     document.getElementById('sched-modal-sub').textContent = it.worker + ' — ' + SCHED_DAY_NAMES[(d.getDay() + 6) % 7] + ' ' + fmtUKDate(it.date);
     document.getElementById('sched-multi').style.display = 'none';
     document.getElementById('sched-delete-btn').style.display = '';
+    schedSetupMove(it);
   } else {
     schedModalState = { id: null, date, worker };
     sel.value = '';
@@ -7145,6 +7134,7 @@ function openSchedModal(itemId, date, worker) {
     document.getElementById('sched-modal-sub').textContent = worker + ' — tick any other days to add the same slot to them.';
     document.getElementById('sched-multi').style.display = '';
     document.getElementById('sched-delete-btn').style.display = 'none';
+    document.getElementById('sched-move-wrap').style.display = 'none';
     const days = Array.from({ length: 5 }, (_, i) => addDaysLocal(start, i)).map((d, i) => ({ value: localDateStr(d), label: SCHED_DAY_NAMES[i].slice(0, 3) + ' ' + d.getDate(), title: fmtUKDate(localDateStr(d)) }));
     renderSchedChips('sched-days', days, new Set([date]));
   }
@@ -7162,6 +7152,49 @@ function closeSchedModal() {
 function newLinkId() { return 'lk' + Date.now() + Math.random().toString(36).slice(2, 7); }
 function schedOthersOf(members, me) { return members.filter(n => n !== me).join(', '); }
 function schedPlainItem(x) { const c = { ...x }; delete c._pending; return c; }
+
+// ── Move an unfinished job slot into the following week ─────────
+function schedJobUnfinished(it) {
+  if (!it || it.type !== 'job') return false;
+  if (isRecurringJobId(it.jobId)) return true;
+  const j = jobs.find(x => String(x.id) === String(it.jobId));
+  return !!j && j.open && !jobPending(j);
+}
+
+function schedSetupMove(it) {
+  const wrap = document.getElementById('sched-move-wrap');
+  const show = schedJobUnfinished(it);
+  wrap.style.display = show ? '' : 'none';
+  document.getElementById('sched-move-box').style.display = 'none';
+  if (!show) return;
+  const nextMon = addDaysLocal(mondayOf(new Date(it.date + 'T00:00:00')), 7);
+  document.getElementById('sched-move-days').innerHTML = Array.from({ length: 5 }, (_, i) => addDaysLocal(nextMon, i)).map((d, i) => {
+    const ds = localDateStr(d);
+    return `<button type="button" class="wo-chip" title="${fmtUKDate(ds)}" onclick="schedMoveTo('${ds}')">${SCHED_DAY_NAMES[i].slice(0, 3)} ${d.getDate()}</button>`;
+  }).join('');
+}
+
+function schedMoveToggle() {
+  const box = document.getElementById('sched-move-box');
+  box.style.display = box.style.display === 'none' ? '' : 'none';
+}
+
+function schedMoveTo(newDate) {
+  if (!schedModalState || !schedModalState.id) return;
+  const cur = schedule.find(x => x.id === schedModalState.id);
+  if (!cur) return;
+  if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to change the schedule'); return; }
+  // Linked meet-up slots travel together so both workers still meet
+  const group = cur.linkId ? schedule.filter(x => x.linkId === cur.linkId && x.date === cur.date) : [cur];
+  const d = new Date(newDate + 'T00:00:00');
+  const who = group.map(x => workerInitials(x.worker) || x.worker).join(' & ');
+  if (!confirm('Move ' + cur.jobId + ' (' + who + ') to ' + SCHED_DAY_NAMES[(d.getDay() + 6) % 7] + ' ' + fmtUKDate(newDate) + '?')) return;
+  const previous = group.map(schedPlainItem);
+  const items = group.map(x => ({ ...schedPlainItem(x), date: newDate }));
+  closeSchedModal();
+  schedCommit(items, previous, []);
+  setSyncStatus('office', 'synced', cur.jobId + ' moved to ' + fmtUKDate(newDate));
+}
 
 // Optimistically shows the items, then saves them (and removes deleteIds) in the background.
 function schedCommit(items, previous, deleteIds) {
@@ -7543,7 +7576,7 @@ function renderWorkerWeek() {
       const main = r.absence ? escWO(r.absence) : escWO(r.property || r.jobId);
       const sub = r.absence ? '' : `${r.property ? `<span>${escWO(r.jobId)}</span>` : ''}${sj && sj.recurring ? '<span class="rj-tag">Recurring</span>' : ''}${sj && sj.priority ? `<span class="prio prio-${escWO(sj.priority)}">${escWO(sj.priority)}</span>` : ''}`;
       rows += `<tr class="day-row wk-raised${first ? ' wk-day-start' : ''}${rowCls}">${first ? dayCell : ''}
-          <td><div class="wk-prop">${main}</div><div class="wk-sub">${sub}<span class="raised-tag">Worker raised</span></div></td>
+          <td><div class="wk-prop">${main}</div><div class="wk-sub">${sub}<span class="raised-tag">Off-Schedule Work</span></div></td>
           <td class="wk-desc">${sj ? escWO(sj.description || '') : ''}</td>
           <td class="wk-note"></td>
           <td class="wk-logged"><span class="wk-logged-pill">${fmtHrs(r.hours)}h</span></td>
