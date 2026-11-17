@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-103 (Admin: read-only "View as worker" tab) -->
+<!-- BUILD MARKER: NB-104 (Holding WOs can be linked to a recurring job) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -921,11 +921,11 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 
       <div id="hold-link-modal" class="sched-modal" style="display:none;" onmousedown="if(event.target===this)closeHoldLinkModal()">
         <div class="card sched-modal-box">
-          <p class="section-heading">Link <span id="hold-link-id"></span> to an existing WO</p>
+          <p class="section-heading">Link <span id="hold-link-id"></span> to an existing WO or recurring job</p>
           <p class="text-muted" id="hold-link-info" style="font-size:12px;margin-top:2px;"></p>
-          <label style="margin-top:14px;">Existing work order</label>
+          <label style="margin-top:14px;">Existing work order or recurring job</label>
           <select id="hold-link-select"></select>
-          <p class="wo-hint">All hours, photos, comments and schedule slots on the temporary WO move to the WO you pick, and the temporary WO is removed.</p>
+          <p class="wo-hint">All hours, photos, comments and schedule slots on the temporary WO move to the job you pick, and the temporary WO is removed. For a recurring job, the hours keep the property the worker picked.</p>
           <div class="form-footer" style="display:flex;gap:8px;justify-content:flex-end;margin-top:1.25rem;">
             <button class="btn" onclick="closeHoldLinkModal()">Cancel</button>
             <button class="btn btn-primary" id="hold-link-confirm" onclick="confirmHoldLink()">Link</button>
@@ -3648,7 +3648,7 @@ function renderJobRow(j, hoursByJob) {
           ${sched}
           ${photoButtonHtml('o', j)}
           <button class="btn btn-sm${openCommentJobs.has(String(j.id)) ? ' jc-btn-on' : ''}" id="jc-btn-${escWO(j.id)}" onclick="toggleJobComments('${escWO(j.id)}')">Comments${jobCommentCount(j.id) ? ' (' + jobCommentCount(j.id) + ')' : ''}</button>
-          ${hold ? `<button class="btn btn-sm" onclick="openHoldLinkModal('${escWO(j.id)}')">Link to existing WO</button><button class="btn btn-sm btn-primary" onclick="completeHoldingJob('${escWO(j.id)}')">Complete as new WO</button>` : `<button class="btn btn-sm" onclick="editJob('${escWO(j.id)}')">Edit</button>
+          ${hold ? `<button class="btn btn-sm" onclick="openHoldLinkModal('${escWO(j.id)}')">Link to existing WO / RWO</button><button class="btn btn-sm btn-primary" onclick="completeHoldingJob('${escWO(j.id)}')">Complete as new WO</button>` : `<button class="btn btn-sm" onclick="editJob('${escWO(j.id)}')">Edit</button>
           ${j.open
             ? `<button class="btn btn-sm" onclick="toggleJobOpen('${escWO(j.id)}', false, this)">Close</button>`
             : jobPending(j)
@@ -8894,11 +8894,13 @@ function openHoldLinkModal(id) {
   const real = jobs.filter(j => !jobIsHolding(j)).sort(woNumberDesc);
   const opt = j => `<option value="${escWO(j.id)}">${escWO(j.id)}${j.open ? '' : ' (closed)'} · ${escWO(propLabel(j.property, 40))} · ${escWO(String(j.description || '').slice(0, 50))}</option>`;
   const same = real.filter(j => j.property === hold.property);
+  const rwo = recurringJobs.filter(j => j.active !== false && j.active !== 'FALSE').slice().sort((a, b) => recurringSortKey(a) - recurringSortKey(b));
   const sel = document.getElementById('hold-link-select');
-  sel.innerHTML = '<option value="">Select a work order...</option>' +
+  sel.innerHTML = '<option value="">Select a work order or recurring job...</option>' +
     (same.length ? `<optgroup label="Same property">${same.map(opt).join('')}</optgroup>` : '') +
+    (rwo.length ? `<optgroup label="Recurring jobs">${rwo.map(j => `<option value="${escWO(j.id)}">${escWO(j.id)} · ${escWO(String(j.description || '').slice(0, 60))}</option>`).join('')}</optgroup>` : '') +
     `<optgroup label="All work orders">${real.filter(j => j.property !== hold.property).map(opt).join('')}</optgroup>`;
-  if (!sel._ssAttached) ssAttach('hold-link-select', 'Search WO, property, description...'); else ssRefresh('hold-link-select');
+  if (!sel._ssAttached) ssAttach('hold-link-select', 'Search WO, RWO, property, description...'); else ssRefresh('hold-link-select');
   const btn = document.getElementById('hold-link-confirm');
   btn.disabled = false; btn.textContent = 'Link';
   document.getElementById('hold-link-modal').style.display = 'flex';
@@ -8909,18 +8911,19 @@ async function confirmHoldLink() {
   const holdId = holdLinkId;
   const hold = jobs.find(j => j.id === holdId);
   const targetId = document.getElementById('hold-link-select').value;
-  if (!hold || !targetId) { alert('Please pick the work order it belongs to'); return; }
-  if (!confirm('Move everything on ' + holdId + ' to ' + targetId + ' and remove ' + holdId + '?')) return;
+  if (!hold || !targetId) { alert('Please pick the work order or recurring job it belongs to'); return; }
+  const isRwo = /^RWO\d+$/i.test(targetId);
+  if (!confirm('Move everything on ' + holdId + ' to ' + targetId + (isRwo ? ' (recurring job, at ' + hold.property + ')' : '') + ' and remove ' + holdId + '?')) return;
   if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to do this'); return; }
   const btn = document.getElementById('hold-link-confirm');
   btn.disabled = true; btn.textContent = 'Linking...';
   try {
     const res = await api('resolveHoldingJob', { holdId, targetId, performedBy: officeUserName() });
     if (!res || res.mode !== 'link') throw new Error('The Apps Script is still running the previous version — publish a new deployment version and try again.');
-    const target = jobs.find(j => j.id === targetId);
+    const target = isRwo ? recurringJobs.find(j => j.id === targetId) : jobs.find(j => j.id === targetId);
     if (target && res.assignedTo != null) target.assignedTo = res.assignedTo;
-    applyHoldingResolved(holdId, targetId, null);
-    notifyHoldingRaiser(hold.reportedBy, holdId, target || { id: targetId });
+    applyHoldingResolved(holdId, targetId, null, isRwo ? hold.property : '');
+    notifyHoldingRaiser(hold.reportedBy, holdId, isRwo ? { id: targetId, property: hold.property } : (target || { id: targetId }));
     closeHoldLinkModal();
     renderOfficeDashboard();
     setSyncStatus('office', 'synced', holdId + ' linked to ' + targetId);
@@ -8932,11 +8935,11 @@ async function confirmHoldLink() {
 }
 
 // Mirror the server move locally so nothing flickers before the refresh lands
-function applyHoldingResolved(oldId, newId, newJob) {
+function applyHoldingResolved(oldId, newId, newJob, rwoProperty) {
   jobs = jobs.filter(j => j.id !== oldId);
   if (newJob) jobs.push(newJob);
-  entries.forEach(e => { if (String(e.jobId) === oldId) e.jobId = newId; });
-  schedule.forEach(x => { if (String(x.jobId) === oldId) x.jobId = newId; });
+  entries.forEach(e => { if (String(e.jobId) === oldId) { e.jobId = newId; if (rwoProperty) e.property = rwoProperty; } });
+  schedule.forEach(x => { if (String(x.jobId) === oldId) { x.jobId = newId; if (rwoProperty) x.property = rwoProperty; } });
   jobComments.forEach(c => { if (c.jobId === oldId) c.jobId = newId; });
   if (photoCounts[oldId]) { photoCounts[newId] = (photoCounts[newId] || 0) + photoCounts[oldId]; delete photoCounts[oldId]; }
   delete photoCache[oldId]; delete photoCache[newId];
