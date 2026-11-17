@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-108 (Notifications tab: per-worker "Office messages" switch on the Workers tab) -->
+<!-- BUILD MARKER: NB-109 (Daily View tab removed; Schedule is the opening tab) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -778,8 +778,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 
       <!-- Office sub-navigation -->
       <div class="office-subnav">
-        <button class="active" onclick="switchOfficeTab('daily')" id="otab-daily">Daily View</button>
-        <button onclick="switchOfficeTab('schedview')" id="otab-schedview">Schedule</button>
+        <button class="active" onclick="switchOfficeTab('schedview')" id="otab-schedview">Schedule</button>
         <button onclick="switchOfficeTab('entries')" id="otab-entries">Time Entries</button>
         <button onclick="switchOfficeTab('wocreate')" id="otab-wocreate">WO Creation</button>       
         <button onclick="switchOfficeTab('jobs')" id="otab-jobs">Jobs</button>
@@ -900,7 +899,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
       </div>
 
       <!-- Schedule View tab -->
-      <div id="office-tab-schedview" style="display:none;">
+      <div id="office-tab-schedview">
         <div class="card">
           <div class="row-between card-header" style="flex-wrap:wrap;gap:10px;">
             <div class="sched-head">
@@ -1037,53 +1036,6 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
             <div id="jobs-filter-chips" class="job-filter-chips"></div>
           </div>
           <div id="job-list"><p class="text-muted">Loading...</p></div>
-        </div>
-      </div>
-
-      <!-- Daily View tab -->
-      <div id="office-tab-daily">
-        <div class="card">
-          <div class="row-between card-header">
-            <div style="display:flex;align-items:center;gap:8px;">
-              <button class="btn btn-sm" onclick="changeDailyViewDate(-1)" title="Previous day" style="padding:4px 10px;">‹</button>
-              <p class="section-heading" id="daily-view-heading" style="margin:0;">Today's entries</p>
-              <button class="btn btn-sm" onclick="changeDailyViewDate(1)" title="Next day" style="padding:4px 10px;">›</button>
-              <button class="btn btn-sm" id="daily-view-today-btn" onclick="jumpToTodayDailyView()" style="display:none;">Today</button>
-            </div>
-            <div style="display:flex;gap:8px;">
-              <button class="btn btn-sm" id="daily-add-entry-toggle" onclick="toggleDailyAddEntry()">+ Add entry</button>
-              <button class="btn btn-sm" onclick="refreshOffice().then(() => renderDailyView())">↻ Refresh</button>
-            </div>
-          </div>
-          <div id="daily-add-entry-form" style="display:none;margin-bottom:1rem;padding:1rem;background:var(--color-background-secondary);border-radius:var(--border-radius-md);">
-            <p style="font-size:13px;font-weight:500;margin-bottom:0.75rem;">Add time entry</p>
-            <div class="grid2">
-              <div>
-                <label style="margin-top:0;">Worker</label>
-                <select id="dae-worker" onchange="populateDailyEntryJobDropdown()"></select>
-              </div>
-              <div>
-                <label style="margin-top:0;">Job</label>
-                <select id="dae-job" onchange="rjPropCheck('dae')"></select>
-              </div>
-            </div>
-            <div class="grid2" style="margin-top:10px;">
-              <div>
-                <label style="margin-top:0;">Hours</label>
-                <input type="number" id="dae-hours" placeholder="e.g. 4" min="0.5" max="16" step="0.5">
-              </div>
-              <div>
-                <div id="rj-prop-dae" class="rj-prop-wrap"></div>
-                <label id="dae-comments-label" style="margin-top:0;">Comments (optional)</label>
-                <input type="text" id="dae-comments" placeholder="What was done...">
-              </div>
-            </div>
-            <div style="display:flex;gap:8px;margin-top:0.75rem;">
-              <button class="btn btn-primary btn-sm" onclick="submitDailyEntry()">Save entry</button>
-              <button class="btn btn-sm" onclick="toggleDailyAddEntry()">Cancel</button>
-            </div>
-          </div>
-          <div id="daily-view-list"><p class="text-muted">Loading...</p></div>
         </div>
       </div>
 
@@ -1602,7 +1554,6 @@ function trackRecentEntry(entry) {
   recentlyCreatedEntries.push({ entry, at: Date.now() });
   recentlyCreatedEntries = recentlyCreatedEntries.filter(r => Date.now() - r.at < RECENT_ENTRY_WINDOW_MS);
 }
-let dailyViewDate = localDateStr(new Date());
 let currentWorker = null;
 let syncQueue = JSON.parse(localStorage.getItem('syncQueue') || '[]');
 let pollTimer = null;
@@ -2412,11 +2363,8 @@ async function confirmOvertime() {
     // Reset office add-entry forms if open
     const oaeForm = document.getElementById('office-add-entry-form');
     if (oaeForm && oaeForm.style.display !== 'none') toggleOfficeAddEntry();
-    const daeForm = document.getElementById('daily-add-entry-form');
-    if (daeForm && daeForm.style.display !== 'none') toggleDailyAddEntry();
     renderEntriesByDate();
     renderOfficeEntries();
-    renderDailyView();
 
     if (normalPart) {
       if (typeof updateHoursPlaceholder === 'function') updateHoursPlaceholder();
@@ -3014,64 +2962,6 @@ function toggleEdit(id, isOffice) {
 }
 
 
-async function saveDailyViewEdit(id) {
-  const entry = entries.find(e => e.id === id);
-  if (!entry) return;
-  const newJob      = document.getElementById(`ej-o-${id}`).value;
-  const newHours    = parseFloat(document.getElementById(`eh-o-${id}`).value);
-  const newComments = document.getElementById(`en-o-${id}`).value;
-  const reason      = document.getElementById(`er-o-${id}`).value;
-  if (isNaN(newHours)) { alert('Please enter valid hours.'); return; }
-
-  entry.amendments.push({
-    by: 'Office',
-    at: new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
-    note: reason
-  });
-  entry.jobId    = newJob;
-  entry.hours    = newHours;
-  entry.comments = newComments;
-
-  // Recalculate property/description for the new job selection — previously
-  // left untouched, so switching e.g. a WO entry to an absence type silently
-  // kept showing the old WO's property/description.
-  const newJobObj_dv = jobs.find(j => j.id === newJob);
-  const newRecurringObj_dv = recurringJobs.find(j => j.id === newJob);
-  const newAbsTypeObj_dv = absenceTypes.find(a => a.id === newJob);
-  if (newJobObj_dv) {
-    entry.property = newJobObj_dv.property || '';
-    entry.description = newJobObj_dv.description || '';
-  } else if (newRecurringObj_dv) {
-    entry.property = newRecurringObj_dv.property || '';
-    entry.description = newRecurringObj_dv.description || '';
-  } else if (newAbsTypeObj_dv) {
-    entry.property = '';
-    entry.description = newAbsTypeObj_dv.name || newAbsTypeObj_dv.id;
-  } else {
-    entry.property = '';
-    entry.description = '';
-  }
-
-  localStorage.setItem('entries', JSON.stringify(entries));
-
-  renderDailyView();
-  renderOfficeEntries();
-
-  const { synced } = await queueOrSend('updateEntry', { entry: { ...entry, amendments: amendmentsToString(entry.amendments) } });
-  if (synced) setSyncStatus('office', 'synced', 'Saved to Sheets');
-}
-
-function toggleDailyViewEdit(id) {
-  const row = document.getElementById(`editrow-o-${id}`);
-  if (!row) return;
-  row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
-}
-
-function closeDailyViewEdit(id) {
-  const row = document.getElementById(`editrow-o-${id}`);
-  if (row) row.style.display = 'none';
-}
-
 async function saveEdit(id, isOffice) {
   const p = isOffice ? 'o' : 'w';
   const entry = entries.find(e => e.id === id);
@@ -3114,7 +3004,7 @@ async function saveEdit(id, isOffice) {
 
   localStorage.setItem('entries', JSON.stringify(entries));
 
-  if (isOffice) { renderOfficeDashboard(); renderDailyView(); }
+  if (isOffice) renderOfficeDashboard();
   else { renderEntriesByDate(); updateHoursPlaceholder(); showToast('toast-amended'); }
 
   const { synced } = await queueOrSend('updateEntry', { entry: { ...entry, amendments: amendmentsToString(entry.amendments) } });
@@ -3168,8 +3058,9 @@ function enterOffice() {
   document.getElementById('otab-viewas').style.display = officeUser.role === 'admin' ? '' : 'none';
   document.getElementById('office-pin').value = '';
   showLoginNote('office-login-note', '');
+  switchOfficeTab(officeResumeTab || 'schedview');
+  officeResumeTab = '';
   refreshOffice();
-  if (officeResumeTab) { switchOfficeTab(officeResumeTab); officeResumeTab = ''; }
 }
 
 function openPasswordChange(forced, current) {
@@ -3824,8 +3715,6 @@ function renderOfficeDashboard() {
   syncDateRangeLimits();
   const overtimeTab = document.getElementById('office-tab-overtime');
   if (overtimeTab && overtimeTab.style.display !== 'none') renderOvertimeTab();
-  const dailyTab = document.getElementById('office-tab-daily');
-  if (dailyTab && dailyTab.style.display !== 'none') renderDailyView();
   const entriesTab = document.getElementById('office-tab-entries');
   if (entriesTab && entriesTab.style.display !== 'none') renderOfficeEntries();
 }
@@ -4465,7 +4354,6 @@ async function submitMultiAddEntries() {
     }
 
     renderOfficeEntries();
-    renderDailyView();
     toggleMultiAddEntry();
 
     let msg = datesToLog.length + ' entr' + (datesToLog.length === 1 ? 'y' : 'ies') + ' added';
@@ -4555,7 +4443,6 @@ async function deleteEntry(id, isOffice) {
   localStorage.setItem('entries', JSON.stringify(entries));
   if (isOffice) {
     renderOfficeEntries();
-    renderDailyView();
     setSyncStatus('office', 'pending', 'Deleting...');
   } else {
     renderEntriesByDate();
@@ -4611,250 +4498,6 @@ async function toggleAbsenceType(id, currentlyActive) {
   const { synced } = await queueOrSend('saveAbsenceType', { absenceType: a });
   if (synced) setSyncStatus('office', 'synced', 'Absence type updated');
 }
-
-function changeDailyViewDate(delta) {
-  const d = new Date(dailyViewDate + 'T12:00:00');
-  d.setDate(d.getDate() + delta);
-  dailyViewDate = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-  renderDailyView();
-}
-
-function jumpToTodayDailyView() {
-  dailyViewDate = localDateStr(new Date());
-  renderDailyView();
-}
-
-function renderDailyView() {
-  const el = document.getElementById('daily-view-list');
-  const heading = document.getElementById('daily-view-heading');
-  const todayBtn = document.getElementById('daily-view-today-btn');
-  if (!el) return;
-
-  const todayStr = dailyViewDate;
-  const isActuallyToday = todayStr === localDateStr(new Date());
-  const todayFmt = fmtDate(todayStr);
-  if (heading) heading.textContent = todayFmt;
-  if (todayBtn) todayBtn.style.display = isActuallyToday ? 'none' : 'inline-block';
-
-  const today = new Date(); today.setHours(0,0,0,0);
-  const prevMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-  const activeWorkers = workers.filter(w => w.active !== false && w.active !== 'FALSE');
-
-  if (!activeWorkers.length) { el.innerHTML = '<p class="text-muted">No workers found.</p>'; return; }
-
-  let html = '';
-
-  activeWorkers.forEach(worker => {
-    const dayEntries = entries
-      .filter(e => e.worker === worker.name && normaliseDate(e.date) === todayStr)
-      .sort((a, b) => String(a.jobId).localeCompare(String(b.jobId), undefined, { numeric: true }));
-
-    const hoursLogged = dayEntries.reduce((s, e) => s + parseFloat(e.hours || 0), 0);
-    const absence = null;
-    const isBankHoliday = BANK_HOLIDAYS.includes(todayStr);
-    const dow_flag_dv = new Date(todayStr + 'T12:00:00').getDay();
-    const isWeekendDay = dow_flag_dv === 0 || dow_flag_dv === 6;
-    const shouldFlag = !isBankHoliday && !absence && !isWeekendDay && hoursLogged < workerDailyHours(worker.name);
-
-    const statusBadge = isBankHoliday
-      ? `<span class="badge badge-done" style="margin-left:8px;">Bank Holiday</span>`
-      : absence
-        ? `<span class="badge badge-open" style="margin-left:8px;">${absence.reason}</span>`
-        : shouldFlag && hoursLogged === 0
-          ? `<span class="badge" style="margin-left:8px;background:#fdecea;color:var(--color-text-error);">No hours</span>`
-          : shouldFlag
-            ? `<span class="badge" style="margin-left:8px;background:#fff8e1;color:var(--color-text-warning);">${hoursLogged}h logged</span>`
-            : `<span class="badge badge-done" style="margin-left:8px;">Complete</span>`;
-
-    const dayTotal = dayEntries.reduce((s, e) => s + parseFloat(e.hours || 0), 0);
-
-    const entryRows = dayEntries.length === 0
-      ? `<tr><td colspan="6" style="padding:10px 12px;font-size:12px;color:var(--color-text-secondary);width:100%;">No entries</td></tr>`
-      : dayEntries.map((e, idx) => {
-          const job = jobs.find(j => j.id === e.jobId) || recurringJobs.find(j => j.id === e.jobId);
-          const isRJ = recurringJobs.some(j => j.id === e.jobId);
-          const jobProperty = isRJ ? (e.property || (job ? job.property : '')) : (job ? job.property : (e.property || ''));
-          const jobDescription = (job ? (job.description || '') : (e.description || '')).slice(0, 200);
-          const amended = e.amendments && e.amendments.length > 0;
-          const lastAmend = amended ? e.amendments[e.amendments.length - 1] : null;
-          return `
-          <tr class="day-row" ${idx === 0 ? 'style="border-top:1.5px solid var(--color-border-secondary);"' : ''}>
-            <td style="padding:9px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-              <span style="font-weight:600;">${e.jobId}</span>
-              ${amended && !e.isOvertime ? `<span class="badge-amended-sm">${lastAmend.note === 'Created by Office' ? 'Office' : 'Amended'}</span>` : ''}
-              ${e.isOvertime ? `<span class="badge-amended-sm" style="background:var(--color-background-success);color:var(--color-text-success);">⏱ Overtime</span>` : ''}
-            </td>
-            <td style="padding:9px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;color:var(--color-text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${propLabel(jobProperty, 35)}</td>
-            <td style="padding:9px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;color:var(--color-text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${jobDescription}</td>
-            <td style="padding:9px 6px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;font-weight:500;text-align:center;white-space:nowrap;width:46px;">${e.hours}h</td>
-            <td style="padding:9px 10px;font-size:12px;font-style:italic;color:var(--color-text-secondary);overflow:hidden;text-overflow:ellipsis;">
-              ${e.isOvertime && e.overtimeStart ? `<span style="font-style:normal;font-weight:500;color:var(--color-text-success);">${e.overtimeStart} – ${e.overtimeEnd}</span> ` : ''}${e.comments || ''}${amended && !e.isOvertime && lastAmend.note !== 'Created by Office' ? ` · Amended by ${lastAmend.by}` : ''}
-              ${e.isOvertime && amended && lastAmend.note && lastAmend.note.includes('): ') ? `<div style="font-size:10px;font-style:italic;margin-top:2px;color:var(--color-text-secondary);">${lastAmend.note.slice(lastAmend.note.indexOf('): ') + 3)}</div>` : ''}
-            </td>
-            <td style="padding:4px 8px;text-align:right;vertical-align:middle;width:160px;white-space:nowrap;">
-              <button class="btn btn-sm" onclick="toggleDailyViewEdit('${e.id}')">Edit</button>
-              <button class="btn btn-sm" style="color:var(--color-text-error);border-color:var(--color-border-error);margin-left:4px;" onclick="deleteEntry('${e.id}', true)">Delete</button>
-            </td>
-          </tr>
-          <tr id="editrow-o-${e.id}" style="display:none;">
-            <td colspan="6" style="padding:0;">
-              <div class="entry-edit" style="display:block;margin:0;border-radius:0;">
-                <div class="edit-grid">
-                  <div class="edit-field">
-                    <label>Job</label>
-                    <select id="ej-o-${e.id}">
-                      ${(() => {
-                        const openJobs = jobs.filter(j => j.open || j.id === e.jobId);
-                        const assigned = openJobs.filter(j => expandAssignedTo(j.assignedTo).includes(e.worker));
-                        const others   = openJobs.filter(j => !expandAssignedTo(j.assignedTo).includes(e.worker));
-                        const recurr   = recurringJobs.filter(j => j.active !== false && j.active !== 'FALSE' || j.id === e.jobId);
-                        const absTypes = absenceTypes.filter(a => a.active !== false && a.active !== 'FALSE');
-                        const fmt = j => `<option value="${j.id}" ${j.id === e.jobId ? 'selected' : ''}>${j.id} · ${propLabel(j.property || j.name || '') ? propLabel(j.property || j.name || '') + ' · ' : ''}${(j.description || j.name || '').slice(0,40)}</option>`;
-                        let html = '';
-                        if (assigned.length) html += `<optgroup label="Assigned Jobs">${assigned.map(fmt).join('')}</optgroup>`;
-                        if (others.length)   html += `<optgroup label="Other Jobs">${others.map(fmt).join('')}</optgroup>`;
-                        if (recurr.length)   html += `<optgroup label="Recurring Jobs">${recurr.map(fmt).join('')}</optgroup>`;
-                        if (absTypes.length) html += `<optgroup label="Absence / Leave">${absTypes.map(fmt).join('')}</optgroup>`;
-                        return html;
-                      })()}
-                    </select>
-                  </div>
-                  <div class="edit-field">
-                    <label>Hours</label>
-                    <input type="number" id="eh-o-${e.id}" value="${e.hours}" min="0.5" max="16" step="0.5">
-                  </div>
-                </div>
-                <div class="edit-comments">
-                  <label>Comments</label>
-                  <textarea id="en-o-${e.id}">${e.comments || ''}</textarea>
-                </div>
-                <div class="edit-comments">
-                  <label>Reason for amendment</label>
-                  <input type="text" id="er-o-${e.id}" placeholder="e.g. Entered wrong hours">
-                </div>
-                <div class="edit-actions">
-                  <button class="btn btn-primary btn-sm" onclick="saveDailyViewEdit('${e.id}')">Save changes</button>
-                  <button class="btn btn-sm" onclick="closeDailyViewEdit('${e.id}')">Cancel</button>
-                </div>
-              </div>
-            </td>
-          </tr>`;
-        }).join('') + `
-          <tr style="background:var(--color-background-secondary);border-bottom:1.5px solid var(--color-border-secondary);">
-            <td style="padding:6px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;font-weight:600;width:110px;">Total</td>
-            <td style="padding:6px 10px;border-right:0.5px solid var(--color-border-tertiary);width:200px;"></td>
-            <td style="padding:6px 10px;border-right:0.5px solid var(--color-border-tertiary);"></td>
-            <td style="padding:6px 6px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;font-weight:600;text-align:center;width:46px;">${dayTotal}h</td>
-            <td></td>
-            <td style="width:160px;"></td>
-          </tr>`;
-
-    html += `
-      <div style="margin-bottom:1.5rem;width:100%;">
-        <p style="font-size:13px;font-weight:600;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.5rem;">
-          ${worker.name} ${statusBadge}
-        </p>
-        <table class="week-table" style="width:100%;table-layout:fixed;">
-          <colgroup>
-            <col style="width:160px;">
-            <col style="width:200px;">
-            <col>
-            <col style="width:46px;">
-            <col>
-            <col style="width:160px;">
-          </colgroup>
-          <thead>
-            <tr>
-              <th>W/O Number</th>
-              <th>Property</th>
-              <th>Description</th>
-              <th style="text-align:center;">Hrs</th>
-              <th>Comments</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>${entryRows}</tbody>
-        </table>
-      </div>`;
-  });
-
-  el.innerHTML = html;
-  initInlineJobSelects();
-}
-
-function toggleDailyAddEntry() {
-  const form = document.getElementById('daily-add-entry-form');
-  const btn = document.getElementById('daily-add-entry-toggle');
-  const open = form.style.display === 'none';
-  form.style.display = open ? 'block' : 'none';
-  btn.textContent = open ? '✕ Cancel' : '+ Add entry';
-  if (open) {
-    const workerSel = document.getElementById('dae-worker');
-    const active = workers.filter(w => w.active !== false && w.active !== 'FALSE');
-    workerSel.innerHTML = '<option value="">Select worker...</option>' + active.map(w => `<option value="${w.name}">${w.name}</option>`).join('');
-    document.getElementById('dae-job').innerHTML = '<option value="">Select worker first...</option>';
-    const daeCommentsLabel = document.getElementById('dae-comments-label');
-    if (daeCommentsLabel) daeCommentsLabel.textContent = 'Comments (optional)';
-  }
-}
-
-function populateDailyEntryJobDropdown() {
-  const selectedWorker = document.getElementById('dae-worker').value;
-  const jobSel = document.getElementById('dae-job');
-  if (!selectedWorker) { jobSel.innerHTML = '<option value="">Select worker first...</option>'; return; }
-  const openJobs = jobs.filter(j => j.open);
-  const assigned = openJobs.filter(j => expandAssignedTo(j.assignedTo).includes(selectedWorker));
-  const others = openJobs.filter(j => !expandAssignedTo(j.assignedTo).includes(selectedWorker));
-  const activeAbsTypes = absenceTypes.filter(a => a.active !== false && a.active !== 'FALSE');
-  const fmt = j => `<option value="${j.id}">${j.id}${j.property ? ' · ' + propLabel(j.property) : ''}${j.description ? ' · ' + (j.description.length > 40 ? j.description.slice(0,40) + '…' : j.description) : ''}</option>`;
-  let html = '<option value="">Select a job...</option>';
-  if (assigned.length) html += `<optgroup label="Assigned Jobs">${assigned.map(fmt).join('')}</optgroup>`;
-  if (others.length)   html += `<optgroup label="Other Jobs">${others.map(fmt).join('')}</optgroup>`;
-  if (activeAbsTypes.length) html += `<optgroup label="Absence / Leave">${activeAbsTypes.map(a => `<option value="${a.id}">${a.id} · ${a.name}</option>`).join('')}</optgroup>`;
-  jobSel.innerHTML = html;
-  if (!jobSel._ssAttached) { ssAttach('dae-job', 'Search jobs...'); } else { ssRefresh('dae-job'); }
-}
-
-async function submitDailyEntry() {
-  const worker   = document.getElementById('dae-worker').value;
-  const jobId    = document.getElementById('dae-job').value;
-  const date     = dailyViewDate;
-  const hours    = parseFloat(document.getElementById('dae-hours').value);
-  const comments = document.getElementById('dae-comments').value;
-  if (!worker || !jobId || isNaN(hours)) { alert('Please fill in all required fields.'); return; }
-  const dayOfWeek_de = new Date(date + 'T12:00:00').getDay();
-  const isWeekend_de = dayOfWeek_de === 0 || dayOfWeek_de === 6;
-  const alreadyLogged = normalHoursLogged(worker, date);
-  const isOvertime_de = isWeekend_de || (alreadyLogged + hours > workerDailyHours(worker));
-  const allJobs = [...jobs, ...recurringJobs, ...absenceTypes];
-  const jobObj = allJobs.find(j => j.id === jobId);
-  const entry_de = { id: uid(), worker, jobId, date, hours, comments, amendments: [{ by: officeUserName() || 'Office', at: new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }), note: 'Created by Office' }], createdAt: new Date().toISOString(), property: isRecurringJobId(jobId) ? (rjPropGetValue('rj-prop-dae') || (jobObj ? jobObj.property : '')) : (jobObj ? jobObj.property : ''), description: jobObj ? (jobObj.description || jobObj.name || '') : '', performedBy: officeUserName() };
-  if (isRecurringJobId(jobId) && !rjPropGetValue('rj-prop-dae')) { alert('Please select a property for this recurring job.'); return; }
-  if (isRecurringJobId(jobId) && !comments.trim()) { alert('Please add a comment for this recurring job.'); return; }
-  if (isOvertime_de) { startOvertime(entry_de, isWeekend_de); return; }
-  const entry = entry_de;
-  entries.push(entry); trackRecentEntry(entry);
-  localStorage.setItem('entries', JSON.stringify(entries));
-  document.getElementById('dae-worker').value = '';
-  document.getElementById('dae-job').innerHTML = '<option value="">Select worker first...</option>';
-  if (typeof ssSyncLabel === 'function') ssSyncLabel('dae-job');
-  document.getElementById('dae-hours').value = '';
-  document.getElementById('dae-comments').value = '';
-  rjPropHide('rj-prop-dae');
-  toggleDailyAddEntry();
-  renderDailyView();
-  const { synced } = await queueOrSend('addEntry', { entry: { ...entry, amendments: amendmentsToString(entry.amendments) } });
-  if (synced) setSyncStatus('office', 'synced', 'Entry saved to Sheets');
-}
-
-// ── Overtime rates (LLP) ─────────────────────────────────────────
-// Mon 07:00 – Sat 18:00            1.5x
-// Sat 18:00 – Mon 07:00 (Sunday)   2.0x
-// Bank holidays (incl. Christmas)  2.0x
-// Office closure days              processed as 0.5x (paid 1.5x, base already in salary)
-const OFFICE_CLOSURE_STATUSES = ['Festive Closure'];
-const STANDBY_START_MIN = 17 * 60;   // Friday close of business
-const STANDBY_END_MIN = 7 * 60;      // Monday (or first working day after a bank holiday)
 
 function isOfficeClosureDay(ds) {
   return schedule.some(x => x.date === ds && x.type === 'status' && OFFICE_CLOSURE_STATUSES.includes(x.status));
@@ -5317,14 +4960,13 @@ async function officeReviewOvertime(id, status) {
 }
 
 function switchOfficeTab(tab) {
-  const tabs = ['daily','wocreate','jobs','schedule','weekendcover','notifs','viewas','schedview','entries','absences','workers','locations','recurring','overtime','weekapprovals'];
+  const tabs = ['wocreate','jobs','schedule','weekendcover','notifs','viewas','schedview','entries','absences','workers','locations','recurring','overtime','weekapprovals'];
   tabs.forEach(t => {
     const el = document.getElementById('office-tab-' + t);
     const btn = document.getElementById('otab-' + t);
     if (el) el.style.display = t === tab ? 'block' : 'none';
     if (btn) btn.classList.toggle('active', t === tab);
   });
-  if (tab === 'daily') renderDailyView();
   if (tab === 'absences') populateAbsenceEntryForm();
   if (tab === 'entries') renderOfficeEntries();
   if (tab === 'recurring') renderRecurringJobsList();
