@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-116 (Schedule: recurring jobs turn blue once a worker has completed their week) -->
+<!-- BUILD MARKER: NB-117 (Editing a time entry keeps its job; recurring jobs on the schedule are in the edit list) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -2768,11 +2768,12 @@ function renderWeek(wc) {
                     const fmt = j => `<option value="${j.id}" ${j.id === e.jobId ? 'selected' : ''}>${j.id} · ${propLabel(j.property || j.name || '') ? propLabel(j.property || j.name || '') + ' · ' : ''}${(j.description || j.name || '').slice(0,40)}</option>`;
                     let html = '';
                     const assigned = openJobs.filter(j => expandAssignedTo(j.assignedTo).includes(currentWorker));
-                    const recurr   = recurringJobs.filter(j => (j.active !== false && j.active !== 'FALSE') || j.id === e.jobId).filter(j => expandAssignedTo(j.assignedTo || '').includes(currentWorker));
+                    const onSched = new Set(schedule.filter(x => x.worker === currentWorker).map(x => String(x.jobId)));
+                    const recurr   = recurringJobs.filter(j => j.id === e.jobId || ((j.active !== false && j.active !== 'FALSE') && (expandAssignedTo(j.assignedTo || '').includes(currentWorker) || onSched.has(String(j.id)))));
                     if (assigned.length) html += `<optgroup label="Assigned Jobs">${assigned.map(fmt).join('')}</optgroup>`;
                     if (recurr.length)   html += `<optgroup label="Recurring Jobs">${recurr.map(fmt).join('')}</optgroup>`;
                     if (absTypes.length) html += `<optgroup label="Absence / Leave">${absTypes.map(fmt).join('')}</optgroup>`;
-                    return html;
+                    return withCurrentJobOption(html, e);
                   })()}
                 </select>
               </div>
@@ -2965,9 +2966,9 @@ function renderEntryRow(e, isOffice) {
           <div class="edit-field">
             <label>Job</label>
             <select id="ej-${p}-${e.id}">
-              ${[...jobs.filter(j => j.open || j.id === e.jobId), ...recurringJobs.filter(j => j.active !== false && j.active !== 'FALSE')].filter((j,i,a) => a.findIndex(x=>x.id===j.id)===i).map(j =>
-                `<option value="${j.id}" ${j.id === e.jobId ? 'selected' : ''}>${j.id} — ${propLabel(j.property || j.description)}</option>`
-              ).join('')}
+              ${withCurrentJobOption([...jobs.filter(j => j.open || j.id === e.jobId), ...recurringJobs.filter(j => j.active !== false && j.active !== 'FALSE' || j.id === e.jobId), ...absenceTypes.filter(a => a.id === e.jobId)].filter((j,i,a) => a.findIndex(x=>x.id===j.id)===i).map(j =>
+                `<option value="${j.id}" ${j.id === e.jobId ? 'selected' : ''}>${j.id} — ${propLabel(j.property || j.description || j.name || '')}</option>`
+              ).join(''), e)}
             </select>
           </div>
           <div class="edit-field">
@@ -3001,7 +3002,7 @@ async function saveEdit(id, isOffice) {
   const p = isOffice ? 'o' : 'w';
   const entry = entries.find(e => e.id === id);
   if (!entry) return;
-  const newJob = document.getElementById(`ej-${p}-${id}`).value;
+  const newJob = document.getElementById(`ej-${p}-${id}`).value || entry.jobId;
   const newHours = parseFloat(document.getElementById(`eh-${p}-${id}`).value);
   const newComments = document.getElementById(`en-${p}-${id}`).value;
   const reason = document.getElementById(`er-${p}-${id}`).value;
@@ -3012,6 +3013,7 @@ async function saveEdit(id, isOffice) {
     at: new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
     note: reason
   };
+  const prevJob = String(entry.jobId), prevProp = entry.property, prevDesc = entry.description;
   entry.amendments.push(amendment);
   entry.jobId = newJob;
   entry.hours = newHours;
@@ -3037,6 +3039,7 @@ async function saveEdit(id, isOffice) {
     entry.description = '';
   }
 
+  if (String(newJob) === prevJob) { entry.property = prevProp; entry.description = prevDesc; }
   localStorage.setItem('entries', JSON.stringify(entries));
 
   if (isOffice) renderOfficeDashboard();
@@ -3994,7 +3997,7 @@ function renderOfficeEntries_() {
                       if (others.length)   html += `<optgroup label="Other Jobs">${others.map(fmt).join('')}</optgroup>`;
                       if (recurr.length)   html += `<optgroup label="Recurring Jobs">${recurr.map(fmt).join('')}</optgroup>`;
                       if (absTypes.length) html += `<optgroup label="Absence / Leave">${absTypes.map(fmt).join('')}</optgroup>`;
-                      return html;
+                      return withCurrentJobOption(html, e);
                     })()}
                   </select>
                 </div>
@@ -4053,7 +4056,7 @@ function toggleEditOfficeEntries(id) {
 async function saveEditOfficeEntries(id) {
   const entry = entries.find(e => e.id === id);
   if (!entry) return;
-  const newJob = document.getElementById(`ej-oe-${id}`).value;
+  const newJob = document.getElementById(`ej-oe-${id}`).value || entry.jobId;
   const newHours = parseFloat(document.getElementById(`eh-oe-${id}`).value);
   const newComments = document.getElementById(`en-oe-${id}`).value;
   const reason = document.getElementById(`er-oe-${id}`).value;
@@ -4063,6 +4066,7 @@ async function saveEditOfficeEntries(id) {
     at: new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
     note: reason
   };
+  const prevJob = String(entry.jobId), prevProp = entry.property, prevDesc = entry.description;
   entry.amendments.push(amendment);
   entry.jobId = newJob;
   entry.hours = newHours;
@@ -4088,6 +4092,7 @@ async function saveEditOfficeEntries(id) {
     entry.description = '';
   }
 
+  if (String(newJob) === prevJob) { entry.property = prevProp; entry.description = prevDesc; }
   localStorage.setItem('entries', JSON.stringify(entries));
   renderOfficeEntries();
   const { synced } = await queueOrSend('updateEntry', { entry: { ...entry, amendments: amendmentsToString(entry.amendments) } });
@@ -5763,6 +5768,13 @@ if ('serviceWorker' in navigator) {
   });
 }
 
+
+// The entry's own job is always an option and selected, so saving other changes never switches the job
+function withCurrentJobOption(html, e) {
+  const id = String(e.jobId == null ? '' : e.jobId);
+  if (!id || html.indexOf('value="' + id + '"') > -1) return html;
+  return `<option value="${escWO(id)}" selected>${escWO(id)}${e.property ? ' · ' + escWO(propLabel(e.property)) : ''}</option>` + html;
+}
 
 function initInlineJobSelects() {
   // Attach searchable overlay to all inline edit job selects in the DOM
