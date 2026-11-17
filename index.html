@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-105 (Holding WO link list: same property, all WOs, then recurring jobs) -->
+<!-- BUILD MARKER: NB-106 (Recurring Jobs tab: newest RWO first) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -4176,7 +4176,8 @@ function renderRecurringJobsList() {
   if (!el) return;
   if (document.getElementById('rj-costcode')) initRecurringForm();
   if (!recurringJobs.length) { el.innerHTML = '<p class="text-muted">No recurring jobs yet.</p>'; return; }
-  const list = recurringJobs.slice().sort((a, b) => recurringSortKey(a) - recurringSortKey(b) || String(a.id).localeCompare(String(b.id)));
+  const newestFirst = j => { const k = recurringSortKey(j); return k === 1e9 ? -1 : k; };
+  const list = recurringJobs.slice().sort((a, b) => newestFirst(b) - newestFirst(a) || String(b.id).localeCompare(String(a.id)));
   el.innerHTML = list.map(j => {
     const active = j.active !== false && j.active !== 'FALSE';
     const idArg = escWO(JSON.stringify(j.id));
