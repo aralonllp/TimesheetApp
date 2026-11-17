@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-114 (Schedule: open WOs flagged red once a worker has completed their week) -->
+<!-- BUILD MARKER: NB-115 (Load recent entries and schedule only; older weeks fetched on demand) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -1704,6 +1704,7 @@ function loadInitialData() {
       BANK_HOLIDAYS = data.bankHolidays;
       localStorage.setItem('bankHolidays', JSON.stringify(BANK_HOLIDAYS));
     }
+    const prevEntries = entries;
     entries = (data.entries || []).map(e => ({
       ...e,
       worker: String(e.worker || '').trim().replace(/\s+/g, ' '),
@@ -1715,6 +1716,7 @@ function loadInitialData() {
       overtimeStart: toHHMM(e.overtimeStart),
       overtimeEnd: toHHMM(e.overtimeEnd)
     }));
+    entries = keepOlderEntries(entries, prevEntries, data);
     syncQueue.forEach(q => {
       if (!entries.find(e => e.id === q.id)) entries.push(q);
     });
@@ -2087,6 +2089,7 @@ async function pollJobs(preloaded) {
       BANK_HOLIDAYS = data.bankHolidays;
       localStorage.setItem('bankHolidays', JSON.stringify(BANK_HOLIDAYS));
     }
+    const prevEntries = entries;
     entries = (data.entries || []).map(e => ({
       ...e,
       worker: String(e.worker || '').trim().replace(/\s+/g, ' '),
@@ -2098,6 +2101,7 @@ async function pollJobs(preloaded) {
       overtimeStart: toHHMM(e.overtimeStart),
       overtimeEnd: toHHMM(e.overtimeEnd)
     })).filter(e => !pendingDeleteEntryIds.has(String(e.id)));
+    entries = keepOlderEntries(entries, prevEntries, data);
     syncQueue.forEach(q => { if (q.payload?.entry && !entries.find(e => e.id === q.payload.entry.id)) entries.push(q.payload.entry); });
     // Guard against a lagging server read silently dropping an entry that
     // already synced successfully — see trackRecentEntry for why this exists.
@@ -2920,7 +2924,8 @@ function renderEntriesByDate() {
   const container = document.getElementById('entries-by-date');
   const dateVal = document.getElementById('entry-date') ? document.getElementById('entry-date').value : '';
   const wc = getWeekCommencing(dateVal || localDateStr(new Date()));
-  container.innerHTML = renderWeek(wc);
+  const loading = loadHistory(wc, false, renderEntriesByDate);
+  container.innerHTML = (loading ? historyNote(wc) : '') + renderWeek(wc);
   initInlineJobSelects();
 }
 function groupByDate(arr) {
@@ -3170,6 +3175,7 @@ async function refreshOfficeNow() {
         BANK_HOLIDAYS = data.bankHolidays;
         localStorage.setItem('bankHolidays', JSON.stringify(BANK_HOLIDAYS));
       }
+      const prevEntries = entries;
       entries = (data.entries || []).map(e => ({
         ...e,
         worker: String(e.worker || '').trim().replace(/\s+/g, ' '),
@@ -3179,6 +3185,7 @@ async function refreshOfficeNow() {
         overtimeStart: toHHMM(e.overtimeStart),
         overtimeEnd: toHHMM(e.overtimeEnd)
       })).filter(e => !pendingDeleteEntryIds.has(String(e.id)));
+      entries = keepOlderEntries(entries, prevEntries, data);
       syncQueue.forEach(q => { if (q.payload?.entry && !entries.find(e => e.id === q.payload.entry.id)) entries.push(q.payload.entry); });
       recentlyCreatedEntries = recentlyCreatedEntries.filter(r => Date.now() - r.at < RECENT_ENTRY_WINDOW_MS);
       recentlyCreatedEntries.forEach(r => {
@@ -3297,8 +3304,7 @@ function fillJobFilterValues() {
     const used = new Set(jobFilters.filter(f => f.field === field).map(f => f.value));
     // Only offer values found in the jobs currently showing (search, view and the other filters applied).
     // Filters on this same field are ignored so you can still add a second value to it.
-    const hoursByJob = {};
-    entries.forEach(e => { const k = String(e.jobId); hoursByJob[k] = (hoursByJob[k] || 0) + (parseFloat(e.hours) || 0); });
+    const hoursByJob = allJobHours();
     const pool = jobs.filter(j => jobInCurrentView(j) && jobMatchesSearch(j) && jobMatchesFilters(j, hoursByJob, field === 'status' ? null : field));
     const count = {};
     pool.forEach(j => new Set(field === 'status' ? jobStatusFlags(j, hoursByJob) : def.values(j).map(String)).forEach(v => { count[v] = (count[v] || 0) + 1; }));
@@ -3382,8 +3388,7 @@ function renderJobsList() {
   if (!el) return;
   const q = (document.getElementById('jobs-search').value || '').trim().toLowerCase();
   const woNum = id => { const m = /(\d+)/.exec(String(id)); return m ? parseInt(m[1], 10) : 0; };
-  const hoursByJob = {};
-  entries.forEach(e => { const k = String(e.jobId); hoursByJob[k] = (hoursByJob[k] || 0) + (parseFloat(e.hours) || 0); });
+  const hoursByJob = allJobHours();
   initJobFilterUI();
   const matches = j => jobMatchesSearch(j) && jobMatchesFilters(j, hoursByJob);
   const filtered = jobs.filter(matches);
@@ -3546,7 +3551,7 @@ function fmtHrs(n) { return (Math.round(n * 100) / 100).toString(); }
 
 function renderJobRow(j, hoursByJob) {
   const est = j.estHours === '' || j.estHours == null ? null : parseFloat(j.estHours);
-  const actual = hoursByJob ? (hoursByJob[String(j.id)] || 0) : entries.filter(e => String(e.jobId) === String(j.id)).reduce((t, e) => t + (parseFloat(e.hours) || 0), 0);
+  const actual = hoursByJob ? (hoursByJob[String(j.id)] || 0) : jobHoursTotal(j.id);
   const over = est != null && !isNaN(est) && actual > est;
   const assigned = expandAssignedTo(j.assignedTo);
   const assignedTxt = assigned.length ? assigned.map(n => workerInitials(n)).join(', ') : '';
@@ -3673,10 +3678,15 @@ function toggleJobEntries(id, btn) {
 function renderJobEntriesTable(id) {
   const key = String(id);
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  let loadingNote = '';
+  if ((preWindowHours[key] || 0) > 0.0001 && loadJobHistory(key, () => {
+    const p = document.getElementById('job-entries-' + key);
+    if (p && expandedJobs.has(key)) p.innerHTML = renderJobEntriesTable(key);
+  })) loadingNote = '<p class="text-muted" style="font-size:12px;padding:4px 0;">Loading older entries...</p>';
   const rows = entries.filter(e => String(e.jobId) === key).map(e => ({ e, date: normaliseDate(e.date), pending: false }));
   overtimeRequests.filter(o => String(o.jobId) === key && o.status === 'pending')
     .forEach(o => rows.push({ e: { worker: o.worker, hours: o.hours, comments: o.workerComment || '', isOvertime: true, timeRange: o.timeRange }, date: normaliseDate(o.date), pending: true }));
-  if (!rows.length) return '<p class="text-muted" style="font-size:12px;padding:4px 0;">No time logged against this job yet.</p>';
+  if (!rows.length) return loadingNote || '<p class="text-muted" style="font-size:12px;padding:4px 0;">No time logged against this job yet.</p>';
   rows.sort((a, b) => a.date.localeCompare(b.date) || String(a.e.worker).localeCompare(String(b.e.worker)));
 
   const byWorker = {};
@@ -3782,6 +3792,7 @@ function renderOfficeEntries_() {
 
   const fromDate = fromVal ? new Date(fromVal + 'T00:00:00') : (() => { const d = new Date(); d.setDate(d.getDate()-4); return d; })();
   const toDate = toVal ? new Date(toVal + 'T00:00:00') : new Date();
+  if (loadHistory(localDateStr(fromDate), false, renderOfficeEntries_)) { el.innerHTML = historyNote(localDateStr(fromDate)); return; }
 
   const allDays = [];
   const cursor = new Date(fromDate);
@@ -5272,6 +5283,7 @@ async function exportXLSX() {
   const workerFilter = document.getElementById('oe-worker-filter')?.value || '';
   const fromVal      = document.getElementById('oe-date-from')?.value || '';
   const toVal        = document.getElementById('oe-date-to')?.value || '';
+  if (fromVal) await ensureHistory(fromVal, false);
 
   const filtered = entries.filter(e => {
     if (workerFilter && e.worker !== workerFilter) return false;
@@ -5659,10 +5671,11 @@ function csvRateLabel_(seg) {
   return seg.rate ? seg.rate + 'x' : '';
 }
 
-function exportCSV() {
+async function exportCSV() {
   const workerFilter = document.getElementById('oe-worker-filter')?.value || '';
   const fromVal      = document.getElementById('oe-date-from')?.value || '';
   const toVal        = document.getElementById('oe-date-to')?.value || '';
+  if (fromVal) await ensureHistory(fromVal, false);
 
   const filtered = entries.filter(e => {
     if (workerFilter && e.worker !== workerFilter) return false;
@@ -6750,6 +6763,14 @@ function setScheduleFromData(data) {
       const i = server.findIndex(x => x.id === p.id);
       if (i > -1) server[i] = p; else server.push(p);
     });
+    const sFrom = typeof data.scheduleFrom === 'string' ? data.scheduleFrom : '';
+    scheduleFrom = sFrom;
+    if (!sFrom) histScheduleFrom = '';
+    else {
+      if (!histScheduleFrom || sFrom < histScheduleFrom) histScheduleFrom = sFrom;
+      const ids = new Set(server.map(x => x.id));
+      schedule.forEach(x => { if (x.date < sFrom && !ids.has(x.id) && !schedPendingDeletes.has(x.id) && !schedRecentDeletes.has(x.id)) server.push(x); });
+    }
     schedule = server;
   }
   if (Array.isArray(data.scheduleStatuses)) scheduleStatuses = data.scheduleStatuses;
@@ -6892,14 +6913,16 @@ function renderScheduleInto(o) {
   document.getElementById(o.rangeId).textContent = shortDot(start) + ' to ' + shortDot(lastDay);
   document.getElementById(o.legendId).innerHTML = scheduleStatuses.map(st =>
     `<span class="sched-pill" style="background:${escWO(st.color)};color:${textOn(st.color)};">${escWO(st.name)}</span>`).join('');
+  if (loadHistory(localDateStr(start), true, () => renderScheduleInto(o))) {
+    document.getElementById(o.rangeId).textContent += ' (loading older week...)';
+  }
   const ops = scheduleOps();
   if (!ops.length) { document.getElementById(o.gridId).innerHTML = '<tr><td style="padding:12px;">No active workers.</td></tr>'; return; }
 
-  const dayHrs = {}, jobTotals = {}, weekTotals = {};
+  const dayHrs = {}, jobTotals = allJobHours(), weekTotals = {};
   {
     entries.forEach(e => {
       const h = parseFloat(e.hours) || 0, jid = String(e.jobId);
-      jobTotals[jid] = (jobTotals[jid] || 0) + h;
       const k = normaliseDate(e.date) + '|' + e.worker + '|' + jid;
       dayHrs[k] = (dayHrs[k] || 0) + h;
     });
@@ -7599,7 +7622,8 @@ function renderWorkerWeek() {
   const today = localDateStr(new Date());
   document.getElementById('wk-week-title').textContent = 'Week ' + isoWeekNumber(start);
   const wkDays = schedDaysForWeek(start, [currentWorker]);
-  document.getElementById('wk-week-range').textContent = shortDot(start) + ' to ' + shortDot(wkDays[wkDays.length - 1]);
+  document.getElementById('wk-week-range').textContent = shortDot(start) + ' to ' + shortDot(wkDays[wkDays.length - 1])
+    + (loadHistory(localDateStr(start), true, renderWorkerWeek) ? ' (loading...)' : '');
   const COLS = 5;
   const target = workerDailyHours(currentWorker);
   let rows = '';
@@ -7779,13 +7803,8 @@ function renderWorkerJobs() {
   const woNum = id => { const m = /(\d+)/.exec(String(id)); return m ? parseInt(m[1], 10) : 0; };
   let list = (workerJobsView === 'open' ? openJobs : closedJobs).slice().sort((a, b) => woNum(b.id) - woNum(a.id));
   if (q) list = list.filter(j => [j.id, j.property, j.description, j.issueHighlightedBy, j.priority].some(v => String(v || '').toLowerCase().includes(q)));
-  const totals = {}, mineHrs = {};
-  entries.forEach(e => {
-    const k = String(e.jobId), h = parseFloat(e.hours) || 0;
-    totals[k] = (totals[k] || 0) + h;
-    if (e.worker === currentWorker) mineHrs[k] = (mineHrs[k] || 0) + h;
-  });
-  if (serverJobHours) Object.keys(serverJobHours).forEach(k => { totals[k] = Math.max(totals[k] || 0, serverJobHours[k]); });
+  const totals = allJobHours(), mineHrs = myJobHours(currentWorker);
+  if (serverJobHours && !entriesFrom) Object.keys(serverJobHours).forEach(k => { totals[k] = Math.max(totals[k] || 0, serverJobHours[k]); });
   el.innerHTML = list.length
     ? list.map(j => renderWorkerJobRow(j, totals[String(j.id)] || 0, mineHrs[String(j.id)] || 0)).join('')
     : '<p class="text-muted">' + (q ? 'No jobs match that search.' : (workerJobsView === 'open' ? 'No open jobs assigned to you.' : 'No closed jobs.')) + '</p>';
@@ -8181,6 +8200,129 @@ var woCostCodes = [];
 // Signed-in workers only get their own entries, so job totals come from the server
 let serverJobHours = null;
 
+// Each load only carries recent entries (from entriesFrom) and the recent schedule (from scheduleFrom).
+// Older weeks are fetched on demand and kept across refreshes.
+let entriesFrom = '', scheduleFrom = '';
+let histEntriesFrom = '', histScheduleFrom = '';   // earliest date loaded so far
+let preWindowHours = {}, preWindowMine = {};       // all-time hours before the window, per job
+const historyJobsLoaded = new Set();
+let historyLoading = null, historyFailedAt = 0;
+
+function normEntry_(e) {
+  return {
+    ...e,
+    worker: String(e.worker || '').trim().replace(/\s+/g, ' '),
+    comments: String(e.comments || ''),
+    property: String(e.property || ''),
+    description: String(e.description || ''),
+    amendments: amendmentsFromString(typeof e.amendments === 'string' ? e.amendments : JSON.stringify(e.amendments || [])),
+    isOvertime: e.isOvertime === true || e.isOvertime === 'TRUE' || e.isOvertime === 1,
+    overtimeStart: toHHMM(e.overtimeStart),
+    overtimeEnd: toHHMM(e.overtimeEnd)
+  };
+}
+
+function inEntryWindow_(e) { return !entriesFrom || normaliseDate(e.date) >= entriesFrom; }
+
+function keepOlderEntries(fresh, prev, data) {
+  const from = data && typeof data.entriesFrom === 'string' ? data.entriesFrom : '';
+  entriesFrom = from;
+  if (!from) histEntriesFrom = '';
+  else if (!histEntriesFrom || from < histEntriesFrom) histEntriesFrom = from;
+  preWindowHours = {}; preWindowMine = {};
+  if (from && data.jobHours) {
+    const inWin = {}, mineWin = {};
+    (data.entries || []).forEach(e => {
+      const k = String(e.jobId), h = parseFloat(e.hours) || 0;
+      inWin[k] = (inWin[k] || 0) + h;
+      if (String(e.worker || '').trim() === currentWorker) mineWin[k] = (mineWin[k] || 0) + h;
+    });
+    Object.keys(data.jobHours).forEach(k => { preWindowHours[k] = (parseFloat(data.jobHours[k]) || 0) - (inWin[k] || 0); });
+    if (data.myJobHours) Object.keys(data.myJobHours).forEach(k => { preWindowMine[k] = (parseFloat(data.myJobHours[k]) || 0) - (mineWin[k] || 0); });
+  }
+  if (!from) return fresh;
+  const ids = new Set(fresh.map(e => String(e.id)));
+  const older = (prev || []).filter(e => normaliseDate(e.date) < from && !ids.has(String(e.id)));
+  return older.length ? fresh.concat(older) : fresh;
+}
+
+// All-time hours per job: the part before the window (from the server) plus what is loaded now
+function allJobHours() {
+  const t = {};
+  Object.keys(preWindowHours).forEach(k => { if (preWindowHours[k] > 0.0001) t[k] = preWindowHours[k]; });
+  entries.forEach(e => { if (!inEntryWindow_(e)) return; const k = String(e.jobId); t[k] = (t[k] || 0) + (parseFloat(e.hours) || 0); });
+  return t;
+}
+function jobHoursTotal(id) { return allJobHours()[String(id)] || 0; }
+function myJobHours(worker) {
+  const t = {};
+  Object.keys(preWindowMine).forEach(k => { if (preWindowMine[k] > 0.0001) t[k] = preWindowMine[k]; });
+  entries.forEach(e => { if (!inEntryWindow_(e) || e.worker !== worker) return; const k = String(e.jobId); t[k] = (t[k] || 0) + (parseFloat(e.hours) || 0); });
+  return t;
+}
+
+function mergeHistory_(data) {
+  if (Array.isArray(data.entries)) {
+    const have = new Set(entries.map(e => String(e.id)));
+    data.entries.forEach(e => { if (!have.has(String(e.id)) && !pendingDeleteEntryIds.has(String(e.id))) entries.push(normEntry_(e)); });
+  }
+  if (Array.isArray(data.schedule)) {
+    const have = new Set(schedule.map(x => x.id));
+    data.schedule.forEach(x => { if (!have.has(x.id) && !schedPendingDeletes.has(x.id) && !schedRecentDeletes.has(x.id)) schedule.push({ ...x, sort: parseFloat(x.sort) || 0 }); });
+  }
+}
+
+// Is anything from this date missing? (entries, and the schedule when asked)
+function historyNeeded(from, withSchedule) {
+  if (!from || previewWorker) return false;
+  if (histEntriesFrom && from < histEntriesFrom) return true;
+  return !!(withSchedule && histScheduleFrom && from < histScheduleFrom);
+}
+
+// Fetch older entries (and schedule) back to `from`, then call `after` to re-render
+function loadHistory(from, withSchedule, after) {
+  if (!historyNeeded(from, withSchedule)) return false;
+  if (Date.now() - historyFailedAt < 30000 && !historyLoading) return false;
+  if (historyLoading) { historyLoading.then(() => { if (historyNeeded(from, withSchedule)) loadHistory(from, withSchedule, after); else if (after) after(); }); return true; }
+  const eTo = histEntriesFrom, sTo = histScheduleFrom;
+  const lowest = [eTo, withSchedule ? sTo : ''].filter(Boolean).sort().pop();
+  const td = new Date(lowest + 'T12:00:00'); td.setDate(td.getDate() - 1);
+  const to = localDateStr(td);
+  historyLoading = api('getHistory', { from: from, to: to, schedule: !!withSchedule })
+    .then(data => {
+      if (!data || !data.success) historyFailedAt = Date.now();
+      if (data && data.success) {
+        mergeHistory_(data);
+        if (!histEntriesFrom || from < histEntriesFrom) {
+          // entries between `to` and the old edge were already loaded, so the edge just moves back
+          histEntriesFrom = from;
+        }
+        if (withSchedule && (!histScheduleFrom || from < histScheduleFrom)) histScheduleFrom = from;
+      }
+    })
+    .catch(err => { historyFailedAt = Date.now(); console.warn('Could not load older weeks', err); })
+    .then(() => { historyLoading = null; if (after) after(); });
+  return true;
+}
+
+// A job's full history (job expansion table)
+function loadJobHistory(id, after) {
+  id = String(id);
+  if (!histEntriesFrom || historyJobsLoaded.has(id) || previewWorker) return false;
+  historyJobsLoaded.add(id);
+  api('getHistory', { jobId: id }).then(data => { if (data && data.success) mergeHistory_(data); if (after) after(); })
+    .catch(err => { historyJobsLoaded.delete(id); console.warn('Could not load job history', err); });
+  return true;
+}
+
+function ensureHistory(from, withSchedule) {
+  return new Promise(res => { if (!loadHistory(from, withSchedule, res)) res(); });
+}
+
+function historyNote(from) {
+  return historyLoading && historyNeeded(from, false) ? '<div class="text-muted" style="padding:6px 0;font-size:0.85em;">Loading older entries...</div>' : '';
+}
+
 function setCodeListsFromData(data) {
   serverJobHours = data && data.jobHours && typeof data.jobHours === 'object' ? data.jobHours : null;
   setPhotoCountsFromData(data);
@@ -8426,7 +8568,7 @@ function initWOForm() {
   if (banner) {
     banner.style.display = holding ? '' : 'none';
     if (holding) {
-      const hrs = entries.filter(e => String(e.jobId) === holding.id).reduce((t, e) => t + (parseFloat(e.hours) || 0), 0);
+      const hrs = jobHoursTotal(holding.id);
       banner.textContent = 'Temporary WO raised by ' + (holding.reportedBy || 'a worker') + (holding.reportedDate ? ' on ' + fmtUKDate(holding.reportedDate) : '') + ': "' + holding.description + '". ' + (hrs ? fmtHrs(hrs) + 'h logged so far will move to the new WO.' : 'No hours logged against it yet.');
     }
   }
@@ -8671,7 +8813,7 @@ function openHoldLinkModal(id) {
   if (!hold) return;
   holdLinkId = id;
   document.getElementById('hold-link-id').textContent = id;
-  const hrs = entries.filter(e => String(e.jobId) === id).reduce((t, e) => t + (parseFloat(e.hours) || 0), 0);
+  const hrs = jobHoursTotal(id);
   document.getElementById('hold-link-info').textContent = 'Raised by ' + (hold.reportedBy || '—') + ' · ' + propLabel(hold.property, 50) + ' · "' + hold.description + '" · ' + fmtHrs(hrs) + 'h logged';
   const real = jobs.filter(j => !jobIsHolding(j)).sort(woNumberDesc);
   const opt = j => `<option value="${escWO(j.id)}">${escWO(j.id)}${j.open ? '' : ' (closed)'} · ${escWO(propLabel(j.property, 40))} · ${escWO(String(j.description || '').slice(0, 50))}</option>`;
@@ -9010,7 +9152,9 @@ function renderWeekApprovalsTab(targetId) {
     return;
   }
 
-  el.innerHTML = pending.map(sub => {
+  const oldestWc = normaliseDate(pending[0].weekStart);
+  const loadingOld = loadHistory(oldestWc, false, () => renderWeekApprovalsTab(targetId));
+  el.innerHTML = (loadingOld ? historyNote(oldestWc) : '') + pending.map(sub => {
     const wc = normaliseDate(sub.weekStart);
     const weekEntries = entries.filter(e => e.worker === sub.worker && !e.isOvertime && (() => {
       const d = normaliseDate(e.date);
