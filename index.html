@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-122 (Comms team: CWO / CRWO, office tabs inside the worker login, hidden from main office) -->
+<!-- BUILD MARKER: NB-123 (Comms sign-in always uses its own token; ends any office session in the window) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -1611,7 +1611,7 @@ window.addEventListener('online', () => {
 
 // Signed session tokens from sign-in; every call carries one
 let workerToken = '';
-function currentToken() { return (currentOfficeUser && officeToken) || workerToken || officeToken || ''; }
+function currentToken() { return commsRole ? (workerToken || '') : ((currentOfficeUser && officeToken) || workerToken || officeToken || ''); }
 function readWorkerTokens() { try { return JSON.parse(localStorage.getItem('workerTokens') || '{}'); } catch (e) { return {}; } }
 function saveWorkerToken(name, token) {
   if (!token) return;
@@ -1686,6 +1686,11 @@ function commsTabAllowed(t) { return COMMS_TABS.includes(t) || (commsRole === 'C
 
 function applyCommsMode(role) {
   const on = !!role && !previewWorker;
+  // A Comms sign-in replaces any office sign-in left open in this window, so every request goes as them
+  if (on && currentOfficeUser) {
+    currentOfficeUser = null; officeToken = ''; officeUser = null;
+    stopReminderTimer();
+  }
   commsRole = on ? role : '';
   COMMS_OFFICE_TABS.forEach(t => { const b = document.getElementById('wtab-c-' + t); if (b) b.style.display = on && commsTabAllowed(t) ? '' : 'none'; });
   const nw = document.getElementById('notif-wrap'); if (nw) nw.style.display = on ? 'none' : '';
