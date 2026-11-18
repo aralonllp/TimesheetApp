@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-123 (Comms sign-in always uses its own token; ends any office session in the window)-->
+<!-- BUILD MARKER: NB-124 (Overtime requests stay on screen through a refresh that started before they saved) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -1578,6 +1578,25 @@ let isSubmittingMultiAdd = false;
 // window after creation and re-injected if a poll's snapshot is missing them.
 const RECENT_ENTRY_WINDOW_MS = 3 * 60 * 1000; // 3 minutes
 let recentlyCreatedEntries = [];
+// Same idea for overtime requests: a refresh that started before the request was saved
+// must not make it vanish from the screen until the next one.
+let recentOvertime = [];
+function trackRecentOvertime(req) {
+  recentOvertime.push({ req, at: Date.now() });
+  recentOvertime = recentOvertime.filter(r => Date.now() - r.at < RECENT_ENTRY_WINDOW_MS);
+}
+function withRecentOvertime(list) {
+  list = list.slice();
+  recentOvertime = recentOvertime.filter(r => Date.now() - r.at < RECENT_ENTRY_WINDOW_MS);
+  const ids = new Set(list.map(o => String(o.id)));
+  recentOvertime.forEach(r => {
+    const i = list.findIndex(o => String(o.id) === String(r.req.id));
+    if (i === -1) { list.push(r.req); ids.add(String(r.req.id)); }
+    else if (list[i].status === 'pending' && r.req.status && r.req.status !== 'pending') list[i] = { ...list[i], ...r.req };
+  });
+  syncQueue.forEach(q => { const o = q.payload && q.payload.request; if (q.action === 'saveOvertimeRequest' && o && !ids.has(String(o.id))) { list.push(o); ids.add(String(o.id)); } });
+  return list;
+}
 function trackRecentEntry(entry) {
   recentlyCreatedEntries.push({ entry, at: Date.now() });
   recentlyCreatedEntries = recentlyCreatedEntries.filter(r => Date.now() - r.at < RECENT_ENTRY_WINDOW_MS);
@@ -1873,7 +1892,7 @@ function loadInitialData() {
     setScheduleFromData(data);
     weekSubmissions = data.weekSubmissions || [];
     absenceTypes = (data.absenceTypes || []);
-    overtimeRequests = (data.overtimeRequests || []);
+    overtimeRequests = withRecentOvertime(data.overtimeRequests || []);
     overtimeRequests = overtimeRequests.map(o => {
       if (o.property && o.description) return o;
       const job = jobs.find(j => j.id === o.jobId) || recurringJobs.find(j => j.id === o.jobId);
@@ -2289,7 +2308,7 @@ async function pollJobs(preloaded) {
     });
     recurringJobs = withRecentRecurring((data.recurringJobs || recurringJobs).map(j => ({ ...j, assignedTo: String(j.assignedTo || '') })));
     absenceTypes = data.absenceTypes || absenceTypes;
-    overtimeRequests = data.overtimeRequests || overtimeRequests;
+    overtimeRequests = withRecentOvertime(data.overtimeRequests || overtimeRequests);
     if (data.properties) setPropertiesFromData(data.properties);
     setCodeListsFromData(data);
     setScheduleFromData(data);
@@ -2580,6 +2599,7 @@ async function confirmOvertime() {
   isSubmittingOvertime = true;
   try {
     overtimeRequests.push(otRequest);
+    trackRecentOvertime(otRequest);
     localStorage.setItem('overtimeRequests', JSON.stringify(overtimeRequests));
     if (normalPart) {
       entries.push(normalPart); trackRecentEntry(normalPart);
@@ -3406,7 +3426,7 @@ async function refreshOfficeNow() {
     setScheduleFromData(data);
     weekSubmissions = data.weekSubmissions || weekSubmissions;
       absenceTypes = data.absenceTypes || [];
-      overtimeRequests = data.overtimeRequests || [];
+      overtimeRequests = withRecentOvertime(data.overtimeRequests || []);
     overtimeRequests = overtimeRequests.map(o => {
       if (o.property && o.description) return o;
       const job = jobs.find(j => j.id === o.jobId) || recurringJobs.find(j => j.id === o.jobId);
@@ -5184,6 +5204,7 @@ async function officeReviewOvertime(id, status) {
     overtimeRequests[idx].reviewedBy = reviewedBy;
     overtimeRequests[idx].reviewedAt = new Date().toISOString();
     overtimeRequests[idx].reviewComment = reviewComment;
+    trackRecentOvertime({ ...overtimeRequests[idx] });
   }
   localStorage.setItem('overtimeRequests', JSON.stringify(overtimeRequests));
 
