@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-125 (Comms: same width, header and tab order on the worker and office screens) -->
+<!-- BUILD MARKER: NB-126 (Completing a holding WO: Reported By is the office member, not the worker) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -8915,7 +8915,7 @@ function initWOForm() {
   document.getElementById('otab-wocreate').textContent = editing ? 'Edit ' + editing.id : holding ? 'Complete ' + holding.id : 'WO Creation';
   document.getElementById('wo-next-id').textContent = editing ? editing.id : nextWOId();
   const repDate = editing ? (editing.reportedDate || '') : holding ? (holding.reportedDate || '') : localDateStr(new Date());
-  const repBy = editing ? (editing.reportedBy || '') : holding ? (holding.reportedBy || '') : officeUserInitials();
+  const repBy = editing ? (editing.reportedBy || '') : officeUserInitials();
   document.getElementById('wo-meta').textContent = (editing || holding ? 'Reported ' : 'Reporting ') + (repDate ? fmtUKDate(repDate) : '—') + (repBy ? ' by ' + repBy : '');
   const banner = document.getElementById('wo-hold-banner');
   if (banner) {
@@ -9330,7 +9330,7 @@ async function createWorkOrder() {
     try {
       const res = await api('resolveHoldingJob', { holdId: holdingJob.id, job: { ...job, updatedBy: officeUserInitials() }, performedBy: officeUserName() });
       if (!res || !res.id || res.mode !== 'complete') throw new Error('The Apps Script is still running the previous version — publish a new deployment version and try again.');
-      const created = { ...holdingJob, ...job, ...(res.job || {}), id: res.id, holding: false, open: holdingJob.open };
+      const created = { ...holdingJob, ...job, ...(res.job || {}), id: res.id, holding: false, open: holdingJob.open, reportedDate: holdingJob.reportedDate || job.reportedDate };
       delete created.performedBy;
       applyHoldingResolved(holdingJob.id, created.id, created);
       const raiser = holdingJob.reportedBy;
