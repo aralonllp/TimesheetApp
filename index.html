@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-121 (Schedule: Change worker on a slot; scheduled jobs can be logged by that worker) -->
+<!-- BUILD MARKER: NB-122 (Comms team: CWO / CRWO, office tabs inside the worker login, hidden from main office) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -692,6 +692,12 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
         <button class="active" id="wtab-log" onclick="switchWorkerTab('log')">Log Time</button>
         <button id="wtab-myweek" onclick="switchWorkerTab('myweek')">My Week</button>
         <button id="wtab-myjobs" onclick="switchWorkerTab('myjobs')">My Jobs</button>
+        <button id="wtab-c-wocreate" class="comms-tab" style="display:none;" onclick="commsGo('wocreate')">WO Creation</button>
+        <button id="wtab-c-jobs" class="comms-tab" style="display:none;" onclick="commsGo('jobs')">Jobs</button>
+        <button id="wtab-c-entries" class="comms-tab" style="display:none;" onclick="commsGo('entries')">Time Entries</button>
+        <button id="wtab-c-overtime" class="comms-tab" style="display:none;" onclick="commsGo('overtime')">Overtime</button>
+        <button id="wtab-c-weekapprovals" class="comms-tab" style="display:none;" onclick="commsGo('weekapprovals')">Weekly Approvals</button>
+        <button id="wtab-c-recurring" class="comms-tab" style="display:none;" onclick="commsGo('recurring')">Recurring Jobs</button>
       </div>
 
       <div id="worker-myweek-section" style="display:none;">
@@ -737,7 +743,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
             <p class="text-muted" id="job-desc"></p>
             <p class="text-muted" id="job-assigned" style="font-size:12px;margin-top:4px;"></p>
           </div>
-          <button type="button" class="hold-raise" onclick="openHoldModal()">Job not listed? Raise a temporary WO</button>
+          <button type="button" class="hold-raise" id="hold-raise-link" onclick="openHoldModal()">Job not listed? Raise a temporary WO</button>
           <div class="grid2">
             <div>
               <label>Date</label>
@@ -783,10 +789,10 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
     <div id="office-screen" style="display:none;">
       <div class="row-between form-section">
         <div>
-          <p class="section-heading">Office dashboard</p>
+          <p class="section-heading" id="office-heading">Office dashboard</p>
         </div>
         <div style="display:flex;align-items:center;gap:10px;">
-          <span class="text-muted" style="font-size:13px;">Logged in as <strong id="office-user-display"></strong> · <button type="button" class="hold-raise" style="margin:0;font-size:13px;" onclick="openPasswordChange(false)">Change password</button></span>
+          <span class="text-muted" style="font-size:13px;">Logged in as <strong id="office-user-display"></strong><span id="office-pw-link"> · <button type="button" class="hold-raise" style="margin:0;font-size:13px;" onclick="openPasswordChange(false)">Change password</button></span></span>
           <div class="sync-status">
             <span class="sync-dot" id="office-sync-dot"></span>
             <span id="office-sync-text">—</span>
@@ -797,6 +803,8 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 
       <!-- Office sub-navigation -->
       <div class="office-subnav">
+        <button id="otab-c-log" style="display:none;" onclick="commsGo('log')">Log Time</button>
+        <button id="otab-c-myjobs" style="display:none;" onclick="commsGo('myjobs')">My Jobs</button>
         <button class="active" onclick="switchOfficeTab('schedule')" id="otab-schedule">Schedule</button>
         <button onclick="switchOfficeTab('entries')" id="otab-entries">Time Entries</button>
         <button onclick="switchOfficeTab('wocreate')" id="otab-wocreate">WO Creation</button>       
@@ -1659,11 +1667,89 @@ function showLoginNote(id, text) {
 const WORKER_IDLE_MS = 30 * 60 * 1000;
 let workerLastActive = Date.now();
 ['pointerdown', 'keydown', 'touchstart', 'wheel'].forEach(ev => document.addEventListener(ev, () => { workerLastActive = Date.now(); }, { passive: true, capture: true }));
-setInterval(() => { if (currentWorker && !previewWorker && Date.now() - workerLastActive >= WORKER_IDLE_MS) workerLogout(); }, 60000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden && currentWorker && !previewWorker && Date.now() - workerLastActive >= WORKER_IDLE_MS) workerLogout(); });
+setInterval(() => { if (currentWorker && !previewWorker && !commsRole && Date.now() - workerLastActive >= WORKER_IDLE_MS) workerLogout(); }, 60000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && currentWorker && !previewWorker && !commsRole && Date.now() - workerLastActive >= WORKER_IDLE_MS) workerLogout(); });
 
 const API_TIMEOUT_MS = 60000;
 let workerLastLoadOk = 0;
+
+// ── Comms team ──────────────────────────────────────────────────
+// Comms / Comms Manager sign in as workers and also get a few office tabs, limited
+// by the server to Comms records (CWO / CRWO numbers). No schedule or notifications.
+let commsRole = '';
+const COMMS_TABS = ['wocreate', 'jobs', 'entries', 'recurring'];
+const COMMS_MANAGER_TABS = ['overtime', 'weekapprovals'];
+const COMMS_OFFICE_TABS = ['wocreate', 'jobs', 'entries', 'overtime', 'weekapprovals', 'recurring'];
+function isCommsWorker(w) { return !!w && /^comms/i.test(String(w.team || '')); }
+function isCommsJobId(id) { return /^CR?WO\d+$/i.test(String(id || '').trim()); }
+function commsTabAllowed(t) { return COMMS_TABS.includes(t) || (commsRole === 'Comms Manager' && COMMS_MANAGER_TABS.includes(t)); }
+
+function applyCommsMode(role) {
+  const on = !!role && !previewWorker;
+  commsRole = on ? role : '';
+  COMMS_OFFICE_TABS.forEach(t => { const b = document.getElementById('wtab-c-' + t); if (b) b.style.display = on && commsTabAllowed(t) ? '' : 'none'; });
+  const nw = document.getElementById('notif-wrap'); if (nw) nw.style.display = on ? 'none' : '';
+  const hl = document.getElementById('hold-raise-link'); if (hl) hl.style.display = on ? 'none' : '';
+  if (on) document.getElementById('wtab-myweek').style.display = 'none';
+  const nav = document.querySelector('.nav'); if (nav) nav.style.display = on ? 'none' : '';
+  document.getElementById('otab-c-log').style.display = on ? '' : 'none';
+  document.getElementById('otab-c-myjobs').style.display = on ? '' : 'none';
+  document.querySelectorAll('[id^="otab-"]').forEach(b => {
+    if (/^otab-c-/.test(b.id)) return;
+    const t = b.id.slice(5);
+    if (on) b.style.display = commsTabAllowed(t) ? '' : 'none';
+    else if (t !== 'viewas') b.style.display = '';
+  });
+  ['office-add-entry-toggle', 'office-multi-add-toggle'].forEach(id => { const el = document.getElementById(id); if (el) el.style.display = on ? 'none' : ''; });
+  document.querySelectorAll('#office-screen .office-subnav button').forEach(b => {
+    const t = b.id.replace(/^otab-(c-)?/, '');
+    b.style.order = on ? String(b.id === 'otab-c-log' ? 0 : b.id === 'otab-c-myjobs' ? 1 : 2 + COMMS_OFFICE_TABS.indexOf(t)) : '';
+  });
+  document.getElementById('office-heading').textContent = on ? 'Comms' : 'Office dashboard';
+  document.getElementById('office-pw-link').style.display = on ? 'none' : '';
+  document.getElementById('office-screen').classList.toggle('comms-mode', on);
+  if (on) {
+    officeUser = { username: '', name: currentWorker, initials: workerInitials(currentWorker), role: 'comms' };
+    document.getElementById('office-user-display').textContent = currentWorker;
+    document.getElementById('office-users-card').style.display = 'none';
+  } else if (officeUser && officeUser.role === 'comms') {
+    officeUser = null;
+    document.getElementById('office-screen').style.display = 'none';
+    document.getElementById('office-login-screen').style.display = 'block';
+  }
+}
+
+function commsGo(tab) {
+  if (!commsRole) return;
+  document.querySelectorAll('.comms-tab').forEach(b => b.classList.toggle('active', b.id === 'wtab-c-' + tab));
+  if (tab === 'log' || tab === 'myjobs') {
+    switchTab('worker');
+    switchWorkerTab(tab);
+    return;
+  }
+  if (!commsTabAllowed(tab)) return;
+  if (document.getElementById('office-sync-text').textContent === '—') setSyncStatus('office', 'synced', document.getElementById('worker-sync-text').textContent);
+  switchTab('office');
+  document.getElementById('office-login-screen').style.display = 'none';
+  document.getElementById('office-screen').style.display = 'block';
+  renderOfficeDashboard();
+  switchOfficeTab(tab);
+}
+
+// Comms office tabs refresh with the worker's minute-by-minute load, but never mid-typing
+function commsRenderOffice() {
+  if (!commsRole) return;
+  setSyncStatus('office', 'synced', 'Updated ' + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }));
+  if (!document.getElementById('view-office').classList.contains('active')) return;
+  const a = document.activeElement;
+  if (a && a.closest && a.closest('#office-screen') && /INPUT|TEXTAREA|SELECT/.test(a.tagName)) return;
+  if (document.getElementById('office-tab-wocreate').style.display === 'block') return;
+  renderOfficeDashboard();
+  const cur = COMMS_OFFICE_TABS.find(t => (document.getElementById('office-tab-' + t) || {}).style && document.getElementById('office-tab-' + t).style.display === 'block');
+  if (cur === 'overtime') renderOvertimeTab();
+  if (cur === 'weekapprovals') renderWeekApprovalsTab();
+  if (cur === 'entries') renderOfficeEntries();
+}
 // Bumped on every worker sign-in/out, so a load started for one worker is never applied to the next
 let workerSession = 0;
 function startWorkerSession(name) {
@@ -1989,6 +2075,7 @@ async function workerLogin() {
     }
     await rememberPin(initials, res.name, pin);
     saveWorkerToken(res.name, res.token);
+    loginTeam = res.team || '';
     finishWorkerLogin(res.name);
   } catch (err) {
     showLoginNote('worker-login-note', '');
@@ -2103,6 +2190,7 @@ async function confirmPinResetUI() {
   }
 }
 
+let loginTeam = '';
 function finishWorkerLogin(name) {
   const w = String(name || '').trim().replace(/\s+/g, ' ');
   workerLastActive = Date.now();
@@ -2120,6 +2208,8 @@ function finishWorkerLogin(name) {
   wkWeekStart = mondayOf(new Date());
   const meW = workers.find(x => x.name === currentWorker);
   document.getElementById('wtab-myweek').style.display = meW && !isOnSchedule(meW) ? 'none' : '';
+  applyCommsMode(loginTeam && /^comms/i.test(loginTeam) ? loginTeam : (isCommsWorker(meW) ? meW.team : ''));
+  loginTeam = '';
   document.getElementById('wjobs-search').value = '';
   switchWorkerTab('log');
   updateNotifBadge();
@@ -2139,6 +2229,7 @@ function finishWorkerLogin(name) {
 
 function workerLogout() {
   if (previewWorker) { exitWorkerPreview(); return; }
+  if (commsRole) { applyCommsMode(''); switchTab('worker'); }
   currentWorker = null;
   workerToken = '';
   startWorkerSession('');
@@ -2224,6 +2315,7 @@ async function pollJobs(preloaded) {
     const photoBusy = photoUploading || (document.activeElement && document.activeElement.closest && document.activeElement.closest('.job-photos'));
     if (!photoBusy && document.getElementById('worker-myjobs-section').style.display !== 'none') renderWorkerJobs();
     if (document.getElementById('worker-myweek-section').style.display !== 'none') renderWorkerWeek();
+    if (!previewWorker && (data.commsRole || commsRole)) { if ((data.commsRole || '') !== commsRole) applyCommsMode(data.commsRole || ''); commsRenderOffice(); }
     setWorkerLoadBanner('', '');
     workerLastLoadOk = Date.now();
     if (previewWorker) { setSyncStatus('worker', 'synced', 'Read-only view'); return; }
@@ -2295,6 +2387,15 @@ function populateJobDropdown() {
   const onSched = new Set(schedule.filter(x => x.type === 'job' && x.worker === currentWorker && x.jobId).map(x => String(x.jobId)));
   const schedJobs = [...open.filter(j => onSched.has(String(j.id))), ...recurringJobs.filter(j => j.active !== false && j.active !== 'FALSE' && onSched.has(String(j.id)))]
     .filter(j => !listed.has(String(j.id)));
+  if (commsRole) {
+    schedJobs.forEach(j => listed.add(String(j.id)));
+    const otherComms = [...open.filter(j => !listed.has(String(j.id)) && !jobIsHolding(j)), ...recurringJobs.filter(j => j.active !== false && j.active !== 'FALSE' && !listed.has(String(j.id)))];
+    if (otherComms.length) {
+      html += `<optgroup label="Other Comms jobs">`;
+      html += otherComms.map(j => `<option value="${j.id}">${j.id} · ${propLabel(j.property) ? propLabel(j.property) + ' · ' : ''}${escWO(j.description && j.description.length > 60 ? j.description.slice(0, 60) + '…' : (j.description || ''))}</option>`).join('');
+      html += `</optgroup>`;
+    }
+  }
   if (schedJobs.length) {
     html += `<optgroup label="On your schedule">`;
     html += schedJobs.map(j => `<option value="${j.id}">${j.id} · ${propLabel(j.property) ? propLabel(j.property) + ' · ' : ''}${escWO(j.description && j.description.length > 60 ? j.description.slice(0, 60) + '…' : (j.description || ''))}</option>`).join('');
@@ -3232,6 +3333,7 @@ async function submitNewPassword() {
 }
 
 function officeLogout() {
+  if (commsRole) { workerLogout(); return; }
   if (previewWorker) {
     previewWorker = null;
     currentWorker = null;
@@ -3255,6 +3357,7 @@ function officeLogout() {
 // and a refresh asked for mid-flight runs once more afterwards so it sees the latest.
 let officeRefreshRunning = null, officeRefreshQueued = null;
 function refreshOffice() {
+  if (commsRole) return pollJobs().then(() => commsRenderOffice());
   if (!officeRefreshRunning) {
     officeRefreshRunning = refreshOfficeNow().finally(() => { officeRefreshRunning = null; });
     return officeRefreshRunning;
@@ -3852,7 +3955,7 @@ function renderOfficeDashboard() {
   }
   const owSel = document.getElementById('oe-worker-filter');
   if (owSel) {
-    const active = workers.filter(w => w.active !== false && w.active !== 'FALSE');
+    const active = workers.filter(w => w.active !== false && w.active !== 'FALSE' && (commsRole !== 'Comms' || w.name === currentWorker));
     owSel.innerHTML = '<option value="">All workers</option>' + active.map(w => `<option value="${w.name}">${w.name}</option>`).join('');
   }
   const today = new Date();
@@ -3926,7 +4029,7 @@ function renderOfficeEntries_() {
     }
   }
 
-  const activeWorkers = workers.filter(w => w.active !== false && w.active !== 'FALSE');
+  const activeWorkers = workers.filter(w => w.active !== false && w.active !== 'FALSE' && (commsRole !== 'Comms' || w.name === currentWorker));
   const displayWorkers = workerFilter ? activeWorkers.filter(w => w.name === workerFilter) : activeWorkers;
 
   if (!displayWorkers.length) {
@@ -4200,8 +4303,9 @@ var editingRecurringId = null;
 
 function nextRecurringId() {
   let max = 0;
-  recurringJobs.forEach(j => { const m = /^RWO(\d+)$/i.exec(String(j.id || '')); if (m) max = Math.max(max, parseInt(m[1], 10)); });
-  return 'RWO' + String(max + 1).padStart(4, '0');
+  const re = commsRole ? /^CRWO(\d+)$/i : /^RWO(\d+)$/i;
+  recurringJobs.forEach(j => { const m = re.exec(String(j.id || '')); if (m) max = Math.max(max, parseInt(m[1], 10)); });
+  return (commsRole ? 'CRWO' : 'RWO') + String(max + 1).padStart(4, '0');
 }
 
 function initRecurringForm() {
@@ -4210,7 +4314,7 @@ function initRecurringForm() {
 }
 
 function recurringSortKey(j) {
-  const m = /^RWO(\d+)$/i.exec(String(j.id || ''));
+  const m = /^C?RWO(\d+)$/i.exec(String(j.id || ''));
   return m ? parseInt(m[1], 10) : 1e9;
 }
 
@@ -4368,7 +4472,7 @@ async function addRecurringJob() {
   btn.textContent = 'Creating…';
   try {
     const res = await api('saveRecurringJob', { job: { description, costCode, assignedTo: '' }, performedBy: officeUserName() });
-    if (!res || !/^RWO\d+$/i.test(String(res.id || ''))) throw new Error(RJ_OLD_SCRIPT_MSG);
+    if (!res || !/^C?RWO\d+$/i.test(String(res.id || ''))) throw new Error(RJ_OLD_SCRIPT_MSG);
     const created = { id: res.id, property: '', description, costCode, active: true, assignedTo: '' };
     recurringJobs.push(created);
     noteRecurringSaved(res.id, created);
@@ -5207,14 +5311,45 @@ function renderWorkersList() {
           <input type="text" value="${escWO(workerInitials(w.name))}" maxlength="5" class="initials-input" style="width:64px;font-size:12px;padding:4px 6px;" oninput="this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g,'')" onchange="setWorkerInitialsUI('${w.name.replace(/'/g, "\\'")}', this)">
         </label>
         ${w.mustChangePin ? '<span class="hold-tag" title="Signs in with a temporary PIN and picks their own">Temp PIN</span>' : ''}
+        ${isAdminUser() ? `<label class="text-muted" style="font-size:12px;margin:0;display:flex;align-items:center;gap:4px;font-weight:400;">Team
+          <select style="font-size:12px;padding:4px 6px;width:auto;" onchange="setWorkerTeamUI('${w.name.replace(/'/g, "\\'")}', this)">
+            ${['General', 'Comms', 'Comms Manager'].map(t => `<option${(w.team || 'General') === t ? ' selected' : ''}>${t}</option>`).join('')}
+          </select></label>` : ''}
         <button class="btn btn-sm" onclick="resetPin('${w.name.replace(/'/g, "\\'")}', this)">Reset PIN</button>
-        <button class="btn btn-sm" onclick="toggleWorkerOnSchedule('${w.name.replace(/'/g, "\\'")}')">${isOnSchedule(w) ? 'On schedule ✓' : 'Off schedule'}</button>
+        ${isCommsWorker(w) ? '' : `<button class="btn btn-sm" onclick="toggleWorkerOnSchedule('${w.name.replace(/'/g, "\\'")}')">${isOnSchedule(w) ? 'On schedule ✓' : 'Off schedule'}</button>
         <button class="btn btn-sm" onclick="toggleWorkerWeekendCover('${w.name.replace(/'/g, "\\'")}')">${isWeekendCoverWorker(w) ? 'Weekend rota ✓' : 'Not on weekend rota'}</button>
-        <button class="btn btn-sm" title="Whether office users can pick them on the Notifications tab" onclick="toggleWorkerOfficeNotify('${w.name.replace(/'/g, "\\'")}')">${takesOfficeMessages(w) ? 'Office messages ✓' : 'No office messages'}</button>
+        <button class="btn btn-sm" title="Whether office users can pick them on the Notifications tab" onclick="toggleWorkerOfficeNotify('${w.name.replace(/'/g, "\\'")}')">${takesOfficeMessages(w) ? 'Office messages ✓' : 'No office messages'}</button>`}
         <button class="btn btn-sm" onclick="toggleWorker('${w.name.replace(/'/g, "\\'")}', ${active})">${active ? 'Deactivate' : 'Reactivate'}</button>
       </div>
     </div>`;
   }).join('');
+}
+
+function isAdminUser() { return !!officeUser && officeUser.role === 'admin'; }
+
+async function setWorkerTeamUI(name, sel) {
+  const w = workers.find(x => x.name === name);
+  const prev = (w && w.team) || 'General';
+  const team = sel.value;
+  if (team === prev) return;
+  const msg = team === 'General' ? 'Move ' + name + ' back to the main Labour Pool?' :
+    'Move ' + name + ' to ' + team + '?\n\nThey come off the schedule, weekend rota and office messages, and only see Comms jobs (CWO / CRWO). CBD and PC will no longer see them or their time.';
+  if (!confirm(msg)) { sel.value = prev; return; }
+  sel.disabled = true;
+  try {
+    const res = await api('setWorkerTeam', { name, team, token: officeToken });
+    if (!res || !res.success) throw new Error((res && res.error) || 'The Apps Script is still running the previous version — publish a new deployment version.');
+    if (w) { w.team = res.team; if (isCommsWorker(w)) { w.onSchedule = false; w.officeNotify = false; w.weekendCover = false; } }
+    localStorage.setItem('workers', JSON.stringify(workers));
+    renderWorkersList();
+    setSyncStatus('office', 'synced', name + ' is now ' + res.team);
+    refreshOffice();
+  } catch (err) {
+    sel.value = prev;
+    alert('Could not change the team: ' + (err.message || err));
+  } finally {
+    sel.disabled = false;
+  }
 }
 
 function tempBox(html) { return `<div class="temp-box">${html}</div>`; }
@@ -6528,7 +6663,7 @@ async function runPrevDayHoursReminder(src) {
   const srcSchedule = (src && src.schedule) || schedule;
   const nm = v => String(v || '').trim().replace(/\s+/g, ' ');
   const missing = [];
-  srcWorkers.filter(w => w.active !== false && w.active !== 'FALSE').forEach(w => {
+  srcWorkers.filter(w => w.active !== false && w.active !== 'FALSE' && !isCommsWorker(w)).forEach(w => {
     const name = nm(w.name);
     const st = srcSchedule.find(x => x.date === ds && nm(x.worker) === name && x.type === 'status' && NON_WORKING_STATUSES.includes(x.status));
     if (st) return;
@@ -8693,12 +8828,14 @@ function officeUserName() { return officeUser ? officeUser.name : ''; }
 function officeUserInitials() { return officeUser ? officeUser.initials : ''; }
 
 function nextWOId() {
+  const pre = commsRole ? 'CWO' : 'WO';
+  const re = commsRole ? /^CWO(\d+)$/i : /^WO(\d+)$/i;
   let max = 0;
   jobs.forEach(j => {
-    const m = /^WO(\d+)$/i.exec(String(j.id || '').trim());
+    const m = re.exec(String(j.id || '').trim());
     if (m) max = Math.max(max, parseInt(m[1], 10));
   });
-  return 'WO' + String(max + 1).padStart(5, '0');
+  return pre + String(max + 1).padStart(5, '0');
 }
 
 function woSuggestedEnd(code, startStr) {
