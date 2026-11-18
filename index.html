@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-120 (WO creation: capital expenditure tick box; Capital tag and filter on Jobs) -->
+<!-- BUILD MARKER: NB-121 (Schedule: Change worker on a slot; scheduled jobs can be logged by that worker) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -979,11 +979,19 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
           <div id="sched-move-wrap" style="display:none;margin-top:14px;padding-top:12px;border-top:0.5px solid var(--color-border-tertiary);">
             <div style="display:flex;gap:8px;flex-wrap:wrap;">
               <button type="button" class="btn btn-sm" id="sched-move-btn" onclick="schedMoveToggle()">Move to next week</button>
+              <button type="button" class="btn btn-sm" id="sched-worker-btn" onclick="schedWorkerToggle()">Change worker</button>
               <button type="button" class="btn btn-sm" id="sched-close-job" onclick="schedCloseJob()" style="color:#1e6b34;border-color:#a9d8b8;">Close Job</button>
             </div>
             <div id="sched-move-box" style="display:none;margin-top:8px;">
               <p class="wo-hint" style="margin-top:0;">Which day next week?</p>
               <div class="wo-chips" id="sched-move-days"></div>
+            </div>
+            <div id="sched-worker-box" style="display:none;margin-top:8px;">
+              <p class="wo-hint" style="margin-top:0;">Who is doing it instead?</p>
+              <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <select id="sched-worker-select" style="max-width:240px;"></select>
+                <button type="button" class="btn btn-sm btn-primary" onclick="schedChangeWorker()">Move</button>
+              </div>
             </div>
           </div>
           <div class="form-footer" style="display:flex;gap:8px;justify-content:space-between;margin-top:1.25rem;">
@@ -2281,6 +2289,15 @@ function populateJobDropdown() {
   if (assignedRecurring.length) {
     html += `<optgroup label="Recurring jobs">`;
     html += assignedRecurring.map(j => `<option value="${j.id}">${j.id} · ${escWO(j.description || '')}</option>`).join('');
+    html += `</optgroup>`;
+  }
+  const listed = new Set([...mine, ...assignedRecurring].map(j => String(j.id)));
+  const onSched = new Set(schedule.filter(x => x.type === 'job' && x.worker === currentWorker && x.jobId).map(x => String(x.jobId)));
+  const schedJobs = [...open.filter(j => onSched.has(String(j.id))), ...recurringJobs.filter(j => j.active !== false && j.active !== 'FALSE' && onSched.has(String(j.id)))]
+    .filter(j => !listed.has(String(j.id)));
+  if (schedJobs.length) {
+    html += `<optgroup label="On your schedule">`;
+    html += schedJobs.map(j => `<option value="${j.id}">${j.id} · ${propLabel(j.property) ? propLabel(j.property) + ' · ' : ''}${escWO(j.description && j.description.length > 60 ? j.description.slice(0, 60) + '…' : (j.description || ''))}</option>`).join('');
     html += `</optgroup>`;
   }
   const recentlyClosed = jobs.filter(j => !j.open && isJobLoggable(j) && expandAssignedTo(j.assignedTo).includes(currentWorker)).sort(woNumberDesc);
@@ -7352,6 +7369,12 @@ function schedSetupMove(it) {
   closeBtn.style.display = canClose ? '' : 'none';
   closeBtn.textContent = j && jobPending(j) ? 'Confirm closed' : 'Close Job';
   document.getElementById('sched-move-btn').style.display = show ? '' : 'none';
+  const others = it && it.type === 'job' && it.id ? scheduleOps().filter(w => w.name !== it.worker) : [];
+  const canChange = show && others.length > 0;
+  document.getElementById('sched-worker-btn').style.display = canChange ? '' : 'none';
+  document.getElementById('sched-worker-box').style.display = 'none';
+  document.getElementById('sched-worker-select').innerHTML = '<option value="">Select a worker...</option>' +
+    others.map(w => `<option value="${escWO(w.name)}">${escWO(w.name)}</option>`).join('');
   wrap.style.display = show || canClose ? '' : 'none';
   document.getElementById('sched-move-box').style.display = 'none';
   if (!show) return;
@@ -7375,6 +7398,50 @@ async function schedCloseJob() {
 function schedMoveToggle() {
   const box = document.getElementById('sched-move-box');
   box.style.display = box.style.display === 'none' ? '' : 'none';
+  document.getElementById('sched-worker-box').style.display = 'none';
+}
+
+function schedWorkerToggle() {
+  const box = document.getElementById('sched-worker-box');
+  box.style.display = box.style.display === 'none' ? '' : 'none';
+  document.getElementById('sched-move-box').style.display = 'none';
+}
+
+// Hand one day's slot to another worker (someone is off and a colleague covers it)
+function schedChangeWorker() {
+  if (!schedModalState || !schedModalState.id) return;
+  const cur = schedule.find(x => x.id === schedModalState.id);
+  const to = document.getElementById('sched-worker-select').value;
+  if (!cur || !to) { if (!to) alert('Pick the worker who is doing it instead.'); return; }
+  if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to change the schedule'); return; }
+  const fromIni = workerInitials(cur.worker) || cur.worker, toIni = workerInitials(to) || to;
+  const logged = entries.filter(e => e.worker === cur.worker && String(e.jobId) === String(cur.jobId) && normaliseDate(e.date) === cur.date)
+    .reduce((t, e) => t + (parseFloat(e.hours) || 0), 0);
+  const already = schedule.find(x => x.type === 'job' && x.worker === to && x.date === cur.date && String(x.jobId) === String(cur.jobId) && x.id !== cur.id);
+  let msg = 'Move ' + cur.jobId + ' on ' + fmtUKDate(cur.date) + ' from ' + fromIni + ' to ' + toIni + '?';
+  if (already) msg += '\n\n' + toIni + ' already has it that day, so it will just be taken off ' + fromIni + "'s schedule.";
+  if (logged > 0) msg += '\n\n' + fromIni + ' has already logged ' + logged + 'h on it that day. Those hours stay with ' + fromIni + ' and will show as Off-Schedule Work.';
+  if (!confirm(msg)) return;
+  const previous = [schedPlainItem(cur)];
+  closeSchedModal();
+  if (already) {
+    schedCommit([], previous, [cur.id]);
+  } else {
+    const sort = schedule.filter(x => x.worker === to && x.date === cur.date).reduce((m, x) => Math.max(m, parseFloat(x.sort) || 0), 0) + 1;
+    schedCommit([{ ...schedPlainItem(cur), worker: to, sort }], previous, []);
+    const sj = schedSlotJob(cur);
+    const d = new Date(cur.date + 'T00:00:00');
+    const day = SCHED_DAY_NAMES[(d.getDay() + 6) % 7] + ' ' + fmtUKDate(cur.date);
+    const job = sj && sj.job ? sj.job : null;
+    notifyWorker(to, {
+      title: 'Added to your schedule: ' + cur.jobId,
+      message: [day, (cur.property || (job && job.property) || ''), (job && job.description) || ''].filter(Boolean).join('\n') + '\nCovering for ' + fromIni,
+      priority: job && !sj.recurring ? ntfyPriorityForWO(job.priority) : 4,
+      tags: ['calendar']
+    });
+    flushNtfyQueue();
+  }
+  setSyncStatus('office', 'synced', cur.jobId + ' moved from ' + fromIni + ' to ' + toIni);
 }
 
 function schedMoveTo(newDate) {
