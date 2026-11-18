@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-124 (Overtime requests stay on screen through a refresh that started before they saved) -->
+<!-- BUILD MARKER: NB-125 (Comms: same width, header and tab order on the worker and office screens) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -492,6 +492,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 .app { padding: 0 1rem 2rem; max-width: 980px; margin: 0 auto; }
 .app.worker-wide { max-width: 1200px; }
 .app.office-wide { max-width: 1800px; }
+.app.comms-wide, .app.comms-wide.worker-wide, .app.comms-wide.office-wide { max-width: 1500px; }
 .sync-status { font-size: 12px; color: var(--color-text-secondary); display: flex; align-items: center; gap: 6px; margin-top: 8px; }
 .sync-dot { width: 8px; height: 8px; border-radius: 50%; background: #ccc; display: inline-block; }
 .sync-dot.synced { background: #1a7a4a; }
@@ -524,6 +525,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 
   .app { padding: 0 1.5rem 3rem; max-width: 1200px; }
   .app.worker-wide { max-width: none; padding: 0 1rem 3rem; }
+  .app.comms-wide, .app.comms-wide.worker-wide, .app.comms-wide.office-wide { max-width: none; }
 
   select, input[type="date"], input[type="number"], input[type="password"], textarea {
     font-size: 16px;
@@ -787,7 +789,20 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
     </div>
 
     <div id="office-screen" style="display:none;">
-      <div class="row-between form-section">
+      <div class="row-between form-section" id="comms-office-head" style="display:none;">
+        <div>
+          <p class="screen-title" id="comms-office-greeting">Hello</p>
+          <p class="text-muted" id="comms-office-subtitle">Comms</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div class="sync-status">
+            <span class="sync-dot" id="comms-sync-dot"></span>
+            <span id="comms-sync-text">—</span>
+          </div>
+          <button class="btn" onclick="workerLogout()">Sign out</button>
+        </div>
+      </div>
+      <div class="row-between form-section" id="office-head">
         <div>
           <p class="section-heading" id="office-heading">Office dashboard</p>
         </div>
@@ -1730,6 +1745,10 @@ function applyCommsMode(role) {
     b.style.order = on ? String(b.id === 'otab-c-log' ? 0 : b.id === 'otab-c-myjobs' ? 1 : 2 + COMMS_OFFICE_TABS.indexOf(t)) : '';
   });
   document.getElementById('office-heading').textContent = on ? 'Comms' : 'Office dashboard';
+  document.getElementById('office-head').style.display = on ? 'none' : '';
+  document.getElementById('comms-office-head').style.display = on ? '' : 'none';
+  document.getElementById('comms-office-greeting').textContent = 'Hello, ' + (currentWorker || '');
+  document.querySelector('.app').classList.toggle('comms-wide', on);
   document.getElementById('office-pw-link').style.display = on ? 'none' : '';
   document.getElementById('office-screen').classList.toggle('comms-mode', on);
   if (on) {
@@ -1752,6 +1771,8 @@ function commsGo(tab) {
     return;
   }
   if (!commsTabAllowed(tab)) return;
+  const label = (document.getElementById('wtab-c-' + tab) || {}).textContent || '';
+  document.getElementById('comms-office-subtitle').textContent = 'Comms · ' + label;
   if (document.getElementById('office-sync-text').textContent === '—') setSyncStatus('office', 'synced', document.getElementById('worker-sync-text').textContent);
   switchTab('office');
   document.getElementById('office-login-screen').style.display = 'none';
@@ -2007,6 +2028,8 @@ function queueOrSend(action, payload) {
 // ── Sync status indicator ─────────────────────────────────────────
 
 function setSyncStatus(scope, state, text) {
+  // Comms move between the two screens, so both headers show the same latest status
+  if (commsRole && scope !== 'comms' && scope !== 'login') { ['worker', 'comms'].forEach(sc => { const d = document.getElementById(sc + '-sync-dot'), t = document.getElementById(sc + '-sync-text'); if (d && t) { d.className = 'sync-dot ' + state; t.textContent = text; } }); return; }
   const dot = document.getElementById(scope + '-sync-dot');
   const txt = document.getElementById(scope + '-sync-text');
   if (!dot || !txt) return;
@@ -2025,6 +2048,7 @@ function switchTab(tab) {
   document.getElementById('view-' + tab).classList.add('active');
   document.querySelector('.app').classList.toggle('office-wide', tab === 'office');
   document.querySelector('.app').classList.toggle('worker-wide', tab === 'worker');
+  document.querySelector('.app').classList.toggle('comms-wide', !!commsRole);
 }
 
 // ── Worker helpers ────────────────────────────────────────────────
