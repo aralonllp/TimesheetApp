@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-131 (Worker week and schedule: clear dividers between days, today blue with a black outline) -->
+<!-- BUILD MARKER: NB-132 (Worker week table: day totals, darker day dividers, no today tint) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -425,7 +425,15 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 .wk-day-head { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; margin-bottom: 6px; }
 /* Each day is its own row group: a clear line between days, today tinted blue and outlined in black */
 .week-table td.day-cell { padding: 8px 10px; }
-.week-table tbody.wd-grp + tbody.wd-grp { border-top: 2px solid #8a929c; }
+.week-table tbody.wd-grp + tbody.wd-grp { border-top: 2px solid #5c6570; }
+.week-table tr.wd-total > td { background: var(--color-background-secondary); padding: 6px 10px; font-size: 12px; vertical-align: middle; border-top: 0.5px solid var(--color-border-tertiary); }
+.week-table td.day-cell.wd-total-day { border-top: 0.5px solid var(--color-background-secondary); }
+.week-table tr.wd-total > td.wd-total-day { border-top: 0.5px solid var(--color-background-secondary); border-right: 0.5px solid var(--color-border-tertiary); }
+.week-table .wd-total-label { text-align: right; font-weight: 600; color: var(--color-text-secondary); }
+.week-table .wd-total-val { text-align: center; font-weight: 700; white-space: nowrap; }
+.week-table .wd-total-val.wk-met { color: var(--color-text-success); }
+.week-table .wd-total-val.wk-short { color: var(--color-text-warning); }
+.week-table .wd-total-target { font-weight: 400; color: var(--color-text-secondary); }
 .week-table tbody.wd-grp.wd-today, .week-table tbody.wd-grp + tbody.wd-grp.wd-today, .week-table tbody.wd-grp.wd-today + tbody.wd-grp { border-top: 2px solid var(--color-text-primary); }
 .week-table tbody.wd-today { border: 2px solid var(--color-text-primary); }
 .week-table tbody.wd-today > tr > td, .week-table tbody.wd-today > tr > td.day-cell { background: #eaf2fe; }
@@ -2985,6 +2993,22 @@ async function submitCompletedWeek(wc, btn) {
   }
 }
 
+// Day total under each day of the worker's week table, styled like the schedule's
+function weekDayTotalRow(dayStr, dayEntries) {
+  const total = dayEntries.reduce((t, e) => t + (parseFloat(e.hours) || 0), 0);
+  const dow = new Date(dayStr + 'T12:00:00').getDay();
+  const today = localDateStr(new Date());
+  const useTarget = dow >= 1 && dow <= 5 && !BANK_HOLIDAYS.includes(dayStr);
+  const target = workerDailyHours(currentWorker);
+  const cls = !useTarget || dayStr > today ? '' : total >= target ? ' wk-met' : (dayStr < today ? ' wk-short' : '');
+  return `<tr class="wd-total">
+      <td class="wd-total-day"></td>
+      <td class="wd-total-label" colspan="3">Day total</td>
+      <td class="wd-total-val${cls}">${fmtHrs(total)}h${useTarget ? ` <span class="wd-total-target">/ ${fmtHrs(target)}h</span>` : ''}</td>
+      <td colspan="2"></td>
+    </tr>`;
+}
+
 function renderWeek(wc) {
   const mine = entries.filter(e => e.worker === currentWorker);
   const weekSub = getWeekSubmission(currentWorker, wc);
@@ -3169,10 +3193,7 @@ function renderWeek(wc) {
       const statusLabel = o.status === 'pending' ? '⏱ OT Pending' : '⏱ OT Declined';
       return `
       <tr class="day-row" style="opacity:0.85;">
-        <td class="day-cell" style="vertical-align:top;">
-          <div class="day-name">${dayNames[i]}</div>
-          <div class="day-date">${fmtShortDate(dayStr)}</div>
-        </td>
+        <td class="day-cell wd-total-day" style="vertical-align:top;"></td>
         <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;vertical-align:middle;width:90px;overflow:hidden;">
           <div style="font-weight:600;">${o.jobId}</div>
           <span class="badge-amended-sm" style="${statusStyle}">${statusLabel}</span>
@@ -3191,7 +3212,7 @@ function renderWeek(wc) {
     }).join('');
 
     return entryRowsHtml + otRowsForDay;
-  }).map((html, i) => `<tbody class="wd-grp${weekDays[i] === localDateStr(new Date()) ? ' wd-today' : ''}">${html}</tbody>`).join('');
+  }).map((html, i) => `<tbody class="wd-grp">${html}${weekDayTotalRow(weekDays[i], byDay[weekDays[i]] || [])}</tbody>`).join('');
 
   return `
     <div class="week-block">
@@ -3209,8 +3230,8 @@ function renderWeek(wc) {
             <th style="width:96px;">Day</th>
             <th style="width:90px;">W/O Number</th>
             <th style="width:180px;">Property</th>
-            <th style="width:354px;">Description</th>
-            <th style="width:46px;text-align:center;">Hrs</th>
+            <th style="width:320px;">Description</th>
+            <th style="width:80px;text-align:center;">Hrs</th>
             <th style="width:220px;">Comments</th>
             <th style="width:110px;"></th>
           </tr>
