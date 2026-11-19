@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-126 (Completing a holding WO: Reported By is the office member, not the worker) -->
+<!-- BUILD MARKER: NB-127 (Worker load: slow-load notice and timing; queued items only sent by their owner; late sign-in errors ignored) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -1857,7 +1857,7 @@ function api(action, payload = {}, _attempt = 0) {
   .then(function(data) {
     if (data.newToken) takeRenewedToken(sentToken, data.newToken);
     if (data.movedSlot) applyMovedSlot(data.movedSlot);
-    if (data.authError) { handleAuthExpired(); const e = new Error(data.error); e.authError = true; throw e; }
+    if (data.authError) { if (sentToken && sentToken === currentToken()) handleAuthExpired(); const e = new Error(data.error); e.authError = true; throw e; }
     if (data.error) throw new Error(data.error); // real app-level error — not retried
     return data;
   })
@@ -1977,9 +1977,20 @@ function loadLocalData() {
   }
 }
 
+// Whose record a queued item is. Items saved on a shared device by someone else wait for them to sign in,
+// rather than being sent (and refused) under the wrong person's sign-in.
+function queuedItemWorker(q) {
+  const p = q && q.payload || {};
+  const w = (p.entry && p.entry.worker) || (p.request && p.request.worker) || (p.submission && p.submission.worker) || p.worker || '';
+  return String(w).trim().replace(/\s+/g, ' ');
+}
+function myQueuedItems() {
+  if (!currentWorker || currentOfficeUser) return syncQueue;
+  return syncQueue.filter(q => { const w = queuedItemWorker(q); return !w || w === currentWorker; });
+}
 async function flushQueue() {
   if (!syncQueue.length || !SCRIPT_URL || !navigator.onLine) return;
-  const toSync = [...syncQueue];
+  const toSync = myQueuedItems().slice();
   for (const item of toSync) {
     try {
       await api(item.action, item.payload);
@@ -2000,8 +2011,9 @@ async function flushQueue() {
       continue;
     }
   }
-  if (syncQueue.length) {
-    setSyncStatus('worker', 'pending', syncQueue.length + ' entries pending sync');
+  const left = myQueuedItems().length;
+  if (left) {
+    setSyncStatus('worker', 'pending', left + ' entries pending sync');
   } else {
     setSyncStatus('worker', 'synced', 'All entries synced');
   }
@@ -2267,7 +2279,7 @@ function finishWorkerLogin(name) {
     setSyncStatus('worker', 'pending', 'Loading...');
     setWorkerLoadBanner('loading', 'Loading your jobs...');
   } else {
-    setSyncStatus('worker', syncQueue.length ? 'pending' : 'synced', syncQueue.length ? syncQueue.length + ' entries pending sync' : 'Synced');
+    setSyncStatus('worker', myQueuedItems().length ? 'pending' : 'synced', myQueuedItems().length ? myQueuedItems().length + ' entries pending sync' : 'Synced');
   }
     if (pollTimer) clearInterval(pollTimer);
   	pollTimer = setInterval(pollJobs, POLL_INTERVAL_MS);
@@ -2299,8 +2311,13 @@ async function pollJobs(preloaded) {
   if (!preloaded && workerPollRunning) return;
   if (!preloaded) workerPollRunning = true;
   const mySession = workerSession;
+  const startedAt = Date.now();
+  const slowNote = !preloaded && !workerLastLoadOk ? setTimeout(() => {
+    if (mySession === workerSession && !workerLastLoadOk) setWorkerLoadBanner('loading', 'Still loading your jobs. The server is slow to answer, hang on.');
+  }, 10000) : null;
   try {
     const data = preloaded || await api('getData');
+    if (slowNote) clearTimeout(slowNote);
     if (mySession !== workerSession) return;   // signed out (or someone else signed in) while this was loading
     jobs = data.jobs || [];
     workers = (data.workers || workers).map(w => ({ ...w, name: String(w.name || '').trim().replace(/\s+/g, ' ') }));
@@ -2321,7 +2338,7 @@ async function pollJobs(preloaded) {
       overtimeEnd: toHHMM(e.overtimeEnd)
     })).filter(e => !pendingDeleteEntryIds.has(String(e.id)));
     entries = keepOlderEntries(entries, prevEntries, data);
-    syncQueue.forEach(q => { if (q.payload?.entry && !entries.find(e => e.id === q.payload.entry.id)) entries.push(q.payload.entry); });
+    myQueuedItems().forEach(q => { if (q.payload?.entry && !entries.find(e => e.id === q.payload.entry.id)) entries.push(q.payload.entry); });
     // Guard against a lagging server read silently dropping an entry that
     // already synced successfully — see trackRecentEntry for why this exists.
     recentlyCreatedEntries = recentlyCreatedEntries.filter(r => Date.now() - r.at < RECENT_ENTRY_WINDOW_MS);
@@ -2367,13 +2384,16 @@ async function pollJobs(preloaded) {
     setWorkerLoadBanner('', '');
     workerLastLoadOk = Date.now();
     if (previewWorker) { setSyncStatus('worker', 'synced', 'Read-only view'); return; }
+    const took = Math.round((Date.now() - startedAt) / 1000);
     await flushQueue();
-    if (syncQueue.length) {
-      setSyncStatus('worker', 'pending', syncQueue.length + ' entries pending sync');
+    const mineQueued = myQueuedItems().length;
+    if (mineQueued) {
+      setSyncStatus('worker', 'pending', mineQueued + ' entries pending sync');
     } else {
-      setSyncStatus('worker', 'synced', 'Updated ' + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }));
+      setSyncStatus('worker', 'synced', 'Updated ' + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) + (took >= 8 ? ' · took ' + took + 's' : ''));
     }
   } catch (e) {
+    if (slowNote) clearTimeout(slowNote);
     if (mySession !== workerSession) return;
     setSyncStatus('worker', 'error', 'Could not refresh');
     // One missed background refresh is not worth a warning; a failed first load or a long gap is
@@ -2653,7 +2673,7 @@ async function confirmOvertime() {
       setSyncStatus('worker', 'synced', 'Overtime request submitted');
     } else {
       showToast('toast-error');
-      setSyncStatus('worker', 'pending', syncQueue.length + ' entries pending sync');
+      setSyncStatus('worker', 'pending', myQueuedItems().length + ' entries pending sync');
     }
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Submit overtime request'; }
@@ -2723,7 +2743,7 @@ async function submitEntry() {
       setSyncStatus('worker', 'synced', 'Synced');
     } else {
       showToast('toast-error');
-      setSyncStatus('worker', 'pending', syncQueue.length + ' entries pending sync');
+      setSyncStatus('worker', 'pending', myQueuedItems().length + ' entries pending sync');
     }
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Save entry'; }
