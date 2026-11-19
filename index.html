@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-132 (Worker week table: day totals, darker day dividers, no today tint) -->
+<!-- BUILD MARKER: NB-133 (Schedule: paler today tint) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -436,9 +436,9 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 .week-table .wd-total-target { font-weight: 400; color: var(--color-text-secondary); }
 .week-table tbody.wd-grp.wd-today, .week-table tbody.wd-grp + tbody.wd-grp.wd-today, .week-table tbody.wd-grp.wd-today + tbody.wd-grp { border-top: 2px solid var(--color-text-primary); }
 .week-table tbody.wd-today { border: 2px solid var(--color-text-primary); }
-.week-table tbody.wd-today > tr > td, .week-table tbody.wd-today > tr > td.day-cell { background: #eaf2fe; }
-.wk-table tbody.wd-today tr.wk-total > td { background: #dce8fb; }
-.wk-table tbody.wd-today tr.wk-raised > td:not(.day-cell) { background: #ece6fb; }
+.week-table tbody.wd-today > tr > td, .week-table tbody.wd-today > tr > td.day-cell { background: #f5f9ff; }
+.wk-table tbody.wd-today tr.wk-total > td { background: #ecf2fc; }
+.wk-table tbody.wd-today tr.wk-raised > td:not(.day-cell) { background: #f6f2fd; }
 .wk-table tr.wk-row-past > td:not(.day-cell):not(.wk-status-cell) { color: var(--color-text-secondary); }
 .wk-table .wk-prop { font-weight: 600; font-size: 13px; color: inherit; }
 .wk-table .wk-sub { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 3px; font-size: 11px; color: var(--color-text-secondary); }
