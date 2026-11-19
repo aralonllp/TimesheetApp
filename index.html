@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-130 (Load times: shows whether all tabs were read in one go) -->
+<!-- BUILD MARKER: NB-131 (Worker week and schedule: clear dividers between days, today blue with a black outline) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -416,7 +416,6 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 .wk-table td { padding: 8px 10px; font-size: 12px; vertical-align: middle; border-right: 0.5px solid var(--color-border-tertiary); border-bottom: 0.5px solid var(--color-border-tertiary); }
 .wk-table td:last-child { border-right: none; }
 .wk-table td.day-cell { vertical-align: top; border-bottom: 0.5px solid var(--color-border-tertiary); }
-.wk-table td.day-cell.wk-is-today { box-shadow: inset 3px 0 0 var(--color-text-primary); }
 .wk-table td.wk-status-cell { font-weight: 700; font-size: 13px; }
 .wk-table td.wk-empty { color: var(--color-text-secondary); font-style: italic; }
 .wk-table .wk-wo { font-weight: 700; font-size: 13px; }
@@ -424,9 +423,14 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 .wk-table .wk-note { font-style: italic; color: var(--color-text-secondary); }
 .wk-table .wk-logged { text-align: center; font-weight: 600; white-space: nowrap; }
 .wk-day-head { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; margin-bottom: 6px; }
-.wk-table tr.wk-day-start > td { border-top: 2px solid var(--color-border-secondary, #c9ced6); }
-.wk-table tbody tr:first-child > td { border-top: none; }
-.wk-table tr.wk-row-today > td:not(.day-cell) { background: #f6f9ff; }
+/* Each day is its own row group: a clear line between days, today tinted blue and outlined in black */
+.week-table td.day-cell { padding: 8px 10px; }
+.week-table tbody.wd-grp + tbody.wd-grp { border-top: 2px solid #8a929c; }
+.week-table tbody.wd-grp.wd-today, .week-table tbody.wd-grp + tbody.wd-grp.wd-today, .week-table tbody.wd-grp.wd-today + tbody.wd-grp { border-top: 2px solid var(--color-text-primary); }
+.week-table tbody.wd-today { border: 2px solid var(--color-text-primary); }
+.week-table tbody.wd-today > tr > td, .week-table tbody.wd-today > tr > td.day-cell { background: #eaf2fe; }
+.wk-table tbody.wd-today tr.wk-total > td { background: #dce8fb; }
+.wk-table tbody.wd-today tr.wk-raised > td:not(.day-cell) { background: #ece6fb; }
 .wk-table tr.wk-row-past > td:not(.day-cell):not(.wk-status-cell) { color: var(--color-text-secondary); }
 .wk-table .wk-prop { font-weight: 600; font-size: 13px; color: inherit; }
 .wk-table .wk-sub { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 3px; font-size: 11px; color: var(--color-text-secondary); }
@@ -3025,13 +3029,14 @@ function renderWeek(wc) {
     const isWeekendDay = dow_flag === 0 || dow_flag === 6;
     const shouldFlag = inFlagRange && !isBankHoliday && !absence && !isWeekendDay && hoursLogged < workerDailyHours(currentWorker);
 
-    const dayCellContent = isBankHoliday
+    const todayTag = dayStr === localDateStr(new Date()) ? '<div style="margin-top:4px;"><span class="wk-today">Today</span></div>' : '';
+    const dayCellContent = todayTag + (isBankHoliday
       ? `<div class="day-absence">Bank Holiday</div>`
       : absence
         ? `<div class="day-absence">${absence.reason}</div>`
         : shouldFlag
           ? `<div class="day-flag">⚠ ${hoursLogged > 0 ? hoursLogged + 'h logged' : 'No hours'}</div>`
-          : '';
+          : '');
 
     if (isEmpty) {
       const emptyRowHtml = `
@@ -3186,7 +3191,7 @@ function renderWeek(wc) {
     }).join('');
 
     return entryRowsHtml + otRowsForDay;
-  }).join('');
+  }).map((html, i) => `<tbody class="wd-grp${weekDays[i] === localDateStr(new Date()) ? ' wd-today' : ''}">${html}</tbody>`).join('');
 
   return `
     <div class="week-block">
@@ -3201,16 +3206,16 @@ function renderWeek(wc) {
       <table class="week-table" style="table-layout:fixed;width:100%;">
         <thead>
           <tr>
-            <th style="width:70px;">Day</th>
+            <th style="width:96px;">Day</th>
             <th style="width:90px;">W/O Number</th>
             <th style="width:180px;">Property</th>
-            <th style="width:380px;">Description</th>
+            <th style="width:354px;">Description</th>
             <th style="width:46px;text-align:center;">Hrs</th>
             <th style="width:220px;">Comments</th>
             <th style="width:110px;"></th>
           </tr>
         </thead>
-        <tbody>${rows}</tbody>
+        ${rows}
       </table>
       </div>
     </div>`;
@@ -8100,6 +8105,7 @@ function renderWorkerWeek() {
     const ds = localDateStr(d);
     const items = schedItemsFor(ds, currentWorker);
     const isToday = ds === today;
+    rows += `<tbody class="wd-grp${isToday ? ' wd-today' : ''}">`;
     const dayEntries = entries.filter(e => e.worker === currentWorker && normaliseDate(e.date) === ds);
     const dayTotal = dayEntries.reduce((t, e) => t + (parseFloat(e.hours) || 0), 0);
     const offDay = items.some(x => x.type === 'status' && NON_WORKING_STATUSES.includes(x.status));
@@ -8164,6 +8170,7 @@ function renderWorkerWeek() {
           <td></td>
         </tr>`;
     }
+    rows += '</tbody>';
   }
   document.getElementById('wk-days').innerHTML = `
     <div class="week-table-wrap">
@@ -8176,7 +8183,7 @@ function renderWorkerWeek() {
           <th class="wk-c-log" style="width:96px;text-align:center;">Logged</th>
           <th class="wk-c-act" style="width:190px;"></th>
         </tr></thead>
-        <tbody>${rows}</tbody>
+        ${rows}
       </table>
     </div>`;
 }
