@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-134 (Load-time diagnostics removed) -->
+<!-- BUILD MARKER: NB-135 (Comms: My Jobs removed, they use the office Jobs tab) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -1762,7 +1762,10 @@ function applyCommsMode(role) {
   if (on) document.getElementById('wtab-myweek').style.display = 'none';
   const nav = document.querySelector('.nav'); if (nav) nav.style.display = on ? 'none' : '';
   document.getElementById('otab-c-log').style.display = on ? '' : 'none';
-  document.getElementById('otab-c-myjobs').style.display = on ? '' : 'none';
+  // Comms use the office Jobs tab, which does everything My Jobs does and more
+  document.getElementById('otab-c-myjobs').style.display = 'none';
+  document.getElementById('wtab-myjobs').style.display = on ? 'none' : '';
+  if (on && document.getElementById('worker-myjobs-section').style.display === 'block') switchWorkerTab('log');
   document.querySelectorAll('[id^="otab-"]').forEach(b => {
     if (/^otab-c-/.test(b.id)) return;
     const t = b.id.slice(5);
@@ -1795,7 +1798,8 @@ function applyCommsMode(role) {
 function commsGo(tab) {
   if (!commsRole) return;
   document.querySelectorAll('.comms-tab').forEach(b => b.classList.toggle('active', b.id === 'wtab-c-' + tab));
-  if (tab === 'log' || tab === 'myjobs') {
+  if (tab === 'myjobs') tab = 'jobs';
+  if (tab === 'log') {
     switchTab('worker');
     switchWorkerTab(tab);
     return;
