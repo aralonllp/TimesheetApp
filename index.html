@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-133 (Schedule: paler today tint) -->
+<!-- BUILD MARKER: NB-134 (Load-time diagnostics removed) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -484,15 +484,6 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 .form-section { margin-bottom: 1.5rem; }
 .pin-input { letter-spacing: 4px; }
 .initials-input { text-transform: uppercase; }
-.sync-link { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
-.lt-row { border-top: 1px solid var(--color-border-tertiary); padding: 8px 0; font-size: 12px; }
-.lt-row:first-child { border-top: none; }
-.lt-head { display: flex; justify-content: space-between; gap: 8px; font-weight: 600; font-size: 13px; }
-.lt-bar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; margin: 5px 0 4px; background: var(--color-background-secondary); }
-.lt-bar span { display: block; height: 100%; }
-.lt-out { background: #c9ced6; } .lt-auth { background: #8fb3e8; } .lt-data { background: #1e66c8; } .lt-wait { background: #e0a43a; } .lt-rest { background: #6bbf8e; }
-.lt-key { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 11px; color: var(--color-text-secondary); margin: 6px 0 10px; }
-.lt-key i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
 .load-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 12px; padding: 10px 14px; border-radius: var(--border-radius-md); background: #fdeeee; border: 1px solid #eab4b4; color: #a61b1b; font-size: 13px; font-weight: 600; }
 .load-banner.loading { background: var(--color-background-secondary); border-color: var(--color-border-tertiary); color: var(--color-text-secondary); font-weight: 500; }
 .login-note { margin: 0 0 4px; padding: 8px 12px; border-radius: var(--border-radius-md); background: var(--color-background-secondary); font-size: 13px; color: var(--color-text-secondary); }
@@ -695,7 +686,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
         <div style="display:flex;align-items:center;gap:10px;">
           <div class="sync-status">
             <span class="sync-dot" id="worker-sync-dot"></span>
-            <span id="worker-sync-text" class="sync-link" title="Click to see recent load times" onclick="openLoadTimes()">—</span>
+            <span id="worker-sync-text">—</span>
           </div>
           <div class="notif-wrap" id="notif-wrap">
             <button class="btn notif-bell" id="notif-bell" onclick="toggleNotifications()" aria-expanded="false" aria-haspopup="true" title="Notifications" aria-label="Notifications"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22zm7-6V11a7 7 0 0 0-5.5-6.84V3.5a1.5 1.5 0 0 0-3 0v.66A7 7 0 0 0 5 11v5l-2 2v1h18v-1l-2-2z" fill="currentColor"/></svg><span class="notif-count" id="notif-count" style="display:none;"></span></button>
@@ -818,7 +809,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
         <div style="display:flex;align-items:center;gap:10px;">
           <div class="sync-status">
             <span class="sync-dot" id="comms-sync-dot"></span>
-            <span id="comms-sync-text" class="sync-link" title="Click to see recent load times" onclick="openLoadTimes()">—</span>
+            <span id="comms-sync-text">—</span>
           </div>
           <button class="btn" onclick="workerLogout()">Sign out</button>
         </div>
@@ -831,7 +822,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
           <span class="text-muted" style="font-size:13px;">Logged in as <strong id="office-user-display"></strong><span id="office-pw-link"> · <button type="button" class="hold-raise" style="margin:0;font-size:13px;" onclick="openPasswordChange(false)">Change password</button></span></span>
           <div class="sync-status">
             <span class="sync-dot" id="office-sync-dot"></span>
-            <span id="office-sync-text" class="sync-link" title="Click to see recent load times" onclick="openLoadTimes()">—</span>
+            <span id="office-sync-text">—</span>
           </div>
           <button class="btn" onclick="officeLogout()">Sign out</button>
         </div>
@@ -1426,15 +1417,6 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 </div>
 
 <!-- ── OVERTIME MODAL ── -->
-<div id="load-times-modal" class="sched-modal" style="display:none;" onclick="if (event.target === this) closeModalById('load-times-modal')">
-  <div class="card sched-modal-box" style="max-width:560px;">
-    <div class="row-between"><p class="section-heading">Load times on this device</p><button class="btn btn-sm" onclick="closeModalById('load-times-modal')">Close</button></div>
-    <p class="text-muted" style="font-size:12px;margin-top:2px;">Each data load, newest first. "Outside the script" is Google starting the script up, queueing and the connection; the rest is the script's own work.</p>
-    <div class="lt-key"><span><i class="lt-out"></i>Outside the script</span><span><i class="lt-auth"></i>Sign-in check</span><span><i class="lt-wait"></i>Waiting for another rebuild</span><span><i class="lt-data"></i>Getting the data</span><span><i class="lt-rest"></i>Preparing and sending</span></div>
-    <div id="load-times-list" style="max-height:60vh;overflow:auto;"></div>
-    <div style="display:flex;gap:8px;margin-top:10px;"><button class="btn btn-sm" onclick="copyLoadTimes()">Copy</button><button class="btn btn-sm" onclick="clearLoadTimes()">Clear</button></div>
-  </div>
-</div>
 <div id="pin-set-modal" class="sched-modal" style="display:none;">
   <div class="card sched-modal-box" style="max-width:380px;">
     <p class="section-heading" id="pin-set-title">Choose a new PIN</p>
@@ -1670,6 +1652,7 @@ let pollTimer = null;
 // ── Startup ──────────────────────────────────────────────────────
 
 window.addEventListener('load', () => {
+  try { localStorage.removeItem('loadTimes'); } catch (e) {}
   document.querySelector('.app').classList.add('worker-wide');
   if (SCRIPT_URL) {
     loadLocalData();
@@ -2121,63 +2104,6 @@ let pinChangeCtx = null;
 
 function closeModalById(id) { document.getElementById(id).style.display = 'none'; }
 
-// ── Load-time diagnostics ─────────────────────────────────────────
-// Every data load records how long it took end to end and, from the server's own timing,
-// where that time went. Kept on this device only (last 30), viewed by clicking the sync status.
-const LOAD_TIMES_KEY = 'loadTimes';
-function recordLoadTime(kind, startedAt, data) {
-  try {
-    const t = data && data._timing;
-    const rec = { at: new Date().toISOString(), kind, who: currentWorker || (officeUser && officeUser.name) || '', total: Date.now() - startedAt, server: t || null };
-    const list = JSON.parse(localStorage.getItem(LOAD_TIMES_KEY) || '[]');
-    list.unshift(rec);
-    localStorage.setItem(LOAD_TIMES_KEY, JSON.stringify(list.slice(0, 30)));
-    if (t) console.log('[load] ' + kind + ' ' + (rec.total / 1000).toFixed(1) + 's', t);
-  } catch (e) {}
-}
-function fmtSec(ms) { return (Math.max(0, ms || 0) / 1000).toFixed(ms >= 10000 ? 0 : 1) + 's'; }
-function loadTimesHtml(list) {
-  if (!list.length) return '<p class="text-muted" style="font-size:12px;">No loads recorded yet. They appear after the next refresh.</p>';
-  return list.map(r => {
-    const t = r.server;
-    const head = `<div class="lt-head"><span>${new Date(r.at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} · ${escWO(r.who || '—')}</span><span>${fmtSec(r.total)}</span></div>`;
-    if (!t) return `<div class="lt-row">${head}<div class="text-muted">No breakdown (Code.gs not updated yet, or the load failed).</div></div>`;
-    const inside = t.total || 0, outside = Math.max(0, r.total - inside);
-    const wait = t.wait || 0, data = Math.max(0, (t.data || 0) - wait), auth = t.auth || 0, rest = Math.max(0, inside - auth - (t.data || 0));
-    const seg = (cls, ms) => ms > 0 ? `<span class="${cls}" style="width:${(100 * ms / Math.max(1, r.total)).toFixed(1)}%"></span>` : '';
-    const how = t.copy === 'ready' ? 'used the ready copy' : t.copy === 'waited' ? 'waited for another load\'s rebuild' : t.copy === 'rebuilt' ? 'rebuilt the data copy' + (t.discarded ? ' (a save landed mid-way, so it wasn\'t kept)' : '') : '';
-    const reads = typeof t.batch === 'number' ? '' : (t.reads || []).filter(x => x[1] >= 50).map(x => escWO(x[0]) + ' ' + fmtSec(x[1])).join(', ');
-    const batch = t.batch === 'off' ? 'tabs read one by one (Sheets API service not switched on)' : t.batch === 'failed' ? 'reading all tabs at once failed, so read one by one' : typeof t.batch === 'number' ? 'all tabs read in one go: ' + fmtSec(t.batch) : '';
-    const extra = [batch, t.bankHolidays ? 'bank holidays ' + fmtSec(t.bankHolidays) : '', t.kb ? t.kb + ' KB' : ''].filter(Boolean).join(' · ');
-    return `<div class="lt-row">${head}
-      <div class="lt-bar">${seg('lt-out', outside)}${seg('lt-auth', auth)}${seg('lt-wait', wait)}${seg('lt-data', data)}${seg('lt-rest', rest)}</div>
-      <div>Outside the script <strong>${fmtSec(outside)}</strong> · in the script <strong>${fmtSec(inside)}</strong> (sign-in ${fmtSec(auth)}, data ${fmtSec(t.data)}${how ? ': ' + how : ''}${wait ? ', of which waiting ' + fmtSec(wait) : ''}${t.build ? ', rebuild ' + fmtSec(t.build) : ''})</div>
-      ${reads ? `<div class="text-muted">Slowest tabs: ${reads}</div>` : ''}
-      ${extra ? `<div class="text-muted">${extra}</div>` : ''}
-    </div>`;
-  }).join('');
-}
-function openLoadTimes() {
-  let list = [];
-  try { list = JSON.parse(localStorage.getItem(LOAD_TIMES_KEY) || '[]'); } catch (e) {}
-  document.getElementById('load-times-list').innerHTML = loadTimesHtml(list);
-  document.getElementById('load-times-modal').style.display = 'flex';
-}
-function copyLoadTimes() {
-  let list = [];
-  try { list = JSON.parse(localStorage.getItem(LOAD_TIMES_KEY) || '[]'); } catch (e) {}
-  const lines = list.map(r => {
-    const t = r.server || {};
-    return [r.at.slice(11, 19), r.who, 'total ' + fmtSec(r.total), 'script ' + fmtSec(t.total), 'outside ' + fmtSec(r.total - (t.total || 0)), 'auth ' + fmtSec(t.auth), 'data ' + fmtSec(t.data), t.copy || '', t.wait ? 'wait ' + fmtSec(t.wait) : '', t.build ? 'build ' + fmtSec(t.build) : '', t.batch != null ? 'batch ' + (typeof t.batch === 'number' ? fmtSec(t.batch) : t.batch) : '', (t.reads || []).map(x => x[0] + ' ' + fmtSec(x[1])).join(' / '), t.kb ? t.kb + 'KB' : ''].filter(Boolean).join(' | ');
-  }).join('\n');
-  const done = () => setSyncStatus(currentWorker ? 'worker' : 'office', 'synced', 'Load times copied');
-  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(lines).then(done, () => window.prompt('Copy these load times:', lines));
-  else window.prompt('Copy these load times:', lines);
-}
-function clearLoadTimes() {
-  try { localStorage.removeItem(LOAD_TIMES_KEY); } catch (e) {}
-  openLoadTimes();
-}
 function isNetworkError(err) { return /Failed to fetch|NetworkError|network|HTTP \d|Bad response|No SCRIPT_URL/i.test(String(err && err.message || err)); }
 
 async function sha256Hex(text) {
@@ -2416,7 +2342,6 @@ async function pollJobs(preloaded) {
   if (!preloaded && workerPollRunning) return;
   if (!preloaded) workerPollRunning = true;
   const mySession = workerSession;
-  const startedAt = Date.now();
   const slowNote = !preloaded && !workerLastLoadOk ? setTimeout(() => {
     if (mySession === workerSession && !workerLastLoadOk) setWorkerLoadBanner('loading', 'Still loading your jobs. The server is slow to answer, hang on.');
   }, 10000) : null;
@@ -2489,14 +2414,12 @@ async function pollJobs(preloaded) {
     setWorkerLoadBanner('', '');
     workerLastLoadOk = Date.now();
     if (previewWorker) { setSyncStatus('worker', 'synced', 'Read-only view'); return; }
-    const took = Math.round((Date.now() - startedAt) / 1000);
-    if (!preloaded) recordLoadTime('worker', startedAt, data);
     await flushQueue();
     const mineQueued = myQueuedItems().length;
     if (mineQueued) {
       setSyncStatus('worker', 'pending', mineQueued + ' entries pending sync');
     } else {
-      setSyncStatus('worker', 'synced', 'Updated ' + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) + (took >= 8 ? ' · took ' + took + 's' : ''));
+      setSyncStatus('worker', 'synced', 'Updated ' + new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }));
     }
   } catch (e) {
     if (slowNote) clearTimeout(slowNote);
@@ -3559,9 +3482,7 @@ async function refreshOfficeNow() {
   setSyncStatus('office', 'pending', 'Loading...');
   if (SCRIPT_URL && navigator.onLine) {
     try {
-      const officeLoadStart = Date.now();
       const data = await api('getData');
-      recordLoadTime('office', officeLoadStart, data);
       jobs = withRecentJobs(data.jobs || []);
       workers = (data.workers || []).map(w => ({ ...w, name: String(w.name || '').trim().replace(/\s+/g, ' ') }));
       if (Array.isArray(data.bankHolidays) && data.bankHolidays.length) {
