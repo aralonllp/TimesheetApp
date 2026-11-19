@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-129 (Load-time diagnostics: server breakdown per load, click the sync status) -->
+<!-- BUILD MARKER: NB-130 (Load times: shows whether all tabs were read in one go) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -2134,8 +2134,9 @@ function loadTimesHtml(list) {
     const wait = t.wait || 0, data = Math.max(0, (t.data || 0) - wait), auth = t.auth || 0, rest = Math.max(0, inside - auth - (t.data || 0));
     const seg = (cls, ms) => ms > 0 ? `<span class="${cls}" style="width:${(100 * ms / Math.max(1, r.total)).toFixed(1)}%"></span>` : '';
     const how = t.copy === 'ready' ? 'used the ready copy' : t.copy === 'waited' ? 'waited for another load\'s rebuild' : t.copy === 'rebuilt' ? 'rebuilt the data copy' + (t.discarded ? ' (a save landed mid-way, so it wasn\'t kept)' : '') : '';
-    const reads = (t.reads || []).filter(x => x[1] >= 50).map(x => escWO(x[0]) + ' ' + fmtSec(x[1])).join(', ');
-    const extra = [t.bankHolidays ? 'bank holidays ' + fmtSec(t.bankHolidays) : '', t.kb ? t.kb + ' KB' : ''].filter(Boolean).join(' · ');
+    const reads = typeof t.batch === 'number' ? '' : (t.reads || []).filter(x => x[1] >= 50).map(x => escWO(x[0]) + ' ' + fmtSec(x[1])).join(', ');
+    const batch = t.batch === 'off' ? 'tabs read one by one (Sheets API service not switched on)' : t.batch === 'failed' ? 'reading all tabs at once failed, so read one by one' : typeof t.batch === 'number' ? 'all tabs read in one go: ' + fmtSec(t.batch) : '';
+    const extra = [batch, t.bankHolidays ? 'bank holidays ' + fmtSec(t.bankHolidays) : '', t.kb ? t.kb + ' KB' : ''].filter(Boolean).join(' · ');
     return `<div class="lt-row">${head}
       <div class="lt-bar">${seg('lt-out', outside)}${seg('lt-auth', auth)}${seg('lt-wait', wait)}${seg('lt-data', data)}${seg('lt-rest', rest)}</div>
       <div>Outside the script <strong>${fmtSec(outside)}</strong> · in the script <strong>${fmtSec(inside)}</strong> (sign-in ${fmtSec(auth)}, data ${fmtSec(t.data)}${how ? ': ' + how : ''}${wait ? ', of which waiting ' + fmtSec(wait) : ''}${t.build ? ', rebuild ' + fmtSec(t.build) : ''})</div>
@@ -2155,7 +2156,7 @@ function copyLoadTimes() {
   try { list = JSON.parse(localStorage.getItem(LOAD_TIMES_KEY) || '[]'); } catch (e) {}
   const lines = list.map(r => {
     const t = r.server || {};
-    return [r.at.slice(11, 19), r.who, 'total ' + fmtSec(r.total), 'script ' + fmtSec(t.total), 'outside ' + fmtSec(r.total - (t.total || 0)), 'auth ' + fmtSec(t.auth), 'data ' + fmtSec(t.data), t.copy || '', t.wait ? 'wait ' + fmtSec(t.wait) : '', t.build ? 'build ' + fmtSec(t.build) : '', (t.reads || []).map(x => x[0] + ' ' + fmtSec(x[1])).join(' / '), t.kb ? t.kb + 'KB' : ''].filter(Boolean).join(' | ');
+    return [r.at.slice(11, 19), r.who, 'total ' + fmtSec(r.total), 'script ' + fmtSec(t.total), 'outside ' + fmtSec(r.total - (t.total || 0)), 'auth ' + fmtSec(t.auth), 'data ' + fmtSec(t.data), t.copy || '', t.wait ? 'wait ' + fmtSec(t.wait) : '', t.build ? 'build ' + fmtSec(t.build) : '', t.batch != null ? 'batch ' + (typeof t.batch === 'number' ? fmtSec(t.batch) : t.batch) : '', (t.reads || []).map(x => x[0] + ' ' + fmtSec(x[1])).join(' / '), t.kb ? t.kb + 'KB' : ''].filter(Boolean).join(' | ');
   }).join('\n');
   const done = () => setSyncStatus(currentWorker ? 'worker' : 'office', 'synced', 'Load times copied');
   if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(lines).then(done, () => window.prompt('Copy these load times:', lines));
