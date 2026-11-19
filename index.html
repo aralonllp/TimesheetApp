@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-127 (Worker load: slow-load notice and timing; queued items only sent by their owner; late sign-in errors ignored) -->
+<!-- BUILD MARKER: NB-128 (Comms: new WOs/RWOs loggable straight away and kept through refreshes) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -1574,6 +1574,23 @@ function withRecentRecurring(list) {
   });
   return list;
 }
+// Same for work orders: one just created or changed here stays as saved until a load agrees,
+// so a refresh that started before the save can't hide it (Comms raise a WO and log against it straight away).
+const recentJobSaves = new Map();
+function noteJobSaved(id, fields) {
+  const cur = recentJobSaves.get(id);
+  recentJobSaves.set(id, { fields: { ...(cur ? cur.fields : {}), ...fields, id }, at: Date.now() });
+}
+function withRecentJobs(list) {
+  recentJobSaves.forEach((r, id) => {
+    const j = list.find(x => x.id === id);
+    const agrees = j && Object.keys(r.fields).every(k => rjSame(j[k], r.fields[k]));
+    if (agrees || Date.now() - r.at > RECENT_RJ_MS * 2) { recentJobSaves.delete(id); return; }
+    if (j) Object.assign(j, r.fields);
+    else list.push({ ...r.fields });
+  });
+  return list;
+}
 let absenceTypes = [];
 let currentOfficeUser = null;
 let overtimeRequests = [];
@@ -1885,7 +1902,7 @@ function sanitiseLoadedData() {
 function loadInitialData() {
   setSyncStatus('login', 'pending', 'Connecting...');
   api('getData').then(function(data) {
-    jobs = data.jobs || [];
+    jobs = withRecentJobs(data.jobs || []);
     workers = (data.workers || []).map(w => ({ ...w, name: String(w.name || '').trim().replace(/\s+/g, ' ') }));
     if (Array.isArray(data.bankHolidays) && data.bankHolidays.length) {
       BANK_HOLIDAYS = data.bankHolidays;
@@ -2319,7 +2336,7 @@ async function pollJobs(preloaded) {
     const data = preloaded || await api('getData');
     if (slowNote) clearTimeout(slowNote);
     if (mySession !== workerSession) return;   // signed out (or someone else signed in) while this was loading
-    jobs = data.jobs || [];
+    jobs = withRecentJobs(data.jobs || []);
     workers = (data.workers || workers).map(w => ({ ...w, name: String(w.name || '').trim().replace(/\s+/g, ' ') }));
     if (Array.isArray(data.bankHolidays) && data.bankHolidays.length) {
       BANK_HOLIDAYS = data.bankHolidays;
@@ -3440,7 +3457,7 @@ async function refreshOfficeNow() {
   if (SCRIPT_URL && navigator.onLine) {
     try {
       const data = await api('getData');
-      jobs = data.jobs || [];
+      jobs = withRecentJobs(data.jobs || []);
       workers = (data.workers || []).map(w => ({ ...w, name: String(w.name || '').trim().replace(/\s+/g, ' ') }));
       if (Array.isArray(data.bankHolidays) && data.bankHolidays.length) {
         BANK_HOLIDAYS = data.bankHolidays;
@@ -3778,6 +3795,7 @@ async function confirmJobClose(id) {
     const res = await api('confirmJobClose', { id, performedBy: officeUserName(), confirmedBy: officeUserInitials() });
     if (!res || !res.success) throw new Error('The Apps Script is still running the previous version — publish a new deployment version and try again.');
     job.pendingClose = false;
+    noteJobSaved(id, { open: false, pendingClose: false });
     job.confirmedDate = res.confirmedDate || localDateStr(new Date());
     job.confirmedBy = res.confirmedBy || officeUserInitials();
     localStorage.setItem('jobs', JSON.stringify(jobs));
@@ -3805,6 +3823,7 @@ async function sendBackJob(id) {
   try {
     const result = await api('reopenJob', { id, performedBy: officeUserName(), closedBy: officeUserInitials() });
     Object.assign(job, { open: true, pendingClose: false, closedDate: '', closedBy: '', confirmedDate: '', confirmedBy: '', reopenedDate: result.reopenedDate || localDateStr(new Date()), reopenedBy: result.reopenedBy || officeUserInitials() });
+    noteJobSaved(id, { open: true, pendingClose: false });
     localStorage.setItem('jobs', JSON.stringify(jobs));
     try {
       const c = await api('addJobComment', { jobId: id, text: 'Sent back: ' + reason, performedBy: officeUserName() || 'Office' });
@@ -4459,6 +4478,7 @@ async function sendRecurringUpdate(id, fields, okMsg, busyBtn, busyText) {
     const res = await api('saveRecurringJob', { job: Object.assign({ id }, fields), performedBy: officeUserName() });
     if (!res || res.id !== id) throw new Error(RJ_OLD_SCRIPT_MSG);
     noteRecurringSaved(id, fields);
+    if (currentWorker && !previewWorker) refreshWorkerJobList();
     const live = recurringJobs.find(x => x.id === id) || j;
     Object.assign(live, fields);
     release();
@@ -4545,6 +4565,7 @@ async function addRecurringJob() {
     const created = { id: res.id, property: '', description, costCode, active: true, assignedTo: '' };
     recurringJobs.push(created);
     noteRecurringSaved(res.id, created);
+    if (currentWorker && !previewWorker) refreshWorkerJobList();
     cancelEditRecurring();
     localStorage.setItem('recurringJobs', JSON.stringify(recurringJobs));
     renderRecurringJobsList();
@@ -8123,6 +8144,7 @@ async function workerCloseJob(id, btn) {
     job.pendingClose = true;
     job.closedDate = result.closedDate || localDateStr(new Date());
     job.closedBy = result.closedBy || workerInitials(currentWorker);
+    noteJobSaved(id, { open: false, pendingClose: true });
     localStorage.setItem('jobs', JSON.stringify(jobs));
     const sel = document.getElementById('job-select');
     const keep = sel.value;
@@ -9324,6 +9346,7 @@ async function createWorkOrder() {
         assignedTo: upd.assignedTo, schedStart: upd.schedStart, schedEnd: upd.schedEnd
       });
       if (result.updatedAt) { editingJob.updatedAt = result.updatedAt; editingJob.updatedBy = result.updatedBy; }
+      noteJobSaved(editingJob.id, { property: upd.property, description: upd.description, priority: upd.priority, assignedTo: upd.assignedTo });
       localStorage.setItem('jobs', JSON.stringify(jobs));
       if (newlyAdded.length) notifyJobAllocated(editingJob, newlyAdded);
       const savedId = editingJob.id;
@@ -9383,6 +9406,8 @@ async function createWorkOrder() {
     const created = result.job || { ...job, id: result.id, open: true };
     created.open = true;
     jobs.push(created);
+    noteJobSaved(created.id, { id: created.id, open: true, property: created.property, description: created.description, assignedTo: created.assignedTo });
+    if (currentWorker) { refreshWorkerJobList(); if (document.getElementById('worker-myjobs-section').style.display !== 'none') renderWorkerJobs(); }
     notifyJobAllocated(created, expandAssignedTo(created.assignedTo));
     localStorage.setItem('jobs', JSON.stringify(jobs));
     renderOfficeDashboard();
