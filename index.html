@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-136 (Recurring jobs: optional default location, filled in when the job is picked) -->
+<!-- BUILD MARKER: NB-137 (Weekly Approvals: days grouped with totals and clearer dividers) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -434,6 +434,8 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 .week-table .wd-total-val.wk-met { color: var(--color-text-success); }
 .week-table .wd-total-val.wk-short { color: var(--color-text-warning); }
 .week-table .wd-total-target { font-weight: 400; color: var(--color-text-secondary); }
+.week-table td.wa-day { padding: 5px 10px; font-size: 12px; vertical-align: top; border-right: 0.5px solid var(--color-border-tertiary); background: var(--color-background-secondary); }
+.week-table td.wa-day .wd-total-val { text-align: left; font-size: 11px; margin-top: 1px; }
 .week-table tbody.wd-grp.wd-today, .week-table tbody.wd-grp + tbody.wd-grp.wd-today, .week-table tbody.wd-grp.wd-today + tbody.wd-grp { border-top: 2px solid var(--color-text-primary); }
 .week-table tbody.wd-today { border: 2px solid var(--color-text-primary); }
 .week-table tbody.wd-today > tr > td, .week-table tbody.wd-today > tr > td.day-cell { background: #f5f9ff; }
@@ -9602,6 +9604,50 @@ function syncDateRangeLimits() {
   enforceDateOrder('oe-date-from', 'oe-date-to');
 }
 
+// One row group per day. The day cell spans the day's entries and carries the day total,
+// so the totals and stronger dividers add almost no height. A weekday with nothing logged
+// gets one muted row so it stands out.
+function approvalWeekRows(worker, wc, weekEntries) {
+  const cell = 'padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;vertical-align:middle;';
+  const target = workerDailyHours(worker);
+  const today = localDateStr(new Date());
+  let html = '';
+  for (let k = 0; k < 7; k++) {
+    const d = new Date(wc + 'T12:00:00'); d.setDate(d.getDate() + k);
+    const ds = localDateStr(d);
+    const dayE = weekEntries.filter(e => normaliseDate(e.date) === ds);
+    const weekday = k < 5, bh = BANK_HOLIDAYS.includes(ds);
+    if (!dayE.length && !weekday) continue;
+    const total = dayE.reduce((t, e) => t + (parseFloat(e.hours) || 0), 0);
+    const useTarget = weekday && !bh;
+    const cls = !useTarget || ds > today ? '' : total >= target ? ' wk-met' : ' wk-short';
+    const dayCell = `<td class="wa-day" rowspan="${Math.max(1, dayE.length)}">
+        <div class="day-name">${d.toLocaleDateString('en-GB', { weekday: 'short' })} ${fmtShortDate(ds)}</div>
+        <div class="wd-total-val${cls}">${fmtHrs(total)}h${useTarget ? ` <span class="wd-total-target">/ ${fmtHrs(target)}h</span>` : ''}</div>
+      </td>`;
+    html += '<tbody class="wd-grp">';
+    if (!dayE.length) {
+      html += `<tr class="day-row">${dayCell}<td colspan="5" style="${cell}border-right:none;color:var(--color-text-secondary);font-style:italic;">${bh ? 'Bank holiday' : 'No time logged'}</td></tr>`;
+    } else {
+      dayE.forEach((e, n) => {
+        const job = jobs.find(j => j.id === e.jobId) || recurringJobs.find(j => j.id === e.jobId);
+        const isRJ = recurringJobs.some(j => j.id === e.jobId);
+        const jobProperty = isRJ ? (e.property || (job ? job.property : '')) : (job ? job.property : (e.property || ''));
+        const jobDescription = (job ? (job.description || '') : (e.description || '')).slice(0, 200);
+        html += `<tr class="day-row">${n === 0 ? dayCell : ''}
+              <td style="${cell}overflow:hidden;"><div style="font-weight:600;">${e.jobId}</div></td>
+              <td style="${cell}color:var(--color-text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${propLabel(jobProperty, 35)}</td>
+              <td style="${cell}color:var(--color-text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${jobDescription}</td>
+              <td style="${cell}padding:5px 6px;font-weight:500;text-align:center;white-space:nowrap;">${e.hours}h</td>
+              <td style="padding:5px 10px;font-size:12px;color:var(--color-text-secondary);">${e.comments || ''}</td>
+            </tr>`;
+      });
+    }
+    html += '</tbody>';
+  }
+  return html;
+}
+
 function renderWeekApprovalsTab(targetId) {
   const el = document.getElementById(targetId || 'week-approvals-content');
   if (!el) return;
@@ -9644,48 +9690,15 @@ function renderWeekApprovalsTab(targetId) {
         <table class="week-table" style="table-layout:fixed;width:100%;">
           <thead>
             <tr>
-              <th style="width:60px;">Day</th>
-              <th style="width:70px;">Date</th>
-              <th style="width:65px;">W/O Number</th>
+              <th style="width:104px;">Day</th>
+              <th style="width:76px;">W/O Number</th>
               <th style="width:180px;">Property</th>
               <th style="width:450px;">Description</th>
               <th style="width:46px;text-align:center;">Hrs</th>
               <th style="width:200px;">Comments</th>
             </tr>
           </thead>
-          <tbody>
-            ${weekEntries.sort((a,b) => normaliseDate(a.date).localeCompare(normaliseDate(b.date))).map(e => {
-              const job = jobs.find(j => j.id === e.jobId) || recurringJobs.find(j => j.id === e.jobId);
-              const isRJ = recurringJobs.some(j => j.id === e.jobId);
-              const jobProperty = isRJ ? (e.property || (job ? job.property : '')) : (job ? job.property : (e.property || ''));
-              const jobDescription = (job ? (job.description || '') : (e.description || '')).slice(0, 200);
-              const dayName = new Date(normaliseDate(e.date) + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long' });
-              return `
-            <tr class="day-row">
-              <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;vertical-align:middle;width:60px;">
-                <div class="day-name">${dayName}</div>
-              </td>
-              <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;vertical-align:middle;width:70px;">
-                <div class="day-name">${fmtShortDate(normaliseDate(e.date))}</div>
-              </td>
-              <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;vertical-align:middle;width:65px;overflow:hidden;">
-                <div style="font-weight:600;">${e.jobId}</div>
-              </td>
-              <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;color:var(--color-text-secondary);vertical-align:middle;width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-                ${propLabel(jobProperty, 35)}
-              </td>
-              <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;color:var(--color-text-secondary);vertical-align:middle;width:450px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-                ${jobDescription}
-              </td>
-              <td style="padding:5px 6px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;font-weight:500;text-align:center;vertical-align:middle;white-space:nowrap;width:46px;">
-                ${e.hours}h
-              </td>
-              <td style="padding:5px 10px;font-size:12px;color:var(--color-text-secondary);width:200px;">
-                ${e.comments || ''}
-              </td>
-            </tr>`;
-            }).join('')}
-          </tbody>
+          ${approvalWeekRows(sub.worker, wc, weekEntries)}
         </table>
       </div>`;
   }).join('');
