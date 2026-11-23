@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-140 (Weekend Cover moved inside the Schedule tab) -->
+<!-- BUILD MARKER: NB-141 (Weekend slots locked to the cover worker; changing cover clears their weekend jobs) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -6977,6 +6977,20 @@ function applyWeekendCoverResult(res) {
   if ((res.worker || res.satWorker || res.sunWorker) && !scheduleStatuses.some(s => s.name === WEEKEND_COVER_STATUS)) scheduleStatuses.push({ name: WEEKEND_COVER_STATUS, color: '#00B050' });
 }
 
+function wcCovers(ds, worker) {
+  return schedule.some(x => x.date === ds && x.worker === worker && x.type === 'status' && x.status === WEEKEND_COVER_STATUS);
+}
+function isWeekendDate(ds) { return !!ds && [0, 6].includes(new Date(ds + 'T12:00:00').getDay()); }
+
+// Jobs and notes the outgoing cover worker has on a day they would lose
+function wcAffected(weekStart, satWorker, sunWorker) {
+  const mon = new Date(weekStart + 'T00:00:00');
+  return [[localDateStr(addDaysLocal(mon, 5)), satWorker], [localDateStr(addDaysLocal(mon, 6)), sunWorker]].flatMap(([ds, who]) => {
+    const prev = schedule.filter(x => x.date === ds && x.type === 'status' && x.status === WEEKEND_COVER_STATUS && x.worker !== who).map(x => x.worker);
+    return schedule.filter(x => x.date === ds && prev.includes(x.worker) && (x.type === 'job' || x.type === 'note'));
+  });
+}
+
 function wcSplitDays(weekStart) { wcSplitOpen.add(weekStart); renderWeekendCover(); }
 
 function wcJoinDays(weekStart) {
@@ -7003,6 +7017,12 @@ async function saveWeekendCover(weekStart, fields, sel) {
   const rec = wcFor(weekStart);
   const restore = () => { if (sel) renderWeekendCover(); };
   if (!navigator.onLine || !SCRIPT_URL) { restore(); alert('You need to be online to change weekend cover'); return; }
+  const newSat = fields.split ? fields.satWorker : fields.worker, newSun = fields.split ? fields.sunWorker : fields.worker;
+  const lose = wcAffected(weekStart, newSat || '', newSun || '');
+  if (lose.length) {
+    const lines = lose.map(x => '- ' + x.worker + ', ' + SCHED_DAY_NAMES[(new Date(x.date + 'T12:00:00').getDay() + 6) % 7] + ': ' + (x.type === 'job' ? x.jobId : (x.note || 'note')));
+    if (!confirm('Changing weekend cover will remove ' + (lose.length === 1 ? 'this slot' : 'these ' + lose.length + ' slots') + ' from the schedule:\n\n' + lines.join('\n') + '\n\nAdd ' + (lose.length === 1 ? 'it' : 'them') + ' again for the new cover worker if needed.\n\nContinue?')) { renderWeekendCover(); return; }
+  }
   const selects = Array.from(document.querySelectorAll(`tr[data-week="${weekStart}"] select, tr[data-week="${weekStart}"] button`));
   selects.forEach(x => { x.disabled = true; });
   try {
@@ -7360,7 +7380,7 @@ function renderScheduleInto(o) {
       }).join('');
       dayTotalCells.push(svDayTotal(d, ds, w.name, items, today, weekTotals));
       const isWkend = d.getDay() === 0 || d.getDay() === 6;
-      if (!o.readOnly && (!isWkend || items.length)) {
+      if (!o.readOnly && (!isWkend || wcCovers(ds, w.name))) {
         const addStyle = bg ? ` style="color:${textOn(bg)};border-color:${textOn(bg) === '#fff' ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.4)'};"` : '';
         html += `<button class="sched-add"${addStyle} onclick="openSchedModal(null, '${ds}', '${escWO(w.name).replace(/'/g, "\\'")}')">+ Add</button>`;
       }
@@ -7540,7 +7560,7 @@ function schedWithToggled() {
 
 function schedItemChanged() {
   const val = document.getElementById('sched-item').value;
-  document.getElementById('sched-with-wrap').style.display = val.indexOf('job:') === 0 ? '' : 'none';
+  document.getElementById('sched-with-wrap').style.display = val.indexOf('job:') === 0 && !(schedModalState && schedModalState.weekend) ? '' : 'none';
   const ref = val.indexOf('job:') === 0 ? val.slice(4) : '';
   if (ref && isRecurringJobId(ref)) { rjPropShow('sched-rj-prop'); applyRjDefault('sched-rj-prop', ref); }
   else rjPropHide('sched-rj-prop');
@@ -7566,7 +7586,7 @@ function openSchedModal(itemId, date, worker) {
   const forItem = itemId ? (schedule.find(x => x.id === itemId) || {}) : null;
   const forWorker = forItem ? (forItem.worker || '') : worker;
   const forDate = forItem ? forItem.date : date;
-  const wkendDay = !!forDate && [0, 6].includes(new Date(forDate + 'T12:00:00').getDay());
+  const wkendDay = isWeekendDate(forDate);
   fillSchedItemSelect(forWorker, wkendDay && !(forItem && forItem.type === 'status'));
   const sel = document.getElementById('sched-item');
   const note = document.getElementById('sched-note');
@@ -7574,7 +7594,7 @@ function openSchedModal(itemId, date, worker) {
   if (itemId) {
     const it = schedule.find(x => x.id === itemId);
     if (!it) return;
-    schedModalState = { id: it.id, date: it.date, worker: it.worker };
+    schedModalState = { id: it.id, date: it.date, worker: it.worker, weekend: wkendDay };
     const val = it.type === 'job' ? 'job:' + it.jobId : it.type === 'status' ? 'status:' + it.status : 'note:';
     if (!Array.from(sel.options).some(o => o.value === val)) {
       const oj = it.type === 'job' ? jobs.find(x => String(x.id) === String(it.jobId)) : null;
@@ -7595,7 +7615,7 @@ function openSchedModal(itemId, date, worker) {
     document.getElementById('sched-delete-btn').style.display = '';
     schedSetupMove(it);
   } else {
-    schedModalState = { id: null, date, worker };
+    schedModalState = { id: null, date, worker, weekend: wkendDay };
     sel.value = '';
     note.value = '';
     rjPropHide('sched-rj-prop');
@@ -7608,7 +7628,7 @@ function openSchedModal(itemId, date, worker) {
     document.getElementById('sched-multi').style.display = '';
     document.getElementById('sched-delete-btn').style.display = 'none';
     document.getElementById('sched-move-wrap').style.display = 'none';
-    const idx = wkendDay ? [5, 6] : [0, 1, 2, 3, 4];
+    const idx = wkendDay ? [5, 6].filter(i => wcCovers(localDateStr(addDaysLocal(start, i)), worker)) : [0, 1, 2, 3, 4];
     const days = idx.map(i => { const d = addDaysLocal(start, i); return { value: localDateStr(d), label: SCHED_DAY_NAMES[i].slice(0, 3) + ' ' + d.getDate(), title: fmtUKDate(localDateStr(d)) }; });
     renderSchedChips('sched-days', days, new Set([date]));
   }
@@ -7645,7 +7665,7 @@ function schedSetupMove(it) {
   closeBtn.textContent = j && jobPending(j) ? 'Confirm closed' : 'Close Job';
   document.getElementById('sched-move-btn').style.display = show ? '' : 'none';
   const others = it && it.type === 'job' && it.id ? scheduleOps().filter(w => w.name !== it.worker) : [];
-  const canChange = show && others.length > 0;
+  const canChange = show && others.length > 0 && !isWeekendDate(it.date);
   document.getElementById('sched-worker-btn').style.display = canChange ? '' : 'none';
   document.getElementById('sched-worker-box').style.display = 'none';
   document.getElementById('sched-worker-select').innerHTML = '<option value="">Select a worker...</option>' +
@@ -7795,7 +7815,7 @@ function saveSchedModal() {
   const isRecurring = type === 'job' && isRecurringJobId(ref);
   const property = isRecurring ? rjPropGetValue('sched-rj-prop') : '';
   if (isRecurring && !property) { alert('Please choose the property for this recurring job, so the worker knows where to go.'); return; }
-  const withOn = type === 'job' && document.getElementById('sched-with-tick').checked;
+  const withOn = type === 'job' && !schedModalState.weekend && document.getElementById('sched-with-tick').checked;
   const selected = withOn ? Array.from(document.querySelectorAll('#sched-with-chips .wo-chip.on')).map(b => b.getAttribute('data-v')) : [];
   if (withOn && !selected.length) { alert('Pick which worker they need to meet, or untick "Other worker required?"'); return; }
   if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to change the schedule'); return; }
