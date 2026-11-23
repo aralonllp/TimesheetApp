@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-137 (Weekly Approvals: days grouped with totals and clearer dividers) -->
+<!-- BUILD MARKER: NB-138 (Weekend work added under Weekend Cover on the schedule) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -7354,7 +7354,8 @@ function renderScheduleInto(o) {
         return svRaisedCard(r, canAdd ? act : ' title="Logged by the worker but not on the schedule"', weekDone[w.name]);
       }).join('');
       dayTotalCells.push(svDayTotal(d, ds, w.name, items, today, weekTotals));
-      if (!o.readOnly && d.getDay() !== 0 && d.getDay() !== 6) {
+      const isWkend = d.getDay() === 0 || d.getDay() === 6;
+      if (!o.readOnly && (!isWkend || items.length)) {
         const addStyle = bg ? ` style="color:${textOn(bg)};border-color:${textOn(bg) === '#fff' ? 'rgba(255,255,255,0.6)' : 'rgba(0,0,0,0.4)'};"` : '';
         html += `<button class="sched-add"${addStyle} onclick="openSchedModal(null, '${ds}', '${escWO(w.name).replace(/'/g, "\\'")}')">+ Add</button>`;
       }
@@ -7446,7 +7447,7 @@ function svDayTotal(d, ds, worker, items, today, weekTotals) {
   return `<div class="sv-daytotal${cls}"><strong>${fmtHrs(logged)}h${useTarget ? ` <span style="font-weight:400;color:var(--color-text-secondary);">/ ${fmtHrs(target)}h</span>` : ''}</strong></div>`;
 }
 
-function fillSchedItemSelect(worker) {
+function fillSchedItemSelect(worker, weekend) {
   const sel = document.getElementById('sched-item');
   const openJobs = jobs.filter(j => j.open && expandAssignedTo(j.assignedTo).includes(worker)).slice().sort((a, b) => (parseInt(String(b.id).replace(/\D/g, ''), 10) || 0) - (parseInt(String(a.id).replace(/\D/g, ''), 10) || 0));
   let html = '<option value="">Select...</option>';
@@ -7454,7 +7455,7 @@ function fillSchedItemSelect(worker) {
   const myRecurring = recurringJobs.filter(j => j.active !== false && j.active !== 'FALSE' && expandAssignedTo(j.assignedTo || '').includes(worker))
     .sort((a, b) => String(a.id).localeCompare(String(b.id)));
   if (myRecurring.length) html += `<optgroup label="Recurring jobs assigned to ${escWO(worker)}">` + myRecurring.map(j => `<option value="job:${escWO(j.id)}">${escWO(j.id)} · ${escWO(j.description || '')}</option>`).join('') + '</optgroup>';
-  const pickable = scheduleStatuses.filter(st => st.name !== WEEKEND_COVER_STATUS);
+  const pickable = weekend ? [] : scheduleStatuses.filter(st => st.name !== WEEKEND_COVER_STATUS);
   if (pickable.length) html += '<optgroup label="Statuses">' + pickable.map(st => `<option value="status:${escWO(st.name)}">${escWO(st.name)}</option>`).join('') + '</optgroup>';
   html += '<optgroup label="Other"><option value="note:">Free text (no WO)</option></optgroup>';
   sel.innerHTML = html;
@@ -7557,8 +7558,11 @@ function renderSchedChips(elId, options, selected) {
 function openSchedModal(itemId, date, worker) {
   const lockedItem = itemId && schedule.find(x => x.id === itemId && x.type === 'status' && x.status === WEEKEND_COVER_STATUS);
   if (lockedItem) { alert('Weekend Cover is managed on the Weekend Cover tab.'); return; }
-  const forWorker = itemId ? ((schedule.find(x => x.id === itemId) || {}).worker || '') : worker;
-  fillSchedItemSelect(forWorker);
+  const forItem = itemId ? (schedule.find(x => x.id === itemId) || {}) : null;
+  const forWorker = forItem ? (forItem.worker || '') : worker;
+  const forDate = forItem ? forItem.date : date;
+  const wkendDay = !!forDate && [0, 6].includes(new Date(forDate + 'T12:00:00').getDay());
+  fillSchedItemSelect(forWorker, wkendDay && !(forItem && forItem.type === 'status'));
   const sel = document.getElementById('sched-item');
   const note = document.getElementById('sched-note');
   const start = schedWeekStart || mondayOf(new Date());
@@ -7599,7 +7603,8 @@ function openSchedModal(itemId, date, worker) {
     document.getElementById('sched-multi').style.display = '';
     document.getElementById('sched-delete-btn').style.display = 'none';
     document.getElementById('sched-move-wrap').style.display = 'none';
-    const days = Array.from({ length: 5 }, (_, i) => addDaysLocal(start, i)).map((d, i) => ({ value: localDateStr(d), label: SCHED_DAY_NAMES[i].slice(0, 3) + ' ' + d.getDate(), title: fmtUKDate(localDateStr(d)) }));
+    const idx = wkendDay ? [5, 6] : [0, 1, 2, 3, 4];
+    const days = idx.map(i => { const d = addDaysLocal(start, i); return { value: localDateStr(d), label: SCHED_DAY_NAMES[i].slice(0, 3) + ' ' + d.getDate(), title: fmtUKDate(localDateStr(d)) }; });
     renderSchedChips('sched-days', days, new Set([date]));
   }
   ssRefresh('sched-item');
