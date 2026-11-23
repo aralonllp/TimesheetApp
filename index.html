@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-138 (Weekend work added under Weekend Cover on the schedule) -->
+<!-- BUILD MARKER: NB-140 (Weekend Cover moved inside the Schedule tab) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -104,6 +104,10 @@ textarea { height: 60px; resize: none; }
 .day-entry-comments { font-size: 11px; color: var(--color-text-secondary); margin-top: 2px; font-style: italic; }
 .day-entry-hours { font-size: 12px; font-weight: 500; color: var(--color-text-primary); white-space: nowrap; min-width: 36px; text-align: right; }
 .day-empty { padding: 10px 12px; color: var(--color-text-secondary); font-size: 12px; }
+.sched-switch { display: inline-flex; border: 0.5px solid var(--color-border-secondary); border-radius: 8px; overflow: hidden; margin-bottom: 10px; background: var(--color-background-primary); }
+.sched-switch button { border: none; background: none; padding: 6px 14px; font-size: 13px; font-family: inherit; cursor: pointer; color: var(--color-text-secondary); }
+.sched-switch button + button { border-left: 0.5px solid var(--color-border-secondary); }
+.sched-switch button.on { background: var(--color-text-primary); color: var(--color-background-primary); font-weight: 500; }
 .day-weekend { background: var(--color-background-secondary); opacity: 0.6; }
 .badge-amended-sm { font-size: 10px; padding: 1px 5px; border-radius: 10px; background: var(--color-background-warning); color: var(--color-text-warning); margin-left: 4px; font-weight: 500; }
 .audit-log-sm { font-size: 10px; color: var(--color-text-secondary); font-style: italic; margin-top: 2px; }
@@ -358,7 +362,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 .sched-grid tbody th { width: 120px; padding: 8px; font-size: 13px; font-weight: 700; text-align: left; background: var(--color-background-primary); }
 .sched-grid tbody th.sched-today, .sched-grid td.sched-today { box-shadow: inset 0 3px 0 var(--color-text-primary); }
 .sched-cell { padding: 6px; min-height: 64px; position: relative; }
-.sched-item.sched-locked { cursor: not-allowed; }
+.sched-item.sched-locked { cursor: pointer; }
 .sched-item { font-size: 12px; line-height: 1.35; padding: 5px 7px; margin-bottom: 4px; border-radius: 6px; background: var(--color-background-secondary, #f3f3f3); cursor: pointer; }
 .sched-item:hover { outline: 1px solid var(--color-border-primary); }
 .sched-item .sched-wo { font-weight: 700; }
@@ -838,7 +842,6 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
         <button onclick="switchOfficeTab('entries')" id="otab-entries">Time Entries</button>
         <button onclick="switchOfficeTab('wocreate')" id="otab-wocreate">WO Creation</button>       
         <button onclick="switchOfficeTab('jobs')" id="otab-jobs">Jobs</button>
-        <button onclick="switchOfficeTab('weekendcover')" id="otab-weekendcover">Weekend Cover</button>
         <button onclick="switchOfficeTab('viewas')" id="otab-viewas" style="display:none;">View as Worker</button>
         <button onclick="switchOfficeTab('overtime')" id="otab-overtime">Overtime</button>
         <button onclick="switchOfficeTab('weekapprovals')" id="otab-weekapprovals">Weekly Approvals</button>
@@ -934,6 +937,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 
       <!-- Schedule tab -->
       <div id="office-tab-schedule">
+        <div class="sched-switch"><button class="on" onclick="switchOfficeTab('schedule')">Schedule</button><button class="" onclick="switchOfficeTab('weekendcover')">Weekend Cover</button></div>
         <div class="card">
           <div class="row-between card-header" style="flex-wrap:wrap;gap:10px;">
             <div class="sched-head">
@@ -1043,6 +1047,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 
       <!-- Weekend Cover tab -->
       <div id="office-tab-weekendcover" style="display:none;">
+        <div class="sched-switch"><button class="" onclick="switchOfficeTab('schedule')">Schedule</button><button class="on" onclick="switchOfficeTab('weekendcover')">Weekend Cover</button></div>
         <div class="card">
           <div class="row-between card-header"><p class="section-heading">This weekend</p></div>
           <div id="wc-current"></div>
@@ -5353,7 +5358,7 @@ function switchOfficeTab(tab) {
     const el = document.getElementById('office-tab-' + t);
     const btn = document.getElementById('otab-' + t);
     if (el) el.style.display = t === tab ? 'block' : 'none';
-    if (btn) btn.classList.toggle('active', t === tab);
+    if (btn) btn.classList.toggle('active', t === tab || (t === 'schedule' && tab === 'weekendcover'));
   });
   if (tab === 'absences') populateAbsenceEntryForm();
   if (tab === 'entries') renderOfficeEntries();
@@ -7317,13 +7322,13 @@ function renderScheduleInto(o) {
     ops.forEach(w => {
       const items = schedItemsFor(ds, w.name);
       const statusItem = items.find(x => x.type === 'status');
-      const bg = statusItem ? statusColor(statusItem.status) : '';
+      const bg = statusItem && statusItem.status !== WEEKEND_COVER_STATUS ? statusColor(statusItem.status) : '';
       html += `<td class="${isToday ? 'sched-today' : ''}"${bg ? ` style="background:${escWO(bg)};"` : ''}><div class="sched-cell">`;
       html += items.map(it => {
         if (it.type === 'status') {
           const c = statusColor(it.status);
           const locked = it.status === WEEKEND_COVER_STATUS;
-          return `<div class="sched-item sched-status${it._pending ? ' sched-pending' : ''}${locked && !o.readOnly ? ' sched-locked' : ''}" style="background:${escWO(c)};color:${textOn(c)};"${locked ? (o.readOnly ? '' : ' title="Change this on the Weekend Cover tab"') : click(it.id)}>${escWO(it.status)}${it.note ? `<div style="font-weight:400;font-style:italic;">${escWO(it.note)}</div>` : ''}</div>`;
+          return `<div class="sched-item sched-status${it._pending ? ' sched-pending' : ''}${locked && !o.readOnly ? ' sched-locked' : ''}" style="background:${escWO(c)};color:${textOn(c)};"${locked ? (o.readOnly ? '' : ` title="Change who is on cover" onclick="switchOfficeTab('weekendcover')"`) : click(it.id)}>${escWO(it.status)}${it.note ? `<div style="font-weight:400;font-style:italic;">${escWO(it.note)}</div>` : ''}</div>`;
         }
         if (it.type === 'job') return svJobCard(it, ds, w.name, dayHrs, jobTotals, click(it.id), weekDone[w.name]);
         if (it.type === 'job') {
@@ -7557,7 +7562,7 @@ function renderSchedChips(elId, options, selected) {
 
 function openSchedModal(itemId, date, worker) {
   const lockedItem = itemId && schedule.find(x => x.id === itemId && x.type === 'status' && x.status === WEEKEND_COVER_STATUS);
-  if (lockedItem) { alert('Weekend Cover is managed on the Weekend Cover tab.'); return; }
+  if (lockedItem) { switchOfficeTab('weekendcover'); return; }
   const forItem = itemId ? (schedule.find(x => x.id === itemId) || {}) : null;
   const forWorker = forItem ? (forItem.worker || '') : worker;
   const forDate = forItem ? forItem.date : date;
