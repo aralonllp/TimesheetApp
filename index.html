@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-145 (Worker schedule: room for Log time + Close job on tablets) -->
+<!-- BUILD MARKER: NB-146 (Worker entries table laid out for portrait tablets) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -85,6 +85,14 @@ textarea { height: 60px; resize: none; }
 /* ── Timesheet week view ── */
 .week-block { margin-bottom: 1.5rem; }
 .week-heading { font-size: 12px; font-weight: 600; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem; }
+.ent-narrow .ent-prop { font-weight: 600; color: var(--color-text-primary); }
+.ent-narrow .ent-desc { margin-top: 2px; white-space: normal; overflow-wrap: anywhere; }
+#timesheet-screen table.week-table.ent-narrow th:last-child { width: 84px !important; }
+#timesheet-screen table.week-table.ent-narrow th:nth-last-child(2) { width: 160px !important; }
+#timesheet-screen table.week-table.ent-narrow th:nth-last-child(3) { width: 56px !important; }
+.ent-narrow td:last-child { white-space: normal !important; padding: 4px 6px !important; }
+.ent-narrow td:last-child .btn { display: block; width: 100%; margin: 0 !important; }
+.ent-narrow td:last-child .btn + .btn { margin-top: 4px !important; }
 .week-table-wrap { width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; border-radius: var(--border-radius-lg); border: 0.5px solid var(--color-border-tertiary); margin-bottom: 1rem; }
 .week-table { width: 100%; min-width: 700px; border-collapse: collapse; background: var(--color-background-primary); }
 .week-table th { font-size: 11px; font-weight: 600; color: var(--color-text-secondary); text-align: left; padding: 8px 12px; background: var(--color-background-secondary); border-bottom: 0.5px solid var(--color-border-tertiary); }
@@ -166,7 +174,7 @@ textarea { height: 60px; resize: none; }
 .preview-banner { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; padding: 10px 14px; border-radius: var(--border-radius-md); background: #fff4d6; border: 1px solid #f0c890; font-size: 13px; color: #6b4700; }
 .hold-tag { font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 700; margin-left: 6px; background: #ffe8cc; color: #8a4b00; white-space: nowrap; }
 .entry-row.hold-row { border-left: 3px solid #f0a040; background: #fffaf3; }
-.hold-raise { background: none; border: none; padding: 0; margin-top: 8px; font-size: 12px; color: var(--color-text-info, #185fa5); text-decoration: underline; cursor: pointer; }
+.hold-raise { background: none; border: none; padding: 0; margin: 8px 0 6px; font-size: 12px; color: var(--color-text-info, #185fa5); text-decoration: underline; cursor: pointer; }
 .hold-banner { margin-top: 8px; padding: 8px 12px; border-radius: var(--border-radius-md); background: #fffaf3; border: 1px solid #f0c890; font-size: 12px; color: #8a4b00; }
 .atp-tag { font-size: 11px; padding: 2px 8px; border-radius: 20px; font-weight: 700; margin-left: 6px; background: #e8e3fb; color: #4b2aa8; white-space: nowrap; }
 .wo-row { display: grid; gap: 14px; }
@@ -536,6 +544,10 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
   .entry-row { padding: 14px; }
   .card { padding: 1.5rem; }
 }
+@media (min-width: 600px) and (max-width: 840px) {
+  .row-between.worker-head { flex-direction: row; align-items: center; }
+  #timesheet-screen .grid2 { grid-template-columns: 1fr 1fr; gap: 12px; }
+}
 @media (min-width: 841px) {
   .grid2 { gap: 16px; }
   .card { padding: 1.5rem; }
@@ -687,7 +699,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
         <button class="btn btn-sm" onclick="exitWorkerPreview()">Back to office</button>
       </div>
       <div class="load-banner" id="worker-load-banner" style="display:none;"><span id="worker-load-text"></span><button class="btn btn-sm" id="worker-load-retry" onclick="retryWorkerLoad()">Try again</button></div>
-      <div class="row-between form-section">
+      <div class="row-between form-section worker-head">
         <div>
           <p class="screen-title" id="worker-greeting">Hello</p>
           <p class="text-muted" id="worker-subtitle">Log time against a job</p>
@@ -2933,6 +2945,14 @@ async function submitCompletedWeek(wc, btn) {
 }
 
 // Day total under each day of the worker's week table, styled like the schedule's
+// Portrait tablets: Description folds under Property so Comments and Edit/Delete stay on screen
+const ENTRIES_NARROW_MQ = window.matchMedia ? window.matchMedia('(max-width: 900px)') : null;
+function entriesNarrow() { return !!(ENTRIES_NARROW_MQ && ENTRIES_NARROW_MQ.matches); }
+if (ENTRIES_NARROW_MQ) {
+  const onNarrowChange = () => { if (currentWorker && document.getElementById('worker-entries-section') && document.getElementById('worker-entries-section').style.display !== 'none') renderEntriesByDate(); };
+  if (ENTRIES_NARROW_MQ.addEventListener) ENTRIES_NARROW_MQ.addEventListener('change', onNarrowChange); else if (ENTRIES_NARROW_MQ.addListener) ENTRIES_NARROW_MQ.addListener(onNarrowChange);
+}
+
 function weekDayTotalRow(dayStr, dayEntries) {
   const total = dayEntries.reduce((t, e) => t + (parseFloat(e.hours) || 0), 0);
   const dow = new Date(dayStr + 'T12:00:00').getDay();
@@ -2942,13 +2962,14 @@ function weekDayTotalRow(dayStr, dayEntries) {
   const cls = !useTarget || dayStr > today ? '' : total >= target ? ' wk-met' : (dayStr < today ? ' wk-short' : '');
   return `<tr class="wd-total">
       <td class="wd-total-day"></td>
-      <td class="wd-total-label" colspan="3">Day total</td>
+      <td class="wd-total-label" colspan="${entriesNarrow() ? 2 : 3}">Day total</td>
       <td class="wd-total-val${cls}">${fmtHrs(total)}h${useTarget ? ` <span class="wd-total-target">/ ${fmtHrs(target)}h</span>` : ''}</td>
       <td colspan="2"></td>
     </tr>`;
 }
 
 function renderWeek(wc) {
+  const ND = entriesNarrow();
   const mine = entries.filter(e => e.worker === currentWorker);
   const weekSub = getWeekSubmission(currentWorker, wc);
   const fulfilled = isWeekFulfilled(currentWorker, wc);
@@ -3009,7 +3030,7 @@ function renderWeek(wc) {
           <div class="day-date">${fmtShortDate(dayStr)}</div>
           ${dayCellContent}
         </td>
-        <td colspan="6" style="padding:10px 12px;font-size:12px;color:var(--color-text-secondary);">—</td>
+        <td colspan="${ND ? 5 : 6}" style="padding:10px 12px;font-size:12px;color:var(--color-text-secondary);">—</td>
       </tr>`;
       const dayOT = overtimeRequests.filter(o => o.worker === currentWorker && normaliseDate(o.date) === dayStr && (o.status === 'pending' || o.status === 'declined'));
       const otRowsForDay = dayOT.map((o, otIdx) => {
@@ -3027,8 +3048,8 @@ function renderWeek(wc) {
           <div style="font-weight:600;">${o.jobId}</div>
           <span class="badge-amended-sm" style="${statusStyle}">${statusLabel}</span>
         </td>
-        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;color:var(--color-text-secondary);vertical-align:middle;width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${propLabel(o.property, 35)}</td>
-        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;color:var(--color-text-secondary);vertical-align:middle;width:380px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${o.description || ''}</td>
+        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;color:var(--color-text-secondary);vertical-align:middle;width:180px;${ND ? '' : 'white-space:nowrap;'}overflow:hidden;text-overflow:ellipsis;">${ND ? `<div class="ent-prop">${propLabel(o.property, 35)}</div><div class="ent-desc">${o.description || ''}</div>` : propLabel(o.property, 35)}</td>
+        ${ND ? '' : `<td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;color:var(--color-text-secondary);vertical-align:middle;width:380px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${o.description || ''}</td>`}
         <td style="padding:5px 6px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;font-weight:500;text-align:center;vertical-align:middle;white-space:nowrap;width:46px;">${o.hours}h</td>
         <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;font-style:italic;color:var(--color-text-secondary);vertical-align:middle;width:220px;overflow:hidden;">
           ${o.timeRange || ''}
@@ -3061,12 +3082,10 @@ function renderWeek(wc) {
           ${isPending ? `<span class="badge-amended-sm" style="background:var(--color-background-info);color:var(--color-text-info);">Pending</span>` : ''}
           ${e.isOvertime ? `<span class="badge-amended-sm" style="background:var(--color-background-success);color:var(--color-text-success);">⏱ Overtime</span>` : ''}
         </td>
-        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;color:var(--color-text-secondary);vertical-align:middle;width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-          ${propLabel(jobProperty, 35)}
-        </td>
-        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;color:var(--color-text-secondary);vertical-align:middle;width:380px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;color:var(--color-text-secondary);vertical-align:middle;width:180px;${ND ? '' : 'white-space:nowrap;'}overflow:hidden;text-overflow:ellipsis;">${ND ? `<div class="ent-prop">${propLabel(jobProperty, 35)}</div><div class="ent-desc">${jobDescription}</div>` : propLabel(jobProperty, 35)}</td>
+        ${ND ? '' : `<td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;color:var(--color-text-secondary);vertical-align:middle;width:380px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
           ${jobDescription}
-        </td>
+        </td>`}
         <td style="padding:5px 6px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;font-weight:500;text-align:center;vertical-align:middle;white-space:nowrap;width:46px;">
           ${e.hours}h
         </td>
@@ -3081,7 +3100,7 @@ function renderWeek(wc) {
         </td>
       </tr>
       <tr id="editrow-w-${e.id}" style="display:none;">
-        <td colspan="7" style="padding:0;">
+        <td colspan="${ND ? 6 : 7}" style="padding:0;">
           <div class="entry-edit" style="display:block;margin:0;border-radius:0;">
             <div class="edit-grid">
               <div class="edit-field">
@@ -3137,8 +3156,8 @@ function renderWeek(wc) {
           <div style="font-weight:600;">${o.jobId}</div>
           <span class="badge-amended-sm" style="${statusStyle}">${statusLabel}</span>
         </td>
-        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;color:var(--color-text-secondary);vertical-align:middle;width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${propLabel(o.property, 35)}</td>
-        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;color:var(--color-text-secondary);vertical-align:middle;width:380px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${o.description || ''}</td>
+        <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;color:var(--color-text-secondary);vertical-align:middle;width:180px;${ND ? '' : 'white-space:nowrap;'}overflow:hidden;text-overflow:ellipsis;">${ND ? `<div class="ent-prop">${propLabel(o.property, 35)}</div><div class="ent-desc">${o.description || ''}</div>` : propLabel(o.property, 35)}</td>
+        ${ND ? '' : `<td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;color:var(--color-text-secondary);vertical-align:middle;width:380px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${o.description || ''}</td>`}
         <td style="padding:5px 6px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;font-weight:500;text-align:center;vertical-align:middle;white-space:nowrap;width:46px;">${o.hours}h</td>
         <td style="padding:5px 10px;border-right:0.5px solid var(--color-border-tertiary);font-size:12px;font-style:italic;color:var(--color-text-secondary);vertical-align:middle;width:220px;overflow:hidden;">
           ${o.timeRange || ''}
@@ -3163,13 +3182,12 @@ function renderWeek(wc) {
         ${weekSub && weekSub.status === 'declined' ? `<span class="badge" style="background:#fdecea;color:var(--color-text-error);">Declined — resubmit when ready</span>` : ''}
       </div>
       <div class="week-table-wrap">
-      <table class="week-table" style="table-layout:fixed;width:100%;">
+      <table class="week-table ent-table${ND ? ' ent-narrow' : ''}" style="table-layout:fixed;width:100%;">
         <thead>
           <tr>
             <th style="width:96px;">Day</th>
             <th style="width:90px;">W/O Number</th>
-            <th style="width:180px;">Property</th>
-            <th style="width:320px;">Description</th>
+            ${ND ? '<th>Job</th>' : '<th style="width:180px;">Property</th><th style="width:320px;">Description</th>'}
             <th style="width:80px;text-align:center;">Hrs</th>
             <th style="width:220px;">Comments</th>
             <th style="width:110px;"></th>
