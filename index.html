@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-146 (Worker entries table laid out for portrait tablets) -->
+<!-- BUILD MARKER: NB-147 (Worker edits can no longer push a day past normal hours) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -3347,6 +3347,21 @@ async function saveEdit(id, isOffice) {
   const newComments = document.getElementById(`en-${p}-${id}`).value;
   const reason = document.getElementById(`er-${p}-${id}`).value;
   if (isNaN(newHours)) { alert('Please enter valid hours.'); return; }
+  if (!isOffice) {
+    const oldHours = parseFloat(entry.hours) || 0;
+    if (newHours <= 0) { alert('Hours must be more than 0. Use Delete to remove the entry.'); return; }
+    if (newHours !== oldHours) {
+      if (entry.isOvertime || entry.overtimeStatus) { alert('Overtime hours were approved by the office, so they can only be changed by the office.'); return; }
+      const ds = normaliseDate(entry.date);
+      const dow = new Date(ds + 'T12:00:00').getDay();
+      const allowed = (dow === 0 || dow === 6) ? oldHours
+        : Math.round(Math.max(0, workerDailyHours(currentWorker) - (normalHoursLogged(currentWorker, ds) - oldHours)) * 100) / 100;
+      if (newHours > allowed) {
+        alert('This entry can be at most ' + fmtHrs(allowed) + 'h — that completes your ' + fmtHrs(workerDailyHours(currentWorker)) + 'h day.\n\nLog any extra time as a new entry so it goes through as overtime.');
+        return;
+      }
+    }
+  }
 
   const amendment = {
     by: isOffice ? 'Office' : currentWorker,
