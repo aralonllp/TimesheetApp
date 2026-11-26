@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-144 (WO creation waits longer and retries when the server is busy) -->
+<!-- BUILD MARKER: NB-145 (Worker schedule: room for Log time + Close job on tablets) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -461,8 +461,10 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 @media (max-width: 1000px) {
   .wk-table th.wk-c-job { width: 170px !important; }
   .wk-table th.wk-c-note { width: 100px !important; }
-  .wk-table th.wk-c-act { width: 170px !important; }
+  .wk-table th.wk-c-act, #timesheet-screen .wk-table thead th.wk-c-act { width: 104px !important; }
   .wk-table th.wk-c-log { width: 84px !important; }
+  .wk-table td.wk-actions .btn { display: block; width: 100%; }
+  .wk-table td.wk-actions .btn + .btn { margin-left: 0; margin-top: 4px; }
 }
 .raised-tag { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 20px; background: #efe7fb; color: #5b3a8e; white-space: nowrap; }
 .sched-item.sched-raised { background: #f7f2fd; border: 1px dashed #b9a2dc; }
@@ -584,7 +586,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
   #timesheet-screen .week-table th:first-child { width: 128px !important; }
   #timesheet-screen .week-table:not(.wk-table) th:nth-child(4) { width: auto !important; }
   #timesheet-screen .week-table:not(.wk-table) th:last-child { width: 190px !important; }
-  #timesheet-screen .wk-table th:last-child { width: 140px !important; }
+  #timesheet-screen .wk-table th:last-child { width: 192px !important; }
   #timesheet-screen .wk-table .btn { white-space: nowrap; }
   .day-name { font-size: 14px; font-weight: 600; }
   .day-date { font-size: 12px; }
