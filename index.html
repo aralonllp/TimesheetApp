@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-147 (Worker edits can no longer push a day past normal hours) -->
+<!-- BUILD MARKER: NB-148 (Worker tablet/Office view buttons hidden while a worker is signed in) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -39,6 +39,8 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; b
   --border-radius-lg: 10px;
 }
 .nav { display: flex; gap: 8px; padding: 1rem 0 1.5rem; border-bottom: 0.5px solid var(--color-border-tertiary); margin-bottom: 1.5rem; }
+body.worker-in .nav { display: none; }
+body.worker-in .view { padding-top: 1.25rem; }
 .nav button { font-size: 13px; padding: 6px 16px; border-radius: var(--border-radius-md); border: 0.5px solid var(--color-border-secondary); background: transparent; color: var(--color-text-secondary); cursor: pointer; }
 .nav button.active { background: var(--color-background-secondary); color: var(--color-text-primary); font-weight: 500; border-color: var(--color-border-primary); }
 .view { display: none; }
@@ -2315,7 +2317,7 @@ function finishWorkerLogin(name) {
   workerLastActive = Date.now();
   showLoginNote('worker-login-note', '');
   document.getElementById('worker-pin').value = '';
-  if (!previewWorker) startWorkerSession(w);
+  if (!previewWorker) { startWorkerSession(w); document.body.classList.add('worker-in'); }
   currentWorker = w;
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('timesheet-screen').style.display = 'block';
@@ -2351,6 +2353,7 @@ function workerLogout() {
   if (commsRole) { applyCommsMode(''); switchTab('worker'); }
   currentWorker = null;
   workerToken = '';
+  document.body.classList.remove('worker-in');
   startWorkerSession('');
   setWorkerLoadBanner('', '');
   workerLastLoadOk = 0;
