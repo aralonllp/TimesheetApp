@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-149 (Job search shows descriptions up to 100 characters) -->
+<!-- BUILD MARKER: NB-150 (Each worker keeps an offline copy of their entries and schedule) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -1867,6 +1867,57 @@ function startWorkerSession(name) {
   entries = n ? entries.filter(e => String(e.worker || '').trim() === n) : [];
   schedule = n ? schedule.filter(x => String(x.worker || '').trim() === n) : [];
 }
+// ── Offline copy per worker ───────────────────────────────────────
+// Each worker's own entries, schedule, overtime and week submissions are kept on the
+// tablet, so they can still see them offline or after a refresh with no signal.
+// Refreshed on every successful load; dropped after WORKER_CACHE_KEEP_DAYS unused.
+const WORKER_CACHE_KEEP_DAYS = 28;
+const workerCacheKey = name => 'wcache:' + name;
+function saveWorkerCache() {
+  if (!currentWorker || previewWorker) return;
+  const me = currentWorker, mine = x => String(x && x.worker || '').trim() === me;
+  const snap = { at: Date.now(), entries: entries.filter(mine), schedule: schedule.filter(mine), overtimeRequests: overtimeRequests.filter(mine), weekSubmissions: (weekSubmissions || []).filter(mine) };
+  try { localStorage.setItem(workerCacheKey(me), JSON.stringify(snap)); } catch (e) {}
+}
+function readWorkerCache(name) {
+  const cutoff = Date.now() - WORKER_CACHE_KEEP_DAYS * 86400000;
+  try {
+    Object.keys(localStorage).filter(k => k.indexOf('wcache:') === 0).forEach(k => {
+      let at = 0; try { at = JSON.parse(localStorage.getItem(k)).at || 0; } catch (e) {}
+      if (at < cutoff) localStorage.removeItem(k);
+    });
+    return JSON.parse(localStorage.getItem(workerCacheKey(name)) || 'null');
+  } catch (e) { return null; }
+}
+function mergeById(base, over) {
+  const m = new Map();
+  (base || []).forEach(x => m.set(String(x.id), x));
+  (over || []).forEach(x => m.set(String(x.id), x));
+  return [...m.values()];
+}
+// What this tablet already knows for the worker, plus anything still waiting to be sent
+function applyWorkerCache(name) {
+  const snap = readWorkerCache(name);
+  if (snap) {
+    entries = mergeById((snap.entries || []).map(e => ({ ...e, amendments: Array.isArray(e.amendments) ? e.amendments : amendmentsFromString(String(e.amendments || '')) })), entries);
+    schedule = mergeById(snap.schedule, schedule);
+    overtimeRequests = mergeById(snap.overtimeRequests, overtimeRequests.filter(o => String(o.worker || '').trim() === name));
+    weekSubmissions = mergeById(snap.weekSubmissions, (weekSubmissions || []).filter(w => String(w.worker || '').trim() === name));
+  }
+  syncQueue.forEach(q => {
+    const p = q.payload || {};
+    if ((q.action === 'addEntry' || q.action === 'updateEntry') && p.entry && String(p.entry.worker || '').trim() === name) {
+      const e = { ...p.entry, amendments: Array.isArray(p.entry.amendments) ? p.entry.amendments : amendmentsFromString(String(p.entry.amendments || '')) };
+      const i = entries.findIndex(x => String(x.id) === String(e.id));
+      if (i > -1) entries[i] = e; else entries.push(e);
+    }
+    if (q.action === 'deleteEntry' && p.id) entries = entries.filter(x => String(x.id) !== String(p.id));
+  });
+  return snap;
+}
+document.addEventListener('visibilitychange', () => { if (document.hidden) saveWorkerCache(); });
+window.addEventListener('pagehide', saveWorkerCache);
+
 const API_TIMEOUTS = { workerLogin: 30000, officeLogin: 30000 };
 
 // Worker screen banner: loading / could not load, with a retry
@@ -2317,7 +2368,7 @@ function finishWorkerLogin(name) {
   workerLastActive = Date.now();
   showLoginNote('worker-login-note', '');
   document.getElementById('worker-pin').value = '';
-  if (!previewWorker) { startWorkerSession(w); document.body.classList.add('worker-in'); }
+  if (!previewWorker) { startWorkerSession(w); document.body.classList.add('worker-in'); applyWorkerCache(w); }
   currentWorker = w;
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('timesheet-screen').style.display = 'block';
@@ -2351,6 +2402,7 @@ function finishWorkerLogin(name) {
 function workerLogout() {
   if (previewWorker) { exitWorkerPreview(); return; }
   if (commsRole) { applyCommsMode(''); switchTab('worker'); }
+  saveWorkerCache();
   currentWorker = null;
   workerToken = '';
   document.body.classList.remove('worker-in');
@@ -2445,6 +2497,7 @@ async function pollJobs(preloaded) {
     setWorkerLoadBanner('', '');
     workerLastLoadOk = Date.now();
     if (previewWorker) { setSyncStatus('worker', 'synced', 'Read-only view'); return; }
+    saveWorkerCache();
     await flushQueue();
     const mineQueued = myQueuedItems().length;
     if (mineQueued) {
