@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-153 (Deleted entries no longer come back) -->
+<!-- BUILD MARKER: NB-154 (Worker and office sign-ins no longer share one window) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -2383,6 +2383,8 @@ function finishWorkerLogin(name) {
   workerLastActive = Date.now();
   showLoginNote('worker-login-note', '');
   document.getElementById('worker-pin').value = '';
+  // One window holds one set of data, so a worker sign-in ends any office session left open here
+  if (!previewWorker && currentOfficeUser) officeLogout();
   if (!previewWorker) { startWorkerSession(w); document.body.classList.add('worker-in'); applyWorkerCache(w); }
   currentWorker = w;
   document.getElementById('login-screen').style.display = 'none';
@@ -3512,6 +3514,8 @@ async function officeLogin() {
 }
 
 function enterOffice() {
+  // ...and an office sign-in ends any worker session (including its idle sign-out timer)
+  if (currentWorker && !previewWorker) { workerLogout(); switchTab('office'); }
   currentOfficeUser = officeUser.username;
   startReminderTimer();
   document.getElementById('office-login-screen').style.display = 'none';
