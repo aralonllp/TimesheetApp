@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-152 (Admin can hide closed WOs) -->
+<!-- BUILD MARKER: NB-153 (Deleted entries no longer come back) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -1635,6 +1635,18 @@ let currentOfficeUser = null;
 let overtimeRequests = [];
 let pendingOvertimeEntry = null;
 let pendingDeleteEntryIds = new Set();
+// A refresh that was already on its way when an entry was deleted still lists it,
+// so deletes are remembered for a few minutes (and while still queued) and kept out.
+const RECENT_DELETE_MS = 3 * 60 * 1000;
+const recentEntryDeletes = new Map();
+function entryDeleted_(id) {
+  id = String(id);
+  if (pendingDeleteEntryIds.has(id)) return true;
+  const at = recentEntryDeletes.get(id);
+  if (at && Date.now() - at < RECENT_DELETE_MS) return true;
+  if (at) recentEntryDeletes.delete(id);
+  return syncQueue.some(q => q.action === 'deleteEntry' && q.payload && String(q.payload.id) === id);
+}
 let isSubmittingEntry = false;
 let isSubmittingOvertime = false;
 let isSubmittingMultiAdd = false;
@@ -1915,6 +1927,7 @@ function applyWorkerCache(name) {
     }
     if (q.action === 'deleteEntry' && p.id) entries = entries.filter(x => String(x.id) !== String(p.id));
   });
+  entries = entries.filter(e => !entryDeleted_(e.id));
   return snap;
 }
 document.addEventListener('visibilitychange', () => { if (document.hidden) saveWorkerCache(); });
@@ -2451,14 +2464,14 @@ async function pollJobs(preloaded) {
       isOvertime: e.isOvertime === true || e.isOvertime === 'TRUE' || e.isOvertime === 1,
       overtimeStart: toHHMM(e.overtimeStart),
       overtimeEnd: toHHMM(e.overtimeEnd)
-    })).filter(e => !pendingDeleteEntryIds.has(String(e.id)));
+    })).filter(e => !entryDeleted_(e.id));
     entries = keepOlderEntries(entries, prevEntries, data);
-    myQueuedItems().forEach(q => { if (q.payload?.entry && !entries.find(e => e.id === q.payload.entry.id)) entries.push(q.payload.entry); });
+    myQueuedItems().forEach(q => { if (q.payload?.entry && !entries.find(e => e.id === q.payload.entry.id) && !entryDeleted_(q.payload.entry.id)) entries.push(q.payload.entry); });
     // Guard against a lagging server read silently dropping an entry that
     // already synced successfully — see trackRecentEntry for why this exists.
     recentlyCreatedEntries = recentlyCreatedEntries.filter(r => Date.now() - r.at < RECENT_ENTRY_WINDOW_MS);
     recentlyCreatedEntries.forEach(r => {
-      if (!entries.find(e => e.id === r.entry.id) && !pendingDeleteEntryIds.has(String(r.entry.id))) {
+      if (!entries.find(e => e.id === r.entry.id) && !entryDeleted_(r.entry.id)) {
         entries.push(r.entry);
       }
     });
@@ -3605,12 +3618,12 @@ async function refreshOfficeNow() {
         isOvertime: e.isOvertime === true || e.isOvertime === 'TRUE' || e.isOvertime === 1,
         overtimeStart: toHHMM(e.overtimeStart),
         overtimeEnd: toHHMM(e.overtimeEnd)
-      })).filter(e => !pendingDeleteEntryIds.has(String(e.id)));
+      })).filter(e => !entryDeleted_(e.id));
       entries = keepOlderEntries(entries, prevEntries, data);
       syncQueue.forEach(q => { if (q.payload?.entry && !entries.find(e => e.id === q.payload.entry.id)) entries.push(q.payload.entry); });
       recentlyCreatedEntries = recentlyCreatedEntries.filter(r => Date.now() - r.at < RECENT_ENTRY_WINDOW_MS);
       recentlyCreatedEntries.forEach(r => {
-        if (!entries.find(e => e.id === r.entry.id) && !pendingDeleteEntryIds.has(String(r.entry.id))) {
+        if (!entries.find(e => e.id === r.entry.id) && !entryDeleted_(r.entry.id)) {
           entries.push(r.entry);
         }
       });
@@ -4953,6 +4966,8 @@ async function submitOfficeEntry() {
 async function deleteEntry(id, isOffice) {
   if (!confirm('Are you sure you want to delete this entry? This cannot be undone.')) return;
   pendingDeleteEntryIds.add(String(id));
+  recentEntryDeletes.set(String(id), Date.now());
+  recentlyCreatedEntries = recentlyCreatedEntries.filter(r => String(r.entry.id) !== String(id));
   entries = entries.filter(e => e.id !== id);
   localStorage.setItem('entries', JSON.stringify(entries));
   if (isOffice) {
@@ -4966,6 +4981,7 @@ async function deleteEntry(id, isOffice) {
     const { synced } = await queueOrSend('deleteEntry', { id, performedBy: isOffice ? (officeUserName() || 'Office') : undefined });
     if (synced) setSyncStatus(isOffice ? 'office' : 'worker', 'synced', 'Entry deleted');
   } finally {
+    recentEntryDeletes.set(String(id), Date.now());
     pendingDeleteEntryIds.delete(String(id));
   }
 }
@@ -8860,7 +8876,7 @@ function myJobHours(worker) {
 function mergeHistory_(data) {
   if (Array.isArray(data.entries)) {
     const have = new Set(entries.map(e => String(e.id)));
-    data.entries.forEach(e => { if (!have.has(String(e.id)) && !pendingDeleteEntryIds.has(String(e.id))) entries.push(normEntry_(e)); });
+    data.entries.forEach(e => { if (!have.has(String(e.id)) && !entryDeleted_(e.id)) entries.push(normEntry_(e)); });
   }
   if (Array.isArray(data.schedule)) {
     const have = new Set(schedule.map(x => x.id));
