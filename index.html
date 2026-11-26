@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-142 (Office Extended role: sees Comms, no admin tools) -->
+<!-- BUILD MARKER: NB-144 (WO creation waits longer and retries when the server is busy) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -1901,12 +1901,13 @@ function api(action, payload = {}, _attempt = 0) {
     if (data.newToken) takeRenewedToken(sentToken, data.newToken);
     if (data.movedSlot) applyMovedSlot(data.movedSlot);
     if (data.authError) { if (sentToken && sentToken === currentToken()) handleAuthExpired(); const e = new Error(data.error); e.authError = true; throw e; }
-    if (data.error) throw new Error(data.error); // real app-level error — not retried
+    if (data.error) { const e = new Error(data.error); if (data.busy) e.busy = true; throw e; } // real app-level error — only a busy lock is retried
     return data;
   })
   .catch(function(err) {
-    const isAppError = err.message && !/^HTTP \d|Bad response from server|Failed to fetch|NetworkError|network/i.test(err.message);
+    const isAppError = !err.busy && err.message && !/^HTTP \d|Bad response from server|Failed to fetch|NetworkError|network/i.test(err.message);
     if (isAppError || _attempt >= MAX_ATTEMPTS - 1) throw err;
+    if (err.busy) return new Promise(function(resolve) { setTimeout(resolve, 2000); }).then(function() { return api(action, payload, _attempt + 1); });
     const delay = 500 * Math.pow(2, _attempt); // 500ms, then 1000ms
     return new Promise(function(resolve) { setTimeout(resolve, delay); })
       .then(function() { return api(action, payload, _attempt + 1); });
@@ -4890,6 +4891,15 @@ async function toggleAbsenceType(id, currentlyActive) {
   const { synced } = await queueOrSend('saveAbsenceType', { absenceType: a });
   if (synced) setSyncStatus('office', 'synced', 'Absence type updated');
 }
+
+// ── Overtime rates (LLP) ─────────────────────────────────────────
+// Mon 07:00 – Sat 18:00            1.5x
+// Sat 18:00 – Mon 07:00 (Sunday)   2.0x
+// Bank holidays (incl. Christmas)  2.0x
+// Office closure days              processed as 0.5x (paid 1.5x, base already in salary)
+const OFFICE_CLOSURE_STATUSES = ['Festive Closure'];
+const STANDBY_START_MIN = 17 * 60;   // Friday close of business
+const STANDBY_END_MIN = 7 * 60;      // Monday (or first working day after a bank holiday)
 
 function isOfficeClosureDay(ds) {
   return schedule.some(x => x.date === ds && x.type === 'status' && OFFICE_CLOSURE_STATUSES.includes(x.status));
