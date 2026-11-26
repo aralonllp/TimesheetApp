@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-150 (Each worker keeps an offline copy of their entries and schedule) -->
+<!-- BUILD MARKER: NB-151 (Office schedule: worker names stay at the top while scrolling) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -365,9 +365,10 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
 .sched-legend { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 12px; }
 .sched-pill { font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 20px; }
 .sched-scroll { overflow-x: auto; border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-md); }
+@media (min-width: 1000px) { .sched-scroll { overflow-x: clip; } }
 .sched-grid { border-collapse: collapse; width: 100%; min-width: 900px; table-layout: fixed; }
 .sched-grid th, .sched-grid td { border: 0.5px solid var(--color-border-tertiary); vertical-align: top; }
-.sched-grid thead th { background: #dce6f2; font-size: 13px; font-weight: 700; padding: 8px; text-align: left; }
+.sched-grid thead th { background: #dce6f2; font-size: 13px; font-weight: 700; padding: 8px; text-align: left; position: sticky; top: 0; z-index: 3; box-shadow: inset 0 -1px 0 #9fb3cc; }
 .sched-grid thead th.sched-corner { background: #ffff00; width: 120px; font-size: 12px; }
 .sched-grid tbody th { width: 120px; padding: 8px; font-size: 13px; font-weight: 700; text-align: left; background: var(--color-background-primary); }
 .sched-grid tbody th.sched-today, .sched-grid td.sched-today { box-shadow: inset 0 3px 0 var(--color-text-primary); }
