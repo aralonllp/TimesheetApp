@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-151 (Office schedule: worker names stay at the top while scrolling) -->
+<!-- BUILD MARKER: NB-152 (Admin can hide closed WOs) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -1099,6 +1099,7 @@ label.sched-with-check { display: inline-flex; align-items: center; gap: 8px; ma
               <button id="jobs-view-open" onclick="setJobsView('open')">Open</button>
               <button id="jobs-view-pending" onclick="setJobsView('pending')">Awaiting sign-off</button>
               <button id="jobs-view-closed" onclick="setJobsView('closed')">Closed</button>
+              <button id="jobs-view-hidden" onclick="setJobsView('hidden')" style="display:none;">Hidden</button>
             </div>
             <div style="display:flex;gap:8px;align-items:center;flex:1;justify-content:flex-end;min-width:220px;">
               <input type="text" id="jobs-search" placeholder="Search WO, location, description..." oninput="renderJobsList()" style="max-width:320px;">
@@ -3793,10 +3794,12 @@ function setJobsView(view) {
   document.getElementById('jobs-view-open').classList.toggle('active', view === 'open');
   document.getElementById('jobs-view-pending').classList.toggle('active', view === 'pending');
   document.getElementById('jobs-view-closed').classList.toggle('active', view === 'closed');
+  document.getElementById('jobs-view-hidden').classList.toggle('active', view === 'hidden');
   renderJobsList();
 }
 
 function jobInCurrentView(j) {
+  if (jobsView === 'hidden' || j.hidden) return jobsView === 'hidden' && !!j.hidden;
   return jobsView === 'all' || (jobsView === 'open' ? j.open : jobsView === 'pending' ? jobPending(j) : (!j.open && !jobPending(j)));
 }
 
@@ -3814,19 +3817,25 @@ function renderJobsList() {
   const hoursByJob = allJobHours();
   initJobFilterUI();
   const matches = j => jobMatchesSearch(j) && jobMatchesFilters(j, hoursByJob);
-  const filtered = jobs.filter(matches);
+  const shown = jobs.filter(j => !j.hidden), hiddenAll = jobs.filter(j => j.hidden);
+  if (jobsView === 'hidden' && !isAdminUser()) jobsView = 'all';
+  const filtered = shown.filter(matches);
+  const hiddenJobs = hiddenAll.filter(matches);
   const openJobs = filtered.filter(j => j.open);
   const pendingJobs = filtered.filter(jobPending);
   const closedJobs = filtered.filter(j => !j.open && !jobPending(j));
   const narrowed = !!q || jobFilters.length > 0;
-  const totOpen = jobs.filter(j => j.open).length, totPending = jobs.filter(jobPending).length, totClosed = jobs.length - totOpen - totPending;
+  const totOpen = shown.filter(j => j.open).length, totPending = shown.filter(jobPending).length, totClosed = shown.length - totOpen - totPending;
+  const hidBtn = document.getElementById('jobs-view-hidden');
+  hidBtn.style.display = isAdminUser() && (hiddenAll.length || jobsView === 'hidden') ? '' : 'none';
+  hidBtn.textContent = 'Hidden (' + (narrowed ? hiddenJobs.length + ' of ' + hiddenAll.length : hiddenAll.length) + ')';
   document.getElementById('jobs-view-pending').textContent = 'Awaiting sign-off (' + (narrowed ? pendingJobs.length + ' of ' + totPending : totPending) + ')';
   document.getElementById('jobs-view-pending').classList.toggle('jobs-view-alert', totPending > 0);
   updateJobsTabBadge();
   document.getElementById('jobs-view-open').textContent = 'Open (' + (narrowed ? openJobs.length + ' of ' + totOpen : totOpen) + ')';
   document.getElementById('jobs-view-closed').textContent = 'Closed (' + (narrowed ? closedJobs.length + ' of ' + totClosed : totClosed) + ')';
-  document.getElementById('jobs-view-all').textContent = 'All (' + (narrowed ? filtered.length + ' of ' + jobs.length : jobs.length) + ')';
-  const list = (jobsView === 'all' ? filtered : jobsView === 'open' ? openJobs : jobsView === 'pending' ? pendingJobs : closedJobs).slice().sort((a, b) => (jobIsHolding(b) - jobIsHolding(a)) || woNum(b.id) - woNum(a.id));
+  document.getElementById('jobs-view-all').textContent = 'All (' + (narrowed ? filtered.length + ' of ' + shown.length : shown.length) + ')';
+  const list = (jobsView === 'hidden' ? hiddenJobs : jobsView === 'all' ? filtered : jobsView === 'open' ? openJobs : jobsView === 'pending' ? pendingJobs : closedJobs).slice().sort((a, b) => (jobIsHolding(b) - jobIsHolding(a)) || woNum(b.id) - woNum(a.id));
   const listEst = list.reduce((t, j) => t + (parseFloat(j.estHours) || 0), 0);
   const listAct = list.reduce((t, j) => t + (hoursByJob[String(j.id)] || 0), 0);
   el.innerHTML = list.length
@@ -3857,6 +3866,24 @@ function lockJobRow(btn, label) {
     if (btn && label) btn.textContent = text;
     if (row) row.classList.remove('row-busy');
   };
+}
+
+async function setJobHiddenUI(id, hidden, btn) {
+  const job = jobs.find(j => j.id === id);
+  if (!job) return;
+  if (!confirm(hidden ? 'Hide ' + id + '?\n\nIt disappears from the Jobs list and from every job picker for everyone. Time already logged against it stays. You can unhide it from the Hidden view.' : 'Unhide ' + id + '?\n\nIt goes back into the Closed list for everyone.')) return;
+  if (!navigator.onLine || !SCRIPT_URL) { alert('You need to be online to do this'); return; }
+  const unlock = lockJobRow(btn, hidden ? 'Hiding…' : 'Unhiding…');
+  try {
+    await api('setJobHidden', { id, hidden, token: officeToken });
+    job.hidden = hidden;
+    try { localStorage.setItem('jobs', JSON.stringify(jobs)); } catch (e) {}
+    renderOfficeDashboard();
+    setSyncStatus('office', 'synced', id + (hidden ? ' hidden' : ' shown again'));
+  } catch (err) {
+    unlock();
+    alert('Could not ' + (hidden ? 'hide ' : 'unhide ') + id + ': ' + (err.message || err));
+  }
 }
 
 async function toggleJobOpen(id, open, btn) {
@@ -4014,7 +4041,9 @@ function renderJobRow(j, hoursByJob) {
             ? `<button class="btn btn-sm" onclick="toggleJobOpen('${escWO(j.id)}', false, this)">Close</button>`
             : jobPending(j)
               ? `<button class="btn btn-sm" id="jsb-${escWO(j.id)}" onclick="sendBackJob('${escWO(j.id)}')">Send back</button><button class="btn btn-sm btn-primary" id="jcc-${escWO(j.id)}" onclick="confirmJobClose('${escWO(j.id)}')">Confirm closed</button>`
-              : `<button class="btn btn-sm" onclick="toggleJobOpen('${escWO(j.id)}', true, this)">Reopen</button>`}`}
+              : j.hidden
+                ? `<span class="nf-kind-tag manual">Hidden</span>${isAdminUser() ? `<button class="btn btn-sm" onclick="setJobHiddenUI('${escWO(j.id)}', false, this)">Unhide</button>` : ''}`
+                : `<button class="btn btn-sm" onclick="toggleJobOpen('${escWO(j.id)}', true, this)">Reopen</button>${isAdminUser() ? `<button class="btn btn-sm" onclick="setJobHiddenUI('${escWO(j.id)}', true, this)" title="Hide this WO from every list and job picker">Hide</button>` : ''}`}`}
         </div>
       </div>
       ${j.description ? `<p class="job-codes" style="margin-top:4px;"><span>Description:</span> <strong>${escWO(j.description)}</strong></p>` : ''}
@@ -9389,7 +9418,7 @@ function openHoldLinkModal(id) {
   document.getElementById('hold-link-id').textContent = id;
   const hrs = jobHoursTotal(id);
   document.getElementById('hold-link-info').textContent = 'Raised by ' + (hold.reportedBy || '—') + ' · ' + propLabel(hold.property, 50) + ' · "' + hold.description + '" · ' + fmtHrs(hrs) + 'h logged';
-  const real = jobs.filter(j => !jobIsHolding(j)).sort(woNumberDesc);
+  const real = jobs.filter(j => !jobIsHolding(j) && !j.hidden).sort(woNumberDesc);
   const opt = j => `<option value="${escWO(j.id)}">${escWO(j.id)}${j.open ? '' : ' (closed)'} · ${escWO(propLabel(j.property, 40))} · ${escWO(String(j.description || '').slice(0, 50))}</option>`;
   const same = real.filter(j => j.property === hold.property);
   const rwo = recurringJobs.filter(j => j.active !== false && j.active !== 'FALSE').slice().sort((a, b) => recurringSortKey(a) - recurringSortKey(b));
