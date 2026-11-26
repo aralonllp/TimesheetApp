@@ -1,13 +1,14 @@
 // ══════════════════════════════════════════════════════════════════
-//  SERVICE WORKER — Timesheet App
-//  Caches the app shell for offline use
+//  SERVICE WORKER — London Labour Pool
+//  Keeps the latest copy of the app so it still opens with no signal
 // ══════════════════════════════════════════════════════════════════
 
-const CACHE_NAME = 'jobsystem-v1';
+const CACHE_PREFIX = 'llp-app-';
+const CACHE_NAME = CACHE_PREFIX + 'v3';
+const OLD_OWN_CACHES = ['jobsystem-v2', 'jobsystem-v1'];
+const INDEX_URL = new URL('./index.html', self.registration.scope).href;
 
-// Files to cache on install
 const PRECACHE_URLS = [
-  './',
   './index.html',
   './manifest.json',
   './icon-192.png',
@@ -15,55 +16,54 @@ const PRECACHE_URLS = [
   './apple-touch-icon.png'
 ];
 
-// Install — cache the app shell
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(PRECACHE_URLS))
+      .then(cache => Promise.all(PRECACHE_URLS.map(u =>
+        fetch(new Request(u, { cache: 'reload' })).then(r => r.ok ? cache.put(u, r) : null).catch(() => null)
+      )))
       .then(() => self.skipWaiting())
   );
 });
 
-// Activate — clean up old caches
+// Only this app's own old caches are removed, never another app's on the same site
 self.addEventListener('activate', event => {
   event.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(
-        keys
-          .filter(key => key !== CACHE_NAME)
-          .map(key => caches.delete(key))
-      )
-    ).then(() => self.clients.claim())
+    caches.keys().then(keys => Promise.all(
+      keys.filter(k => (k.indexOf(CACHE_PREFIX) === 0 && k !== CACHE_NAME) || OLD_OWN_CACHES.indexOf(k) > -1)
+        .map(k => caches.delete(k))
+    )).then(() => self.clients.claim())
   );
 });
 
-// Fetch — serve from cache when offline, network first when online
 self.addEventListener('fetch', event => {
-  const url = new URL(event.request.url);
+  const req = event.request;
+  if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin) return;
 
-  // Never intercept Google Apps Script requests — always needs network
-  if (url.hostname.includes('script.google.com')) {
-    return;
-  }
-
-  // For the app shell (HTML) — network first, fall back to cache
-  if (event.request.mode === 'navigate' || event.request.destination === 'document') {
+  // The page itself: always try the network first (skipping the browser's own cache),
+  // keep that copy as the one offline copy, and fall back to it with no signal
+  if (req.mode === 'navigate' || req.destination === 'document') {
     event.respondWith(
-      fetch(event.request)
-        .then(response => {
-          // Update cache with fresh version
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
-          return response;
+      fetch(new Request(req.url, { cache: 'no-cache', credentials: 'same-origin' }))
+        .then(res => {
+          if (res && res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE_NAME).then(c => c.put(INDEX_URL, copy));
+          }
+          return res;
         })
-        .catch(() => caches.match('./index.html'))
+        .catch(() => caches.open(CACHE_NAME).then(c => c.match(INDEX_URL)).then(hit => hit || Response.error()))
     );
     return;
   }
 
-  // For everything else — cache first
+  // Icons and the manifest: the saved copy straight away, refreshed in the background
   event.respondWith(
-    caches.match(event.request)
-      .then(cached => cached || fetch(event.request))
+    caches.open(CACHE_NAME).then(c => c.match(req, { ignoreSearch: true }).then(hit => {
+      const net = fetch(req).then(res => { if (res && res.ok) c.put(req, res.clone()); return res; }).catch(() => hit);
+      return hit || net;
+    }))
   );
 });
