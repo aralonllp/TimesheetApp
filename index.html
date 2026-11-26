@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<!-- BUILD MARKER: NB-148 (Worker tablet/Office view buttons hidden while a worker is signed in) -->
+<!-- BUILD MARKER: NB-149 (Job search shows descriptions up to 100 characters) -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Timesheet App</title>
@@ -2503,7 +2503,7 @@ function populateJobDropdown() {
   const mine = open.filter(j => expandAssignedTo(j.assignedTo).includes(currentWorker));
   if (mine.length) {
     html += `<optgroup label="Your assigned jobs">`;
-    html += mine.map(j => `<option value="${j.id}">${j.id}${jobIsHolding(j) ? ' (temporary)' : ''} · ${propLabel(j.property) ? propLabel(j.property) + ' · ' : ''}${j.description && j.description.length > 60 ? j.description.slice(0, 60) + '…' : (j.description || '')}</option>`).join('');
+    html += mine.map(j => `<option value="${j.id}">${j.id}${jobIsHolding(j) ? ' (temporary)' : ''} · ${propLabel(j.property) ? propLabel(j.property) + ' · ' : ''}${j.description && j.description.length > 100 ? j.description.slice(0, 100).trimEnd() + '…' : (j.description || '')}</option>`).join('');
     html += `</optgroup>`;
   }
   if (assignedRecurring.length) {
@@ -2520,19 +2520,19 @@ function populateJobDropdown() {
     const otherComms = [...open.filter(j => !listed.has(String(j.id)) && !jobIsHolding(j)), ...recurringJobs.filter(j => j.active !== false && j.active !== 'FALSE' && !listed.has(String(j.id)))];
     if (otherComms.length) {
       html += `<optgroup label="Other Comms jobs">`;
-      html += otherComms.map(j => `<option value="${j.id}">${j.id} · ${propLabel(j.property) ? propLabel(j.property) + ' · ' : ''}${escWO(j.description && j.description.length > 60 ? j.description.slice(0, 60) + '…' : (j.description || ''))}</option>`).join('');
+      html += otherComms.map(j => `<option value="${j.id}">${j.id} · ${propLabel(j.property) ? propLabel(j.property) + ' · ' : ''}${escWO(j.description && j.description.length > 100 ? j.description.slice(0, 100).trimEnd() + '…' : (j.description || ''))}</option>`).join('');
       html += `</optgroup>`;
     }
   }
   if (schedJobs.length) {
     html += `<optgroup label="On your schedule">`;
-    html += schedJobs.map(j => `<option value="${j.id}">${j.id} · ${propLabel(j.property) ? propLabel(j.property) + ' · ' : ''}${escWO(j.description && j.description.length > 60 ? j.description.slice(0, 60) + '…' : (j.description || ''))}</option>`).join('');
+    html += schedJobs.map(j => `<option value="${j.id}">${j.id} · ${propLabel(j.property) ? propLabel(j.property) + ' · ' : ''}${escWO(j.description && j.description.length > 100 ? j.description.slice(0, 100).trimEnd() + '…' : (j.description || ''))}</option>`).join('');
     html += `</optgroup>`;
   }
   const recentlyClosed = jobs.filter(j => !j.open && isJobLoggable(j) && expandAssignedTo(j.assignedTo).includes(currentWorker)).sort(woNumberDesc);
   if (recentlyClosed.length) {
     html += `<optgroup label="Recently closed — hours still allowed">`;
-    html += recentlyClosed.map(j => `<option value="${j.id}">${j.id} · ${propLabel(j.property) ? propLabel(j.property) + ' · ' : ''}${j.description && j.description.length > 50 ? j.description.slice(0, 50) + '…' : (j.description || '')} · ${jobPending(j) && localDateStr(new Date()) > closedGraceEnd(j) ? 'until office sign-off' : 'until ' + fmtUKDate(closedGraceEnd(j))}</option>`).join('');
+    html += recentlyClosed.map(j => `<option value="${j.id}">${j.id} · ${propLabel(j.property) ? propLabel(j.property) + ' · ' : ''}${j.description && j.description.length > 100 ? j.description.slice(0, 100).trimEnd() + '…' : (j.description || '')} · ${jobPending(j) && localDateStr(new Date()) > closedGraceEnd(j) ? 'until office sign-off' : 'until ' + fmtUKDate(closedGraceEnd(j))}</option>`).join('');
     html += `</optgroup>`;
   }
 
@@ -3112,7 +3112,7 @@ function renderWeek(wc) {
                   ${(() => {
                     const openJobs = jobs.filter(j => isJobLoggable(j) || j.id === e.jobId);
                     const absTypes = absenceTypes.filter(a => a.active !== false && a.active !== 'FALSE');
-                    const fmt = j => `<option value="${j.id}" ${j.id === e.jobId ? 'selected' : ''}>${j.id} · ${propLabel(j.property || j.name || '') ? propLabel(j.property || j.name || '') + ' · ' : ''}${(j.description || j.name || '').slice(0,40)}</option>`;
+                    const fmt = j => `<option value="${j.id}" ${j.id === e.jobId ? 'selected' : ''}>${j.id} · ${propLabel(j.property || j.name || '') ? propLabel(j.property || j.name || '') + ' · ' : ''}${(j.description || j.name || '').slice(0,100)}</option>`;
                     let html = '';
                     const assigned = openJobs.filter(j => expandAssignedTo(j.assignedTo).includes(currentWorker));
                     const onSched = new Set(schedule.filter(x => x.worker === currentWorker).map(x => String(x.jobId)));
@@ -4357,7 +4357,7 @@ function renderOfficeEntries_() {
                       const others   = openJobs.filter(j => !expandAssignedTo(j.assignedTo).includes(e.worker));
                       const recurr   = recurringJobs.filter(j => j.active !== false && j.active !== 'FALSE' || j.id === e.jobId);
                       const absTypes = absenceTypes.filter(a => a.active !== false && a.active !== 'FALSE');
-                      const fmt = j => `<option value="${j.id}" ${j.id === e.jobId ? 'selected' : ''}>${j.id} · ${propLabel(j.property || j.name || '') ? propLabel(j.property || j.name || '') + ' · ' : ''}${(j.description || j.name || '').slice(0,40)}</option>`;
+                      const fmt = j => `<option value="${j.id}" ${j.id === e.jobId ? 'selected' : ''}>${j.id} · ${propLabel(j.property || j.name || '') ? propLabel(j.property || j.name || '') + ' · ' : ''}${(j.description || j.name || '').slice(0,100)}</option>`;
                       let html = '';
                       if (assigned.length) html += `<optgroup label="Assigned Jobs">${assigned.map(fmt).join('')}</optgroup>`;
                       if (others.length)   html += `<optgroup label="Other Jobs">${others.map(fmt).join('')}</optgroup>`;
